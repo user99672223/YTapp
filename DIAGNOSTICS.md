@@ -215,6 +215,10 @@ thrown away by the very change that should trigger it. Filters now work and keep
 **Searching the same thing again showed "Loading…" forever.** The new list was never loaded. The
 same search now keeps the results already on screen.
 
+**Down from some search filters didn't reach the results.** Depending on which filter was
+highlighted, pressing down went nowhere. The results are now their own area, so down always
+lands in them.
+
 ## Channels
 
 **Channel videos showed the view count as the channel name.** Cards on a channel's Videos tab read
@@ -264,6 +268,18 @@ won't survive a restart.
 opened the main screens with no connection. Cancel now reconnects, showing progress or the real
 error.
 
+**Settings lists didn't show what was selected.** Opening Maximum quality, Stream client, PO tokens
+or Caption language showed the options without any mark on the current one, so you couldn't tell
+what was set. These lists now put a checkmark on the current choice and go back to Settings when
+you pick one.
+
+**The focused "Sign out" row was unreadable.** Its red text turned pale pink on the white
+highlight. It (and "Clear cache") now turns dark red when highlighted.
+
+**The top bar cut off a tab.** Six tabs didn't fit, so "Settings" (or "Home") was faded out at the
+edge. "Subscriptions" is now "Subs", and Search and Settings are shown as their icons, like
+Apple's own TV apps, so all six fit.
+
 ## Setup and Debug screens
 
 **"Download newer bundle" never worked on the TV, and its result never showed.** It saved into a
@@ -276,3 +292,10 @@ Tube comes back, and failures show Retry.
 
 **The Debug screen couldn't be scrolled.** tvOS only scrolls to things that can be highlighted, and
 only the two buttons could. Every row can now be highlighted.
+
+**The setup screen cut its instructions short.** The four steps ended in "…" and the address broke
+after "http://". The text now wraps fully and the address stays on one line.
+
+**Menu on the Debug screen left the app.** Because nothing on that screen could be highlighted,
+tvOS treated Menu as "leave Tube". Now that every row can be highlighted, Menu goes back to
+Settings.
