@@ -4,6 +4,7 @@ import AVKit
 import AVFoundation
 import CoreMedia
 import Darwin
+import os
 import Core
 
 /// CAMetalLayer that ignores the 1x1 drawable size MoltenVK sometimes sets (mpv PR 13651).
@@ -69,8 +70,17 @@ enum IdleTimer {
 }
 
 /// Frame-rate matching: asks tvOS to switch the display to the stream's frame rate (SDR).
+///
+/// tvOS 27 removed `-[UIWindow avDisplayManager]` (calling it raises "unrecognized selector" and
+/// aborts the app), so the display manager is looked up dynamically: the window where it still
+/// exists, else the window scene or the screen if a later tvOS moved it there. Without one,
+/// frame-rate matching is simply off.
 @MainActor
 enum DisplayCriteriaController {
+    private static let log = Logger(subsystem: "com.local.tube", category: "display")
+    private static let selector = NSSelectorFromString("avDisplayManager")
+    private static var reported = false
+
     private static var window: UIWindow? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -79,18 +89,42 @@ enum DisplayCriteriaController {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.windows.first
     }
 
+    private static var manager: AVDisplayManager? {
+        let owners: [(String, NSObject?)] = [
+            ("UIWindow", window),
+            ("UIWindowScene", window?.windowScene),
+            ("UIScreen", window?.screen)
+        ]
+        for (name, owner) in owners {
+            guard let owner, owner.responds(to: selector),
+                  let found = owner.value(forKey: "avDisplayManager") as? AVDisplayManager else { continue }
+            report("display manager found on \(name)")
+            return found
+        }
+        report("no AVDisplayManager on this tvOS (\(UIDevice.current.systemVersion)); frame-rate matching is off")
+        return nil
+    }
+
+    private static func report(_ message: String) {
+        guard !reported else { return }
+        reported = true
+        log.notice("\(message, privacy: .public)")
+    }
+
+    static var isAvailable: Bool { manager != nil }
+
     static var isMatchingEnabled: Bool {
-        window?.avDisplayManager.isDisplayCriteriaMatchingEnabled ?? false
+        manager?.isDisplayCriteriaMatchingEnabled ?? false
     }
 
     static var isSwitching: Bool {
-        window?.avDisplayManager.isDisplayModeSwitchInProgress ?? false
+        manager?.isDisplayModeSwitchInProgress ?? false
     }
 
     /// Returns the applied refresh rate, or nil when matching is off or not possible.
     @discardableResult
     static func apply(fps: Double, width: Int, height: Int) -> Double? {
-        guard let manager = window?.avDisplayManager, manager.isDisplayCriteriaMatchingEnabled,
+        guard let manager, manager.isDisplayCriteriaMatchingEnabled,
               let rate = RefreshRate.match(fps: fps) else { return nil }
         var format: CMVideoFormatDescription?
         let extensions: [CFString: Any] = [
@@ -108,7 +142,7 @@ enum DisplayCriteriaController {
     }
 
     static func reset() {
-        window?.avDisplayManager.preferredDisplayCriteria = nil
+        manager?.preferredDisplayCriteria = nil
     }
 }
 

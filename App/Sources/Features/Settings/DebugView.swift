@@ -15,7 +15,7 @@ struct DebugView: View {
             Section("Device") {
                 LabeledContent("CPU (all threads)", value: String(format: "%.0f%%", cpu) + " of \(ProcessStats.coreCount * 100)%")
                 LabeledContent("Memory", value: Formatters.bytes(Int64(memory)))
-                LabeledContent("Match frame rate", value: DisplayCriteriaController.isMatchingEnabled ? "On" : "Off — enable in Apple TV Settings → Video and Audio → Match Content")
+                LabeledContent("Match frame rate", value: !DisplayCriteriaController.isAvailable ? "Not available on this tvOS" : DisplayCriteriaController.isMatchingEnabled ? "On" : "Off — enable in Apple TV Settings → Video and Audio → Match Content")
             }
             Section("Last playback") {
                 let s = diagnostics.snapshot
