@@ -330,3 +330,13 @@ test('Automatic skips Mobile web when PO tokens are off; picked by hand it is st
   assert.equal(details.playerClient, 'MWEB');
   assert.equal(mweb().length, 1);
 });
+
+test('stream links close to their expiry are not handed to the player', async () => {
+  const yt = createFakeYouTube({ expiresInSeconds: '900' });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });
+  const audio = details.formats.find((f) => f.itag === 251);
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [audio.index] }), (e) => e.kind === 'expired');
+  assert.equal((await bundle.call('sessionState')).cachedInfos, 0, 'the stale player data is dropped');
+});

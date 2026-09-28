@@ -316,10 +316,19 @@ export async function videoInfo({ id, client }) {
   return detailsOf(info, c);
 }
 
+// Stream URLs stop working at streaming_data.expires (about 6 h after the player request). The
+// player keeps using them after they are resolved, so they are refreshed well before that.
+const EXPIRY_MARGIN_MS = 30 * 60 * 1000;
+
 // Deciphers the chosen formats (by index into streaming_data.adaptive_formats).
 export async function resolveFormats({ id, indices }) {
   const yt = await requireSession();
   const entry = getInfo(id);
+  const expires = entry.info.streaming_data?.expires;
+  if (expires && typeof expires.getTime === 'function' && expires.getTime() - Date.now() < EXPIRY_MARGIN_MS) {
+    state.infos.delete(id);
+    fail('expired', 'The stream links for this video expired. Open the video again.', id);
+  }
   const formats = entry.info.streaming_data?.adaptive_formats || [];
   const urls = {};
   for (const index of indices || []) {

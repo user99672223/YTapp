@@ -216,13 +216,13 @@ function livePlayerResponse(id) {
   };
 }
 
-function playerResponse(id) {
+function playerResponse(id, options = {}) {
   if (id.startsWith('LIVE')) return livePlayerResponse(id);
   return {
     responseContext: {},
     playabilityStatus: { status: 'OK', playableInEmbed: true },
     streamingData: {
-      expiresInSeconds: '21540',
+      expiresInSeconds: options.expiresInSeconds || '21540',
       adaptiveFormats: [
         { itag: 399, signatureCipher: cipher(399), mimeType: 'video/mp4; codecs="av01.0.08M.08"', bitrate: 2500000, width: 1920, height: 1080, fps: 30, qualityLabel: '1080p', quality: 'hd1080', contentLength: '100000000', approxDurationMs: '605000', averageBitrate: 2000000 },
         { itag: 401, signatureCipher: cipher(401), mimeType: 'video/mp4; codecs="av01.0.12M.08"', bitrate: 12000000, width: 3840, height: 2160, fps: 30, qualityLabel: '2160p', quality: 'hd2160', contentLength: '600000000', approxDurationMs: '605000' },
@@ -538,7 +538,8 @@ export function createFakeYouTube(options = {}) {
         return { status: 400, body: { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT' } } };
       }
       if (NOT_PLAYABLE[body.videoId]) return { status: 200, body: { responseContext: {}, playabilityStatus: NOT_PLAYABLE[body.videoId] } };
-      return { status: 200, body: playerResponse(body.videoId) };
+      // options.expiresInSeconds: lifetime of the stream URLs.
+      return { status: 200, body: playerResponse(body.videoId, { expiresInSeconds: options.expiresInSeconds }) };
     }
     if (path === '/youtubei/v1/next') return { status: 200, body: nextResponse(body.videoId) };
     if (path === '/youtubei/v1/search') return { status: 200, body: searchResponse() };

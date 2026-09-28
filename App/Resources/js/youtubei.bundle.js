@@ -44801,9 +44801,15 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return detailsOf(info2, c);
   }
   __name(videoInfo, "videoInfo");
+  var EXPIRY_MARGIN_MS = 30 * 60 * 1e3;
   async function resolveFormats({ id, indices }) {
     const yt = await requireSession();
     const entry = getInfo(id);
+    const expires = entry.info.streaming_data?.expires;
+    if (expires && typeof expires.getTime === "function" && expires.getTime() - Date.now() < EXPIRY_MARGIN_MS) {
+      state.infos.delete(id);
+      fail("expired", "The stream links for this video expired. Open the video again.", id);
+    }
     const formats = entry.info.streaming_data?.adaptive_formats || [];
     const urls = {};
     for (const index of indices || []) {
