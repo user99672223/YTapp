@@ -73,3 +73,20 @@ struct ChoiceList<Value: Hashable>: View {
         .defaultFocus($focused, selection)
     }
 }
+
+/// Label for a destructive button in a settings list. The system's destructive red turns pale
+/// pink on the white row of a focused button and can't be read; this stays red when the row isn't
+/// focused and turns dark red when it is.
+struct DestructiveRowLabel: View {
+    let title: String
+    @Environment(\.isFocused) private var isFocused
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .foregroundStyle(isFocused ? Color(red: 0.7, green: 0.05, blue: 0.05) : Color.red)
+    }
+}

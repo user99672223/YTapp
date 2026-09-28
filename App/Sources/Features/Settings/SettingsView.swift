@@ -48,7 +48,7 @@ struct SettingsView: View {
                 }
                 Button("Re-enter cookies") { model.beginCookieReentry() }
                 if model.isSignedIn {
-                    Button("Sign out of this Apple TV", role: .destructive) { confirmSignOut = true }
+                    Button { confirmSignOut = true } label: { DestructiveRowLabel("Sign out of this Apple TV") }
                 }
             }
 
@@ -109,7 +109,7 @@ struct SettingsView: View {
 
             Section("Storage") {
                 LabeledContent("Player & session cache", value: Formatters.bytes(cacheSize))
-                Button("Clear cache", role: .destructive) { confirmClear = true }
+                Button { confirmClear = true } label: { DestructiveRowLabel("Clear cache") }
             }
 
             Section("Diagnostics") {
