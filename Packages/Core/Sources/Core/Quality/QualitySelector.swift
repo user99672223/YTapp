@@ -41,6 +41,16 @@ public enum QualityError: Error, Equatable, LocalizedError {
     }
 }
 
+public extension StreamFormat {
+    /// The resolution a video format is labelled with ("1080p"): its shorter side. YouTube
+    /// reports vertical videos at their real size, so a 1080p Short is 1080×1920.
+    var shortSide: Int {
+        let h = height ?? 0
+        guard let w = width, w > 0, h > 0 else { return h }
+        return min(w, h)
+    }
+}
+
 public enum QualitySelector {
     /// Formats that can be played as a single progressive file: have a URL (or cipher), are not
     /// DRM protected and not OTF/segmented (live).
@@ -48,12 +58,13 @@ public enum QualitySelector {
         f.hasUrl && !f.isDrm && !f.isOtf
     }
 
-    /// Video-only adaptive formats the TV can show (SDR only).
+    /// Video-only adaptive formats the TV can show (SDR only). The maximum quality applies to
+    /// the short side, so vertical videos are capped like landscape ones.
     public static func videoCandidates(_ formats: [StreamFormat], preferences: QualityPreferences = .default) -> [StreamFormat] {
         formats.filter { f in
             f.hasVideo && !f.hasAudio && isStreamable(f) && !f.isHdr &&
                 preferences.codecOrder.contains(f.codecFamily) &&
-                (f.height ?? 0) > 0 && (f.height ?? 0) <= preferences.maxHeight
+                f.shortSide > 0 && f.shortSide <= preferences.maxHeight
         }
     }
 
@@ -71,7 +82,7 @@ public enum QualitySelector {
         }
         func rank(_ family: CodecFamily) -> Int { preferences.codecOrder.firstIndex(of: family) ?? Int.max }
         return candidates.sorted { a, b in
-            let ha = a.height ?? 0, hb = b.height ?? 0
+            let ha = a.shortSide, hb = b.shortSide
             if ha != hb { return ha > hb }
             let ra = rank(a.codecFamily), rb = rank(b.codecFamily)
             if ra != rb { return ra < rb }
@@ -128,7 +139,7 @@ public enum QualitySelector {
     /// Every format for the manual override list, best first.
     public static func overrideList(_ formats: [StreamFormat]) -> (video: [StreamFormat], audio: [StreamFormat]) {
         let video = formats.filter { $0.hasVideo && !$0.hasAudio }.sorted {
-            if ($0.height ?? 0) != ($1.height ?? 0) { return ($0.height ?? 0) > ($1.height ?? 0) }
+            if $0.shortSide != $1.shortSide { return $0.shortSide > $1.shortSide }
             return ($0.bitrate ?? 0) > ($1.bitrate ?? 0)
         }
         let audio = formats.filter { $0.hasAudio && !$0.hasVideo }.sorted { ($0.bitrate ?? 0) > ($1.bitrate ?? 0) }
