@@ -232,6 +232,7 @@ struct FeedView<Header: View>: View {
     var emptyText = "Nothing here yet."
     var autoRefresh = true
     let header: Header
+    @State private var contentWidth: CGFloat = Layout.defaultContentWidth
 
     init(feed: FeedModel, emptyText: String = "Nothing here yet.", autoRefresh: Bool = true, @ViewBuilder header: () -> Header) {
         self.feed = feed
@@ -257,6 +258,7 @@ struct FeedView<Header: View>: View {
             .padding(.horizontal, Layout.horizontalPadding)
             .padding(.vertical, 40)
         }
+        .background(ContentWidthReader(width: $contentWidth))
         .overlay(alignment: .top) { ToastOverlay() }
         // Keyed on the model: when the view is handed a different FeedModel (another channel
         // tab, a new search) it loads that one instead of leaving it on an endless spinner.
@@ -291,7 +293,7 @@ struct FeedView<Header: View>: View {
         // Keyed by position, not by the section ids (the bridge numbers sections anew on every
         // fetch), so a new page doesn't tear down every section and the focused card with it.
         ForEach(Array(page.sections.enumerated()), id: \.offset) { index, section in
-            FeedSectionView(section: section, isLastSection: index == page.sections.count - 1) {
+            FeedSectionView(section: section, isLastSection: index == page.sections.count - 1, contentWidth: contentWidth) {
                 Task { await feed.loadMore(model, automatic: true) }
             }
         }
@@ -363,10 +365,16 @@ extension FeedView where Header == EmptyView {
 struct FeedSectionView: View {
     let section: FeedSection
     let isLastSection: Bool
+    /// Width between the list's side margins; the grid's columns fill exactly this.
+    var contentWidth: CGFloat = Layout.defaultContentWidth
     let onNearEnd: () -> Void
 
+    private var cardWidth: CGFloat {
+        Layout.columnWidth(in: contentWidth, count: Layout.gridColumns, spacing: Layout.cardSpacing)
+    }
+
     private var columns: [GridItem] {
-        Array(repeating: GridItem(.fixed(Layout.cardWidth), spacing: Layout.cardSpacing, alignment: .top), count: Layout.gridColumns)
+        Array(repeating: GridItem(.fixed(cardWidth), spacing: Layout.cardSpacing, alignment: .top), count: Layout.gridColumns)
     }
 
     var body: some View {
@@ -390,7 +398,7 @@ struct FeedSectionView: View {
         return VStack(alignment: .leading, spacing: 40) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 56) {
                 ForEach(loose) { entry in
-                    FeedItemView(item: entry.item)
+                    FeedItemView(item: entry.item, width: cardWidth)
                         .onAppear {
                             if isLastSection, entry.offset >= section.items.count - Layout.gridColumns * 2 { onNearEnd() }
                         }
@@ -423,8 +431,11 @@ struct ShelfRow: View {
                 }
             }
             .padding(.vertical, 30)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Layout.horizontalPadding)
         }
+        // The row scrolls out to the screen's safe area on both sides (its first card still lines
+        // up with the list), instead of being cut off at the list's right margin.
+        .padding(.horizontal, -Layout.horizontalPadding)
         .focusSection()
     }
 }

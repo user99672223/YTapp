@@ -6,8 +6,38 @@ enum Layout {
     static let cardWidth: CGFloat = 400
     static let cardSpacing: CGFloat = 48
     static let shortWidth: CGFloat = 230
+    static let shortColumns = 6
+    static let shortSpacing: CGFloat = 40
     static let channelWidth: CGFloat = 240
     static let horizontalPadding: CGFloat = 80
+    /// The width between the side margins of a list on the Apple TV's 1920-point screen (80-point
+    /// safe area plus `horizontalPadding` on each side). Used until the real width is measured.
+    static let defaultContentWidth: CGFloat = 1920 - 2 * (80 + horizontalPadding)
+
+    /// Width of each of `count` equal columns that exactly fill `width`, so a grid has the same
+    /// margin on the right as on the left.
+    static func columnWidth(in width: CGFloat, count: Int, spacing: CGFloat) -> CGFloat {
+        guard count > 0, width > 0 else { return 0 }
+        return floor((width - spacing * CGFloat(count - 1)) / CGFloat(count))
+    }
+}
+
+/// Measures the width of the view it is attached to (minus the list's side padding) into `width`.
+struct ContentWidthReader: View {
+    @Binding var width: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { update(geo.size.width) }
+                .onChange(of: geo.size.width) { _, newWidth in update(newWidth) }
+        }
+    }
+
+    private func update(_ outer: CGFloat) {
+        let inner = outer - 2 * Layout.horizontalPadding
+        if inner > 0, abs(inner - width) > 0.5 { width = inner }
+    }
 }
 
 /// Plain message + Retry, used for every failure.
@@ -315,6 +345,8 @@ private struct ToastText: View {
 struct FeedItemView: View {
     let item: FeedItem
     var compact = false
+    /// Card width for video and playlist cards (a grid column); nil keeps the standard size.
+    var width: CGFloat?
 
     var body: some View {
         switch item {
@@ -322,12 +354,12 @@ struct FeedItemView: View {
             if video.isShort {
                 ShortCard(video: video)
             } else {
-                VideoCard(video: video)
+                VideoCard(video: video, width: width ?? Layout.cardWidth)
             }
         case .channel(let channel):
             ChannelCard(channel: channel)
         case .playlist(let playlist):
-            PlaylistCard(playlist: playlist)
+            PlaylistCard(playlist: playlist, width: width ?? Layout.cardWidth)
         }
     }
 }
