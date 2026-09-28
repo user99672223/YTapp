@@ -165,6 +165,11 @@ test('search, suggestions and channel items', async () => {
   assert.equal(list.type, 'playlist');
   assert.equal(list.channelName, 'Channel Two');
   assert.equal(list.videoCountText, '12 videos');
+  // A scheduled premiere is flagged upcoming and its "UPCOMING" label is not a duration.
+  const premiere = items.find((i) => i.id === 'UPCOMINGV02');
+  assert.equal(premiere.isUpcoming, true);
+  assert.equal(premiere.durationText, undefined);
+  assert.equal(premiere.durationSeconds, undefined);
 });
 
 test('Subscriptions, subscribed channels and Library playlists load past the first page', async () => {

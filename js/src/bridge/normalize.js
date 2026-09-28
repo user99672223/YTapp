@@ -72,7 +72,9 @@ function videoFromLegacy(node) {
   const id = node.video_id || node.id || endpointVideoId(node.endpoint);
   if (!id || typeof id !== 'string') return null;
   const overlay = overlaysInfo(node.thumbnail_overlays);
-  const durationText = text(node.length_text) || text(node.duration?.text ? node.duration.text : node.duration) || overlay.durationText;
+  // The duration getter falls back to the raw overlay label ("UPCOMING", "PREMIERE", "SHORTS").
+  const legacyDuration = text(node.duration?.text ?? node.duration);
+  const durationText = text(node.length_text) || (isDurationText(legacyDuration) ? legacyDuration : undefined) || overlay.durationText;
   const author = authorInfo(node.author);
   const badges = (node.badges || []).map((b) => (b.label || b.style || '').toUpperCase());
   const isLive = overlay.isLive || !!node.is_live || badges.some((b) => b.includes('LIVE'));

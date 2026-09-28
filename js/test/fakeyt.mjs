@@ -63,6 +63,17 @@ function videoRenderer(id, title, channelId, channelName, extra = {}) {
   };
 }
 
+// A scheduled premiere as a search result: no length, the overlay only says "UPCOMING".
+function upcomingVideoRenderer(id, title) {
+  const r = videoRenderer(id, title, CH1, 'Channel One', {
+    upcomingEventData: { startTime: '1999999999', upcomingEventText: runs('Premieres DATE_PLACEHOLDER') },
+    thumbnailOverlays: [{ thumbnailOverlayTimeStatusRenderer: { text: runs('UPCOMING'), style: 'UPCOMING' } }]
+  });
+  delete r.videoRenderer.lengthText;
+  delete r.videoRenderer.publishedTimeText;
+  return r;
+}
+
 function lockup(id, title, channelId, channelName) {
   return {
     lockupViewModel: {
@@ -407,6 +418,7 @@ function searchResponse() {
                       items: [shortLockup('SHORTID0003', 'Search short')]
                     }
                   },
+                  upcomingVideoRenderer('UPCOMINGV02', 'Scheduled premiere'),
                   lockupView({
                     id: 'RDMIXSEEDVID1', type: 'PLAYLIST', title: 'Mix – Channel One', badge: 'Mix',
                     thumb: 'https://i.ytimg.com/vi/MIXSEEDVID1/hqdefault.jpg',
