@@ -42,7 +42,7 @@ final class AppModel: ObservableObject {
     private(set) var runtime: JSRuntime?
     private(set) var service: YouTubeService?
     private var authFailures = 0
-    private var recreating: Task<Void, Never>?
+    private var recreating: (epoch: Int, task: Task<Void, Never>)?
     /// Bumped when the stored cookies are replaced or removed. YouTube work started before that
     /// belongs to the previous account and is dropped when it finishes.
     private var sessionEpoch = 0
@@ -112,6 +112,7 @@ final class AppModel: ObservableObject {
             phase = .failed(BridgeError(kind: .bridge, message: "The YouTube bundle isn't running."))
             return
         }
+        let epoch = sessionEpoch
         if showProgress { phase = .connecting("Connecting to YouTube…") }
         do {
             let options = SessionOptions(
@@ -121,6 +122,13 @@ final class AppModel: ObservableObject {
                 poTokenMode: settings.poTokenMode
             )
             let summary = try await service.initialize(options)
+            guard epoch == sessionEpoch else {
+                // Signed out or new cookies meanwhile. This session was built with the old cookies
+                // and has replaced the bridge's one, so build it again with the current cookies.
+                logs.append(.info, "Dropped a YouTube session created for the previous sign-in.")
+                if cookies.hasCookies { Task { await self.connect(showProgress: false) } }
+                return
+            }
             session = summary
             account = summary.account ?? account
             if settings.visitorData.isEmpty, let visitor = summary.visitorData, !visitor.isEmpty {
@@ -135,24 +143,31 @@ final class AppModel: ObservableObject {
                 logs.append(.warn, "The player script could not be analysed; streams may fail to unlock.")
             }
             authFailures = 0
-            phase = .ready
+            // A background reconnect doesn't leave the setup screen (cookie re-entry in progress).
+            if phase != .needsSetup { phase = .ready }
         } catch {
             let wrapped = BridgeError.wrap(error)
+            guard epoch == sessionEpoch else {
+                logs.append(.info, "Ignored a failed session creation for the previous sign-in: \(wrapped.message)")
+                return
+            }
             logs.append(.error, "Session creation failed: \(wrapped.message)")
-            if showProgress || phase != .ready { phase = .failed(wrapped) }
+            if phase != .needsSetup, showProgress || phase != .ready { phase = .failed(wrapped) }
         }
     }
 
-    /// Recreates the session in the background (auth errors, client changes). Coalesced.
+    /// Recreates the session in the background (auth errors, client changes). Coalesced with a
+    /// recreate already running for the same sign-in.
     func recreateSession() async {
-        if let recreating {
-            await recreating.value
+        let epoch = sessionEpoch
+        if let recreating, recreating.epoch == epoch {
+            await recreating.task.value
             return
         }
         let task = Task { await self.connect(showProgress: false) }
-        recreating = task
+        recreating = (epoch: epoch, task: task)
         await task.value
-        recreating = nil
+        if recreating?.epoch == epoch { recreating = nil }
     }
 
     // MARK: - API access with auth recovery
