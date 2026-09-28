@@ -187,6 +187,24 @@ test('actions: rate, subscribe, watch later', async () => {
   assert.equal(edit.body.actions[0].addedVideoId, 'VIDEOID0001');
 });
 
+test('subscribed channels come from the channels page, else from the guide', async () => {
+  const { call } = await connected();
+  const direct = await call('subscribedChannels');
+  const items = direct.sections.flatMap((s) => s.items);
+  assert.deepEqual(items.map((i) => [i.type, i.id, i.name]), [['channel', CH1, 'Channel One'], ['channel', CH2, 'Channel Two']]);
+
+  const yt = createFakeYouTube({ channelsFeed: 'broken' });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  const fallback = await bundle.call('subscribedChannels');
+  const guide = fallback.sections.flatMap((s) => s.items);
+  assert.deepEqual(guide.map((i) => [i.type, i.id, i.name]), [['channel', CH1, 'Channel One'], ['channel', CH2, 'Channel Two']]);
+  assert.match(guide[0].avatar, /^https:\/\/yt3\.ggpht\.com\/.*=s240-/);
+  assert.equal(guide[0].isSubscribed, true);
+  assert.equal(fallback.continuation, undefined);
+  assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/guide'));
+});
+
 test('errors are classified for Swift', async () => {
   const { call } = await connected();
   await assert.rejects(call('resolveFormats', { id: 'NOTLOADED01', indices: [0] }), (e) => e.kind === 'expired');

@@ -105,15 +105,18 @@ enum ProcessStats {
         var threadCount: mach_msg_type_number_t = 0
         guard task_threads(mach_task_self_, &threadList, &threadCount) == KERN_SUCCESS, let threadList else { return 0 }
         defer {
+            // task_threads hands out a send right per thread plus the array itself.
+            for index in 0..<Int(threadCount) { mach_port_deallocate(mach_task_self_, threadList[index]) }
             let size = vm_size_t(Int(threadCount) * MemoryLayout<thread_t>.stride)
             vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: threadList)), size)
         }
         var total = 0.0
+        let infoCount = MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<natural_t>.size
         for index in 0..<Int(threadCount) {
             var info = thread_basic_info()
-            var count = mach_msg_type_number_t(THREAD_INFO_MAX)
+            var count = mach_msg_type_number_t(infoCount)
             let result = withUnsafeMutablePointer(to: &info) { pointer in
-                pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                pointer.withMemoryRebound(to: integer_t.self, capacity: infoCount) {
                     thread_info(threadList[index], thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
                 }
             }

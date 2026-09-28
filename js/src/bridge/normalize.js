@@ -274,10 +274,26 @@ function collectItems(node, out, depth = 0) {
     out.push(item);
     return;
   }
+  // YouTube.js aliases some of these keys (e.g. ExpandedShelfContents/HorizontalList expose
+  // `items` and a `contents` getter returning the same array); walk each child only once.
+  const walked = [];
   for (const key of CONTAINER_KEYS) {
     const child = node[key];
-    if (child && typeof child === 'object') collectItems(child, out, depth + 1);
+    if (!child || typeof child !== 'object' || walked.includes(child)) continue;
+    walked.push(child);
+    collectItems(child, out, depth + 1);
   }
+}
+
+// Drops repeated items (same kind + id) within one section, keeping the first.
+function uniqueItems(items) {
+  const seen = new Set();
+  return items.filter((i) => {
+    const k = `${i.type}:${i.id}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 function shelfSection(title, content, forceStyle) {
@@ -383,16 +399,19 @@ export function sectionsFromNodes(nodes, options = {}) {
           pushItem(item);
           return;
         }
+        const walked = [];
         for (const key of CONTAINER_KEYS) {
           const child = node[key];
-          if (child && typeof child === 'object') visit(child, depth + 1);
+          if (!child || typeof child !== 'object' || walked.includes(child)) continue;
+          walked.push(child);
+          visit(child, depth + 1);
         }
       }
     }
   };
   visit(nodes, 0);
   flushGrid();
-  return sections;
+  return sections.map((s) => ({ ...s, items: uniqueItems(s.items) }));
 }
 
 export function page(sections, continuationKey) {

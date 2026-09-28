@@ -90,6 +90,32 @@ jobs:
         run: |
           grep -E "error:|fatal error|Undefined symbol|ld: " xcodebuild.log | sort -u | head -200 || true
 
+      - name: Verify app bundle
+        run: |
+          APP=build/Build/Products/Release-appletvos/App.app
+          PLIST="$APP/Info.plist"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST"; }
+          plutil -p "$PLIST"
+          test "$(pb CFBundleIdentifier)" = "com.local.tube"
+          test "$(pb CFBundleExecutable)" = "App"
+          test "$(pb MinimumOSVersion)" = "17.0"
+          pb UIDeviceFamily | grep -Eq '^[[:space:]]*3$'
+          pb CFBundleIcons >/dev/null || echo "::warning::No CFBundleIcons in Info.plist (app icon missing?)"
+          test -s "$APP/Assets.car"
+          cmp "$APP/youtubei.bundle.js" App/Resources/js/youtubei.bundle.js
+          vtool -show-build "$APP/App" | tee /dev/stderr | grep -q "platform TVOS"
+          echo "--- dynamic libraries"
+          otool -L "$APP/App"
+          # libmpv, FFmpeg and MoltenVK are static: they must be inside the executable, not
+          # loaded from (stub) frameworks at launch.
+          if otool -L "$APP/App" | grep -E "@rpath/(Lib|lib|MoltenVK|gmp|nettle|hogweed|gnutls|lcms2)"; then
+            echo "::error::The app links a media library dynamically"; exit 1
+          fi
+          nm "$APP/App" | grep -E " [Tt] _mpv_create$"
+          nm "$APP/App" | grep -E " [Tt] _vkGetInstanceProcAddr$"
+          nm "$APP/App" | grep -E " [Tt] _dav1d_open$"
+          du -sh "$APP" "$APP/App"
+
       - name: Package unsigned IPA
         run: |
           APP=build/Build/Products/Release-appletvos/App.app

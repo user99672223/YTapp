@@ -51,11 +51,61 @@ export async function subscriptions() {
 export async function subscribedChannels() {
   const yt = await requireSession();
   requireLogin(yt);
-  const feed = await yt.getChannelsFeed();
-  const key = register('channels', 'feed', feed, { channelsOnly: true });
-  let sections = sectionsFromNodes(pageNodes(feed));
-  sections = onlyChannels(sections, feed);
-  return toPage(key, feed, sections);
+  let feed;
+  let sections = [];
+  let feedError;
+  try {
+    feed = await yt.getChannelsFeed();
+    sections = onlyChannels(sectionsFromNodes(pageNodes(feed)), feed);
+  } catch (e) {
+    feedError = e;
+  }
+  if (feed && sections.length) {
+    const key = register('channels', 'feed', feed, { channelsOnly: true });
+    return toPage(key, feed, sections);
+  }
+  // The "All subscriptions" page changes shape from time to time; the guide (side menu) always
+  // lists the subscribed channels, so fall back to it.
+  let channels = [];
+  try {
+    channels = await guideChannels(yt);
+  } catch (e) {
+    if (feedError) throw feedError;
+    throw e;
+  }
+  if (!channels.length && feedError) throw feedError;
+  return page(channels.length ? [{ id: 'guide-channels', style: 'grid', items: channels }] : [], undefined);
+}
+
+async function guideChannels(yt) {
+  const guide = await yt.getGuide();
+  const out = [];
+  const seen = new Set();
+  const visit = (entry) => {
+    const type = nodeType(entry);
+    if (type === 'GuideCollapsibleEntry') {
+      for (const child of entry.expandable_items || []) visit(child);
+      return;
+    }
+    if (type !== 'GuideEntry') return;
+    const id = entry.endpoint?.payload?.browseId;
+    if (!isChannelId(id) || seen.has(id)) return;
+    seen.add(id);
+    const avatar = bestThumb(entry.thumbnails, 240);
+    out.push({
+      type: 'channel',
+      id,
+      name: text(entry.title) || '',
+      // Guide avatars are 88 px; ask the image server for a TV-sized one.
+      avatar: avatar ? avatar.replace(/=s\d+-/, '=s240-') : undefined,
+      isSubscribed: true
+    });
+  };
+  for (const section of guide.contents || []) {
+    if (nodeType(section) !== 'GuideSubscriptionsSection') continue;
+    for (const entry of section.items || []) visit(entry);
+  }
+  return out;
 }
 
 function onlyChannels(sections, feed) {

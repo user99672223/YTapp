@@ -47,12 +47,19 @@ final class NativeHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         var request = URLRequest(url: requestURL)
         request.httpMethod = method
         let isYouTube = requestURL.host?.lowercased().hasSuffix("youtube.com") ?? false
+        // Only answers to requests made with the signed-in session may rotate its cookies
+        // (validating newly pasted cookies must not touch the stored ones).
+        var carriesSession = false
         for pair in headers where pair.count == 2 {
             let name = pair[0]
             var value = pair[1]
             let lower = name.lowercased()
             if lower == "host" || lower == "content-length" || lower == "connection" { continue }
-            if lower == "cookie", isYouTube { value = cookies.substitute(value) }
+            if lower == "cookie", isYouTube {
+                let substituted = cookies.substitute(value)
+                value = substituted.header
+                carriesSession = substituted.isSession
+            }
             request.setValue(value, forHTTPHeaderField: name)
         }
         if let body, method != "GET", method != "HEAD" { request.httpBody = body }
@@ -69,7 +76,7 @@ final class NativeHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             for (key, value) in http.allHeaderFields {
                 if let k = key as? String, let v = value as? String { headerMap[k] = v }
             }
-            if isYouTube || (http.url?.host?.lowercased().hasSuffix("youtube.com") ?? false) {
+            if carriesSession, http.url?.host?.lowercased().hasSuffix("youtube.com") ?? isYouTube {
                 self?.cookies.absorb(responseHeaders: headerMap, url: http.url ?? requestURL)
             }
             completion(.success(Response(status: http.statusCode, finalURL: http.url?.absoluteString ?? url,
@@ -113,15 +120,18 @@ final class NativeHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
 /// `Set-Cookie` update it and are written back (debounced) so the session stays alive.
 final class CookieStore: @unchecked Sendable {
     private let lock = NSLock()
-    private var original: String = ""
+    /// Every header this session has had since it was stored. A YouTube.js session keeps sending
+    /// the header it was created with, so all of them are recognised and upgraded.
+    private var known: Set<String> = []
     private var jar = CookieJar(header: "")
     private var saveWork: DispatchWorkItem?
+    private var generation = 0
     private let keychain: KeychainStore
 
     init(keychain: KeychainStore) {
         self.keychain = keychain
-        if let stored = keychain.loadCookie() {
-            original = stored
+        if let stored = keychain.loadCookie(), !stored.isEmpty {
+            known = [stored]
             jar = CookieJar(header: stored)
         }
     }
@@ -137,27 +147,33 @@ final class CookieStore: @unchecked Sendable {
     /// Replaces the stored session (after setup or re-entry).
     func replace(with header: String) {
         lock.lock()
-        original = header
+        known = header.isEmpty ? [] : [header]
         jar = CookieJar(header: header)
+        generation += 1
+        saveWork?.cancel()
+        saveWork = nil
         lock.unlock()
         keychain.saveCookie(header)
     }
 
     func clear() {
         lock.lock()
-        original = ""
+        known = []
         jar = CookieJar(header: "")
+        generation += 1
+        saveWork?.cancel()
+        saveWork = nil
         lock.unlock()
         keychain.deleteCookie()
     }
 
-    /// If `requestCookie` is the session cookie YouTube.js was created with, send the freshest
-    /// version instead. Other cookie headers (e.g. validation of new cookies) pass through.
-    func substitute(_ requestCookie: String) -> String {
+    /// If `requestCookie` is a header of the stored session, send the freshest version instead.
+    /// Other cookie headers (e.g. validation of newly pasted cookies) pass through untouched.
+    func substitute(_ requestCookie: String) -> (header: String, isSession: Bool) {
         lock.lock()
         defer { lock.unlock() }
-        guard !original.isEmpty, requestCookie == original || requestCookie == jar.header else { return requestCookie }
-        return jar.header
+        guard known.contains(requestCookie) else { return (requestCookie, false) }
+        return (jar.header, true)
     }
 
     func absorb(responseHeaders: [String: String], url: URL) {
@@ -167,21 +183,34 @@ final class CookieStore: @unchecked Sendable {
             CookieJar.Update(name: $0.name, value: $0.value, domain: $0.domain, expires: $0.expiresDate)
         }
         lock.lock()
-        guard !original.isEmpty else {
+        guard !known.isEmpty else {
             lock.unlock()
             return
         }
+        let before = jar.header
         let changed = jar.apply(updates)
         let header = jar.header
+        if changed {
+            // Rotations are rare (minutes apart); the cap only guards very long-running sessions.
+            if known.count > 512 { known = [before] }
+            known.insert(header)
+        }
+        let generation = self.generation
         lock.unlock()
         guard changed else { return }
-        scheduleSave(header)
+        scheduleSave(header, generation: generation)
     }
 
-    private func scheduleSave(_ header: String) {
+    private func scheduleSave(_ header: String, generation: Int) {
         lock.lock()
         saveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.keychain.saveCookie(header) }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let current = self.generation == generation
+            self.lock.unlock()
+            if current { self.keychain.saveCookie(header) }
+        }
         saveWork = work
         lock.unlock()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5, execute: work)

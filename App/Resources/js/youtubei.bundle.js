@@ -44004,12 +44004,25 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       out.push(item);
       return;
     }
+    const walked = [];
     for (const key of CONTAINER_KEYS) {
       const child = node[key];
-      if (child && typeof child === "object") collectItems(child, out, depth + 1);
+      if (!child || typeof child !== "object" || walked.includes(child)) continue;
+      walked.push(child);
+      collectItems(child, out, depth + 1);
     }
   }
   __name(collectItems, "collectItems");
+  function uniqueItems(items) {
+    const seen = /* @__PURE__ */ new Set();
+    return items.filter((i2) => {
+      const k = `${i2.type}:${i2.id}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  __name(uniqueItems, "uniqueItems");
   function shelfSection(title, content, forceStyle) {
     const items = [];
     collectItems(content, items);
@@ -44111,16 +44124,19 @@ return process(__tube_n, __tube_sp, __tube_s);`);
             pushItem(item);
             return;
           }
+          const walked = [];
           for (const key of CONTAINER_KEYS) {
             const child = node[key];
-            if (child && typeof child === "object") visit(child, depth + 1);
+            if (!child || typeof child !== "object" || walked.includes(child)) continue;
+            walked.push(child);
+            visit(child, depth + 1);
           }
         }
       }
     }, "visit");
     visit(nodes, 0);
     flushGrid();
-    return sections;
+    return sections.map((s) => ({ ...s, items: uniqueItems(s.items) }));
   }
   __name(sectionsFromNodes, "sectionsFromNodes");
   function page(sections, continuationKey) {
@@ -44191,13 +44207,61 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   async function subscribedChannels() {
     const yt = await requireSession();
     requireLogin(yt);
-    const feed = await yt.getChannelsFeed();
-    const key = register("channels", "feed", feed, { channelsOnly: true });
-    let sections = sectionsFromNodes(pageNodes(feed));
-    sections = onlyChannels(sections, feed);
-    return toPage(key, feed, sections);
+    let feed;
+    let sections = [];
+    let feedError;
+    try {
+      feed = await yt.getChannelsFeed();
+      sections = onlyChannels(sectionsFromNodes(pageNodes(feed)), feed);
+    } catch (e) {
+      feedError = e;
+    }
+    if (feed && sections.length) {
+      const key = register("channels", "feed", feed, { channelsOnly: true });
+      return toPage(key, feed, sections);
+    }
+    let channels = [];
+    try {
+      channels = await guideChannels(yt);
+    } catch (e) {
+      if (feedError) throw feedError;
+      throw e;
+    }
+    if (!channels.length && feedError) throw feedError;
+    return page(channels.length ? [{ id: "guide-channels", style: "grid", items: channels }] : [], void 0);
   }
   __name(subscribedChannels, "subscribedChannels");
+  async function guideChannels(yt) {
+    const guide = await yt.getGuide();
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    const visit = /* @__PURE__ */ __name((entry) => {
+      const type = nodeType(entry);
+      if (type === "GuideCollapsibleEntry") {
+        for (const child of entry.expandable_items || []) visit(child);
+        return;
+      }
+      if (type !== "GuideEntry") return;
+      const id = entry.endpoint?.payload?.browseId;
+      if (!isChannelId(id) || seen.has(id)) return;
+      seen.add(id);
+      const avatar = bestThumb(entry.thumbnails, 240);
+      out.push({
+        type: "channel",
+        id,
+        name: text(entry.title) || "",
+        // Guide avatars are 88 px; ask the image server for a TV-sized one.
+        avatar: avatar ? avatar.replace(/=s\d+-/, "=s240-") : void 0,
+        isSubscribed: true
+      });
+    }, "visit");
+    for (const section of guide.contents || []) {
+      if (nodeType(section) !== "GuideSubscriptionsSection") continue;
+      for (const entry of section.items || []) visit(entry);
+    }
+    return out;
+  }
+  __name(guideChannels, "guideChannels");
   function onlyChannels(sections, feed) {
     const channels = sections.flatMap((s) => s.items).filter((i2) => i2.type === "channel");
     if (channels.length) return [{ id: sections[0]?.id || "channels", style: "grid", items: channels }];

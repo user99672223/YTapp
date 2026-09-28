@@ -367,6 +367,80 @@ function searchResponse() {
   };
 }
 
+function channelsBrowse() {
+  const channel = (id, name, subs) => ({
+    channelRenderer: {
+      channelId: id, title: simple(name),
+      thumbnail: thumbs(`//yt3.ggpht.com/${id}=s176-c-k-c0x00ffffff-no-rj`, 176, 176),
+      subscriberCountText: simple(subs),
+      navigationEndpoint: { browseEndpoint: { browseId: id } },
+      subscribeButton: { subscribeButtonRenderer: { buttonText: runs('Subscribed'), subscribed: true, enabled: true, channelId: id } }
+    }
+  });
+  return {
+    responseContext: {},
+    contents: {
+      twoColumnBrowseResultsRenderer: {
+        tabs: [{
+          tabRenderer: {
+            selected: true,
+            content: {
+              sectionListRenderer: {
+                contents: [{
+                  itemSectionRenderer: {
+                    contents: [{
+                      shelfRenderer: {
+                        content: {
+                          expandedShelfContentsRenderer: {
+                            items: [channel(CH1, 'Channel One', '1.1K subscribers'), channel(CH2, 'Channel Two', '2.1M subscribers')]
+                          }
+                        }
+                      }
+                    }]
+                  }
+                }]
+              }
+            }
+          }
+        }]
+      }
+    }
+  };
+}
+
+function guideResponse() {
+  const entry = (id, name) => ({
+    guideEntryRenderer: {
+      navigationEndpoint: { browseEndpoint: { browseId: id, canonicalBaseUrl: `/@${name.replace(/\s/g, '').toLowerCase()}` } },
+      thumbnail: thumbs(`https://yt3.ggpht.com/${id}=s88-c-k-c0x00ffffff-no-rj`, 88, 88),
+      formattedTitle: simple(name),
+      entryData: { guideEntryData: { guideEntryId: id } }
+    }
+  });
+  return {
+    responseContext: {},
+    items: [
+      { guideSectionRenderer: { items: [{ guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEwhat_to_watch' } }, formattedTitle: simple('Home') } }] } },
+      {
+        guideSubscriptionsSectionRenderer: {
+          formattedTitle: simple('Subscriptions'),
+          items: [
+            entry(CH1, 'Channel One'),
+            {
+              guideCollapsibleEntryRenderer: {
+                expanderItem: { guideEntryRenderer: { formattedTitle: simple('Show more') } },
+                expandableItems: [entry(CH2, 'Channel Two'), entry(CH1, 'Channel One')],
+                collapserItem: { guideEntryRenderer: { formattedTitle: simple('Show fewer') } }
+              }
+            },
+            { guideEntryRenderer: { navigationEndpoint: { browseEndpoint: { browseId: 'FEchannels' } }, formattedTitle: simple('All subscriptions') } }
+          ]
+        }
+      }
+    ]
+  };
+}
+
 function reelWatch(id) {
   return {
     responseContext: {},
@@ -393,7 +467,7 @@ function reelSequence() {
   };
 }
 
-export function createFakeYouTube() {
+export function createFakeYouTube(options = {}) {
   const hits = [];
   const router = (req) => {
     const url = new URL(req.url);
@@ -411,8 +485,13 @@ export function createFakeYouTube() {
     if (path === '/youtubei/v1/browse') {
       if (body?.continuation === 'HOMECONT1') return { status: 200, body: homeContinuation() };
       if (body?.browseId === 'FEwhat_to_watch') return { status: 200, body: homeBrowse() };
+      if (body?.browseId === 'FEchannels') {
+        if (options.channelsFeed === 'broken') return { status: 200, body: { responseContext: {} } };
+        return { status: 200, body: channelsBrowse() };
+      }
       return { status: 404, body: { error: 'unknown browse' } };
     }
+    if (path === '/youtubei/v1/guide') return { status: 200, body: guideResponse() };
     if (path === '/youtubei/v1/player') return { status: 200, body: playerResponse(body.videoId) };
     if (path === '/youtubei/v1/next') return { status: 200, body: nextResponse(body.videoId) };
     if (path === '/youtubei/v1/search') return { status: 200, body: searchResponse() };

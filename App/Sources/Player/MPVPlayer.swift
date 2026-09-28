@@ -297,8 +297,12 @@ final class MPVPlayer: @unchecked Sendable {
                     handleProperty(data.assumingMemoryBound(to: mpv_event_property.self).pointee)
                 }
             case MPV_EVENT_FILE_LOADED:
+                // `paused-for-cache` only reports changes; seed the buffering flag with its
+                // current value so a stream that never stalls doesn't look stuck.
+                let buffering = stats.pausedForCache
                 DispatchQueue.main.async { [self] in
                     state.isFileLoaded = true
+                    state.isBuffering = buffering
                     MainActor.assumeIsolated { onFileLoaded?() }
                 }
             case MPV_EVENT_END_FILE:
