@@ -1,7 +1,7 @@
 // Shared bridge state: the Innertube session, cached feed objects (for continuations) and
 // video infos (for deciphering, history pings and ratings).
 import { Innertube, Constants } from 'youtubei.js/web';
-import { NativeCache, loadPlatform } from './platform.js';
+import { NativeCache, loadPlatform, TIZEN_USER_AGENT } from './platform.js';
 import { fail } from './errors.js';
 import { text, bestThumb, entityKeyStrings, isChannelId, nodeType } from './util.js';
 import { addJSONResponseHook } from '../polyfills/fetch.js';
@@ -60,12 +60,13 @@ export function getInfo(id) {
 // InnerTube client name/version and the user agent a stream client uses for googlevideo requests.
 export function clientMeta(client) {
   const key = String(client || 'TV').toUpperCase();
-  const c = Constants.CLIENTS[key === 'YTKIDS' ? 'WEB_KIDS' : key] || Constants.CLIENTS.WEB;
+  const alias = { YTKIDS: 'WEB_KIDS', TV_TIZEN: 'TV' }[key] || key;
+  const c = Constants.CLIENTS[alias] || Constants.CLIENTS.WEB;
   return {
     key,
     name: c.NAME,
     version: c.VERSION,
-    userAgent: c.USER_AGENT || DEFAULT_USER_AGENT
+    userAgent: key === 'TV_TIZEN' ? TIZEN_USER_AGENT : (c.USER_AGENT || DEFAULT_USER_AGENT)
   };
 }
 

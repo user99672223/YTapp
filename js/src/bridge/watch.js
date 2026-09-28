@@ -6,6 +6,7 @@ import { toItem } from './normalize.js';
 import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
 import { fail, classify, BridgeError } from './errors.js';
 import { contentPoToken } from './potoken.js';
+import { tvIdentity } from './platform.js';
 
 const HDR_TRANSFER = /2084|B67|HLG|PQ/i;
 
@@ -199,14 +200,16 @@ export function detailsOf(info, client) {
 
 // Tried in this order when the preferred client fails. All of them accept the account cookies
 // (September 2026): TV (sent as the older 5.x TV app, see platform.js; the 7.x version gets
-// SABR-only answers when signed in), WEB_EMBEDDED (no PO token, embeddable videos only) and MWEB
-// (needs a PO token). TV_SIMPLY, ANDROID_VR, IOS and VISIONOS answer signed-in requests with 400.
-export const FALLBACK_CLIENTS = ['TV', 'WEB_EMBEDDED', 'MWEB'];
+// SABR-only answers when signed in), TV_TIZEN (the same client as a Samsung TV, for sessions
+// that get "The page needs to be reloaded"), WEB_EMBEDDED (no PO token, embeddable videos only)
+// and MWEB (needs a PO token). TV_SIMPLY, ANDROID_VR, IOS and VISIONOS answer signed-in
+// requests with 400.
+export const FALLBACK_CLIENTS = ['TV', 'TV_TIZEN', 'WEB_EMBEDDED', 'MWEB'];
 
 // Reasons that mean the video itself can't be played, so other clients won't help.
 const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
 // Failures that are about the client, not the video: skip that client for the rest of the session.
-const CLIENT_BROKEN = /no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
 
 export function clientChain(preferred) {
   const p = String(preferred || state.options.client || 'AUTO').toUpperCase();
@@ -239,7 +242,10 @@ export async function playerWithFallback(yt, id, preferred, load) {
   for (const c of clientChain(preferred)) {
     try {
       const poToken = await contentPoToken(c, id);
-      const info = await load(c, poToken || undefined);
+      // TV_TIZEN is YouTube.js' TV client with another device identity (platform.js).
+      const ytClient = c === 'TV_TIZEN' ? 'TV' : c;
+      if (ytClient === 'TV') tvIdentity.current = c === 'TV_TIZEN' ? 'tizen' : 'cobalt';
+      const info = await load(ytClient, poToken || undefined);
       checkPlayable(info);
       const problem = await streamProblem(yt, info, c);
       if (problem) fail('extraction', problem);

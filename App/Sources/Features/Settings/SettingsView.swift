@@ -65,7 +65,7 @@ struct SettingsView: View {
             } header: {
                 Text("YouTube stream client")
             } footer: {
-                Text("Automatic tries TV, then Web embedded, then Mobile web, and keeps using the one that works. Only Mobile web needs a PO token.")
+                Text("Automatic tries TV, TV as a Samsung set, Web embedded and Mobile web in turn, and keeps using the one that works. Only Mobile web needs a PO token.")
             }
 
             Section("Playback") {

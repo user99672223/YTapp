@@ -495,6 +495,10 @@ export function createFakeYouTube(options = {}) {
     if (path === '/youtubei/v1/player') {
       const clientName = body?.context?.client?.clientName;
       // options.rejectClients: client names YouTube answers with 400 (as it did for TVHTML5 in 2026).
+      // options.tvReload: TVHTML5 gets "The page needs to be reloaded" unless it says it is a Samsung TV.
+      if (options.tvReload && clientName === 'TVHTML5' && body?.context?.client?.deviceMake !== 'Samsung') {
+        return { status: 200, body: { responseContext: {}, playabilityStatus: { status: 'UNPLAYABLE', reason: 'The page needs to be reloaded.' } } };
+      }
       if ((options.rejectClients || []).includes(clientName)) {
         return { status: 400, body: { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT' } } };
       }

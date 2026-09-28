@@ -42325,6 +42325,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(evaluate2, "evaluate");
   var TV_CLIENT_VERSION = "5.20260707";
   var WEB_EMBEDDED_VERSION = "2.20260708.00.00";
+  var TIZEN_USER_AGENT = "Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1";
+  var tvIdentity = { current: "cobalt" };
   function adjustRequestInit(init2) {
     const body = init2 && init2.body;
     if (typeof body !== "string" || body.indexOf('"TVHTML5"') === -1) return init2;
@@ -42338,6 +42340,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (!client || client.clientName !== "TVHTML5") return init2;
     delete client.browserName;
     delete client.browserVersion;
+    if (tvIdentity.current === "tizen") {
+      Object.assign(client, { deviceMake: "Samsung", deviceModel: "SmartTV", osName: "Tizen", osVersion: "2.4.0", userAgent: TIZEN_USER_AGENT });
+    }
     const headers = new globalThis.Headers(init2.headers);
     headers.set("User-Agent", client.userAgent || Constants_exports.CLIENTS.TV.USER_AGENT);
     return { ...init2, body: JSON.stringify(json), headers };
@@ -42628,12 +42633,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(getInfo, "getInfo");
   function clientMeta(client) {
     const key = String(client || "TV").toUpperCase();
-    const c = Constants_exports.CLIENTS[key === "YTKIDS" ? "WEB_KIDS" : key] || Constants_exports.CLIENTS.WEB;
+    const alias = { YTKIDS: "WEB_KIDS", TV_TIZEN: "TV" }[key] || key;
+    const c = Constants_exports.CLIENTS[alias] || Constants_exports.CLIENTS.WEB;
     return {
       key,
       name: c.NAME,
       version: c.VERSION,
-      userAgent: c.USER_AGENT || DEFAULT_USER_AGENT
+      userAgent: key === "TV_TIZEN" ? TIZEN_USER_AGENT : c.USER_AGENT || DEFAULT_USER_AGENT
     };
   }
   __name(clientMeta, "clientMeta");
@@ -44696,9 +44702,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     };
   }
   __name(detailsOf, "detailsOf");
-  var FALLBACK_CLIENTS = ["TV", "WEB_EMBEDDED", "MWEB"];
+  var FALLBACK_CLIENTS = ["TV", "TV_TIZEN", "WEB_EMBEDDED", "MWEB"];
   var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
-  var CLIENT_BROKEN = /no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+  var CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
   function clientChain(preferred) {
     const p = String(preferred || state.options.client || "AUTO").toUpperCase();
     const first = p === "AUTO" ? state.goodClient || FALLBACK_CLIENTS[0] : p;
@@ -44727,7 +44733,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     for (const c of clientChain(preferred)) {
       try {
         const poToken = await contentPoToken(c, id);
-        const info2 = await load(c, poToken || void 0);
+        const ytClient = c === "TV_TIZEN" ? "TV" : c;
+        if (ytClient === "TV") tvIdentity.current = c === "TV_TIZEN" ? "tizen" : "cobalt";
+        const info2 = await load(ytClient, poToken || void 0);
         checkPlayable(info2);
         const problem = await streamProblem(yt, info2, c);
         if (problem) fail("extraction", problem);

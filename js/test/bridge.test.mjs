@@ -212,7 +212,7 @@ test('a rejected stream client falls back to the next one and is remembered', as
   const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });
   assert.equal(details.playerClient, 'WEB_EMBEDDED');
   const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player').map((h) => h.body.context.client.clientName);
-  assert.deepEqual(players(), ['TVHTML5', 'WEB_EMBEDDED_PLAYER']);
+  assert.deepEqual(players(), ['TVHTML5', 'TVHTML5', 'WEB_EMBEDDED_PLAYER']);
   assert.ok(bundle.logs.some((l) => /stream client TV failed: \[extraction 400\]/.test(l.message)), 'each failed client is logged');
   const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [details.formats.find((f) => f.itag === 251).index] });
   const url = new URL(Object.values(resolved.urls)[0]);
@@ -220,7 +220,7 @@ test('a rejected stream client falls back to the next one and is remembered', as
   // The rejected client is skipped for the rest of the session.
   const short = await bundle.call('shortInfo', { id: 'SHORTID0001', client: 'TV' });
   assert.equal(short.playerClient, 'WEB_EMBEDDED');
-  assert.deepEqual(players().slice(2), ['WEB_EMBEDDED_PLAYER']);
+  assert.deepEqual(players().slice(3), ['WEB_EMBEDDED_PLAYER']);
 });
 
 test('automatic client is the 5.x TV app identity; all clients failing gives one clear error', async () => {
@@ -244,6 +244,24 @@ test('automatic client is the 5.x TV app identity; all clients failing gives one
   await assert.rejects(bundle.call('videoInfo', { id: 'VIDEOID0001' }), (e) =>
     e.kind === 'extraction' && /No stream client could play this video/.test(e.message) &&
     /TV: \[extraction 400\]/.test(e.detail) && /WEB_EMBEDDED: \[extraction 400\]/.test(e.detail));
+});
+
+test('"The page needs to be reloaded" switches the TV client to the Samsung identity', async () => {
+  const yt = createFakeYouTube({ tvReload: true });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  assert.equal(details.playerClient, 'TV_TIZEN');
+  assert.match(details.userAgent, /Tizen/);
+  const players = yt.hits.filter((h) => h.path === '/youtubei/v1/player');
+  assert.equal(players.length, 2);
+  assert.equal(players[1].body.context.client.deviceMake, 'Samsung');
+  assert.match(players[1].headers['user-agent'], /Tizen/);
+  // The next video starts with the identity that worked.
+  await bundle.call('videoInfo', { id: 'VIDEOID0002' });
+  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 3);
+  const watched = await bundle.call('markWatched', { id: 'VIDEOID0001' });
+  assert.equal(watched.ok, true);
 });
 
 test('errors are classified for Swift', async () => {

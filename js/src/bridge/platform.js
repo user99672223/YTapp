@@ -77,6 +77,11 @@ export function evaluate(data, env) {
 export const TV_CLIENT_VERSION = '5.20260707';
 export const WEB_EMBEDDED_VERSION = '2.20260708.00.00';
 
+// Some sessions get "The page needs to be reloaded" for every TV request (YouTube experiment,
+// Aug 2026); those still work when the TV client says it is a Samsung Tizen TV (yt-dlp PR #17723).
+export const TIZEN_USER_AGENT = 'Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1';
+export const tvIdentity = { current: 'cobalt' };
+
 // TV requests look like the TV app: its user agent, and none of the desktop browser fields that
 // the web session context carries.
 export function adjustRequestInit(init) {
@@ -92,6 +97,9 @@ export function adjustRequestInit(init) {
   if (!client || client.clientName !== 'TVHTML5') return init;
   delete client.browserName;
   delete client.browserVersion;
+  if (tvIdentity.current === 'tizen') {
+    Object.assign(client, { deviceMake: 'Samsung', deviceModel: 'SmartTV', osName: 'Tizen', osVersion: '2.4.0', userAgent: TIZEN_USER_AGENT });
+  }
   const headers = new globalThis.Headers(init.headers);
   headers.set('User-Agent', client.userAgent || Constants.CLIENTS.TV.USER_AGENT);
   return { ...init, body: JSON.stringify(json), headers };

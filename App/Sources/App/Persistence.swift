@@ -70,6 +70,7 @@ struct AppSettings: Equatable {
     static let streamClients: [(id: String, label: String)] = [
         ("AUTO", "Automatic (recommended)"),
         ("TV", "TV"),
+        ("TV_TIZEN", "TV (Samsung identity)"),
         ("WEB_EMBEDDED", "Web embedded"),
         ("MWEB", "Mobile web (PO token)")
     ]
