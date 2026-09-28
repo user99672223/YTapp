@@ -2,10 +2,19 @@ import SwiftUI
 import Core
 import Libmpv
 
+/// The result of the last bundle download or switch. Kept outside SettingsView: installing a
+/// bundle reconnects to YouTube, which rebuilds the whole tab view and this screen's state with
+/// it, so a result written to @State would never be seen.
+@MainActor
+final class BundleUpdateStatus: ObservableObject {
+    static let shared = BundleUpdateStatus()
+    @Published var message: String?
+    @Published var busy = false
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var bundleStatus: String?
-    @State private var bundleBusy = false
+    @ObservedObject private var bundleUpdate = BundleUpdateStatus.shared
     @State private var confirmSignOut = false
     @State private var confirmClear = false
     @State private var cacheSize: Int64 = 0
@@ -82,22 +91,17 @@ struct SettingsView: View {
                 LabeledContent("Source", value: model.bundles.hasDownloadedBundle ? "Downloaded" : "Built into the app")
                 TextField("Bundle URL", text: $model.settings.bundleURL)
                     .textContentType(.URL)
-                Button(bundleBusy ? "Downloading…" : "Download newer bundle") {
+                Button(bundleUpdate.busy ? "Downloading…" : "Download newer bundle") {
                     Task { await downloadBundle() }
                 }
-                .disabled(bundleBusy)
+                .disabled(bundleUpdate.busy)
                 if model.bundles.hasDownloadedBundle {
                     Button("Use the built-in bundle") {
-                        Task {
-                            bundleBusy = true
-                            await model.useBuiltInBundle()
-                            bundleBusy = false
-                            bundleStatus = "Switched back to the built-in bundle."
-                        }
+                        Task { await useBuiltInBundle() }
                     }
                 }
-                if let bundleStatus {
-                    Text(bundleStatus).font(.caption).foregroundStyle(.secondary)
+                if let message = bundleUpdate.message {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
                 }
             } header: {
                 Text("YouTube bundle")
@@ -149,15 +153,37 @@ struct SettingsView: View {
         }
     }
 
+    // Both keep their own references: the view is torn down while they run.
     private func downloadBundle() async {
-        bundleBusy = true
-        bundleStatus = "Downloading…"
-        defer { bundleBusy = false }
+        let model = self.model
+        let status = bundleUpdate
+        status.busy = true
+        status.message = "Downloading…"
+        defer { status.busy = false }
         do {
             let info = try await model.updateBundle()
-            bundleStatus = "Installed \(info.bundleVersion) (YouTube.js \(info.youtubeiVersion))."
+            if model.bundles.hasDownloadedBundle {
+                status.message = "Installed \(info.bundleVersion) (YouTube.js \(info.youtubeiVersion))."
+            } else {
+                // The app falls back to the built-in bundle when the downloaded one doesn't start.
+                status.message = "Update failed: the downloaded bundle \(info.bundleVersion) didn't start, so the app is still using the built-in one."
+            }
         } catch {
-            bundleStatus = "Update failed: \(BridgeError.wrap(error).userMessage)"
+            status.message = "Update failed: \(BridgeError.wrap(error).userMessage)"
+        }
+    }
+
+    private func useBuiltInBundle() async {
+        let model = self.model
+        let status = bundleUpdate
+        status.busy = true
+        status.message = nil
+        defer { status.busy = false }
+        await model.useBuiltInBundle()
+        if case .failed(let error) = model.phase {
+            status.message = "The built-in bundle didn't start: \(error.userMessage)"
+        } else {
+            status.message = "Switched back to the built-in bundle."
         }
     }
 }
