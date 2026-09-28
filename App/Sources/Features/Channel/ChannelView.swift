@@ -5,8 +5,11 @@ import Core
 final class ChannelModel: ObservableObject {
     @Published var page: ChannelPage?
     @Published var error: BridgeError?
+    @Published private(set) var isLoading = false
     @Published var isSubscribed: Bool?
     @Published var busy = false
+    /// A failed Subscribe/Unsubscribe (shown with Retry). `error` is only for the page itself.
+    @Published var actionError: BridgeError?
     @Published var tab: ChannelTab = .videos
     private var feeds: [ChannelTab: FeedModel] = [:]
     let channelId: String
@@ -18,11 +21,19 @@ final class ChannelModel: ObservableObject {
 
     func load(_ model: AppModel, force: Bool = false) async {
         if !force, let loadedAt, RefreshPolicy.isFresh(fetchedAt: loadedAt, category: .channel), page != nil { return }
+        if isLoading { return }
         if !force, page == nil, let cached = model.store.cachedPage("channel:\(channelId)", as: ChannelPage.self),
            RefreshPolicy.isFresh(fetchedAt: cached.fetchedAt, category: .channel) {
-            page = cached.value
-            isSubscribed = cached.value.channel.isSubscribed
+            // The key names a feed in the JS session that stored it; after a relaunch it's gone
+            // or points at another channel, so the tabs fetch the channel themselves until the
+            // fresh page (with a live key) arrives.
+            var restored = cached.value
+            restored.key = nil
+            page = restored
+            isSubscribed = restored.channel.isSubscribed
         }
+        isLoading = true
+        defer { isLoading = false }
         do {
             let fresh = try await model.api { [channelId] in try await $0.channel(channelId) }
             page = fresh
@@ -31,7 +42,8 @@ final class ChannelModel: ObservableObject {
             loadedAt = Date()
             model.store.storePage("channel:\(channelId)", fresh)
             if !fresh.tabs.isEmpty, !fresh.tabs.contains(tab) { tab = fresh.tabs[0] }
-            feeds = [:]
+            // Keep the tab feeds already on screen; drop only tabs the channel no longer has.
+            feeds = feeds.filter { fresh.tabs.isEmpty || fresh.tabs.contains($0.key) }
         } catch {
             if page == nil { self.error = BridgeError.wrap(error) }
         }
@@ -40,15 +52,18 @@ final class ChannelModel: ObservableObject {
     func feed(for tab: ChannelTab) -> FeedModel {
         if let existing = feeds[tab] { return existing }
         let id = channelId
-        let key = page?.key
-        let feed = FeedModel(cacheKey: "channel:\(id):\(tab.rawValue)", category: .channel) {
-            try await $0.channelTab(channelId: id, tab: tab, key: key)
+        let feed = FeedModel(cacheKey: "channel:\(id):\(tab.rawValue)", category: .channel) { [weak self] service in
+            // Read the key when the tab loads: the channel page may have been refreshed since.
+            let key = await MainActor.run { self?.page?.key }
+            return try await service.channelTab(channelId: id, tab: tab, key: key)
         }
         feeds[tab] = feed
         return feed
     }
 
     func toggleSubscription(_ model: AppModel) async {
+        // The button stays enabled while busy (so it keeps focus); ignore presses until done.
+        guard !busy else { return }
         guard let current = isSubscribed ?? page?.channel.isSubscribed else {
             await setSubscribed(true, model)
             return
@@ -62,8 +77,9 @@ final class ChannelModel: ObservableObject {
         do {
             let id = channelId
             isSubscribed = try await model.api { try await $0.setSubscribed(channelId: id, value) }
+            actionError = nil
         } catch {
-            self.error = BridgeError.wrap(error)
+            actionError = BridgeError.wrap(error)
         }
     }
 }
@@ -80,17 +96,30 @@ struct ChannelView: View {
     var body: some View {
         Group {
             if let page = channel.page {
+                // No .id(tab): FeedView loads whichever tab's model it's given, and the header
+                // with the tab picker stays in place, so focus stays on the picker.
                 FeedView(feed: channel.feed(for: channel.tab), emptyText: "This channel has nothing here.") {
                     header(page)
                 }
-                .id(channel.tab)
             } else if let error = channel.error {
-                ErrorStateView(error: error) { Task { await channel.load(model, force: true) } }
+                ErrorStateView(error: error, isRetrying: channel.isLoading) {
+                    Task { await channel.load(model, force: true) }
+                }
             } else {
                 LoadingView()
             }
         }
         .task { await channel.load(model) }
+        .alert("Couldn't change the subscription", isPresented: subscriptionFailed, presenting: channel.actionError) { _ in
+            Button("Retry") { Task { await channel.toggleSubscription(model) } }
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error.userMessage)
+        }
+    }
+
+    private var subscriptionFailed: Binding<Bool> {
+        Binding(get: { channel.actionError != nil }, set: { if !$0 { channel.actionError = nil } })
     }
 
     private func header(_ page: ChannelPage) -> some View {
@@ -117,13 +146,19 @@ struct ChannelView: View {
                 }
                 Spacer()
                 if model.isSignedIn {
+                    // Not disabled while busy: a disabled button loses focus on tvOS.
                     Button {
                         Task { await channel.toggleSubscription(model) }
                     } label: {
-                        Label(channel.isSubscribed == true ? "Subscribed" : "Subscribe",
-                              systemImage: channel.isSubscribed == true ? "bell.fill" : "plus")
+                        HStack(spacing: 12) {
+                            if channel.busy {
+                                ProgressView()
+                            } else {
+                                Image(systemName: channel.isSubscribed == true ? "bell.fill" : "plus")
+                            }
+                            Text(channel.isSubscribed == true ? "Subscribed" : "Subscribe")
+                        }
                     }
-                    .disabled(channel.busy)
                     .tint(channel.isSubscribed == true ? .gray : .red)
                 }
             }

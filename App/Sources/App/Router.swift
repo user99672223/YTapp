@@ -28,6 +28,8 @@ final class Router: ObservableObject {
     @Published var paths: [AppTab: [Route]] = [:]
     @Published var watch: WatchRequest?
     @Published var shorts: ShortsRequest?
+    /// Not @Published: a toast shouldn't redraw every view that observes the router.
+    let toasts = ToastCenter()
 
     func path(for tab: AppTab) -> Binding<[Route]> {
         Binding(get: { self.paths[tab] ?? [] }, set: { self.paths[tab] = $0 })
@@ -51,6 +53,23 @@ final class Router: ObservableObject {
         let tab = selectedTab == .shorts || selectedTab == .settings ? .home : selectedTab
         selectedTab = tab
         paths[tab, default: []].append(route)
+    }
+}
+
+/// Short confirmations for actions that have no screen of their own (a card's context menu).
+/// Shown by `ToastOverlay`.
+@MainActor
+final class ToastCenter: ObservableObject {
+    @Published private(set) var message: String?
+    private var hideTask: Task<Void, Never>?
+
+    func show(_ message: String) {
+        self.message = message
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if !Task.isCancelled { self.message = nil }
+        }
     }
 }
 
