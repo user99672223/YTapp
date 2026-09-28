@@ -55,6 +55,16 @@ export function videoThumb(id) {
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : undefined;
 }
 
+// Feeds keep serving the "…_live.jpg" frame captured while a stream was on air (YouTube's red LIVE
+// label is baked into it) after the stream ended. For an item that is not live, use the regular
+// thumbnail instead; hqdefault is the one variant every video has.
+export function notLiveThumb(url, id) {
+  if (typeof url === 'string' && id && /\/vi(?:_webp)?\/[\w-]+\/[\w-]+_live\.(?:jpg|webp)(?:[?#]|$)/.test(url)) {
+    return videoThumb(id);
+  }
+  return url;
+}
+
 export function parseDuration(str) {
   if (!str || typeof str !== 'string') return undefined;
   const m = str.trim().match(/^(\d+)(?::(\d{1,2}))?(?::(\d{1,2}))?$/);

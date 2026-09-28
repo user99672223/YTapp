@@ -7,10 +7,29 @@ import { fail } from './errors.js';
 function pageNodes(feed) {
   if (!feed) return [];
   if (feed.contents && Array.isArray(feed.contents.contents)) return feed.contents.contents;
-  const pc = feed.page_contents;
+  // YouTube.js' page_contents only knows first pages: on a plain Feed continuation (Subscriptions,
+  // subscribed channels, Library playlists) there is no Tab and the getter throws.
+  let pc;
+  try {
+    pc = feed.page_contents;
+  } catch {
+    pc = undefined;
+  }
+  if (!pc) pc = continuationContents(feed.page);
   if (pc && Array.isArray(pc.contents)) return pc.contents;
   if (pc && pc.content && Array.isArray(pc.content.contents)) return pc.content.contents;
   return [];
+}
+
+// The appended items of a continuation response (appendContinuationItemsAction and friends).
+function continuationContents(parsed) {
+  if (!parsed) return undefined;
+  const commands = [
+    ...(parsed.on_response_received_actions || []),
+    ...(parsed.on_response_received_endpoints || []),
+    ...(parsed.on_response_received_commands || [])
+  ];
+  return commands.find((c) => c && Array.isArray(c.contents)) || parsed.continuation_contents || undefined;
 }
 
 function hasMore(feed) {
@@ -170,9 +189,10 @@ function channelHeader(channel, id) {
     out.avatar = out.avatar || bestThumb(image?.avatar?.image || image?.image, 240);
     out.banner = bestThumb(v?.banner?.image, 2560);
     const parts = (v?.metadata?.metadata_rows || []).flatMap((row) => (row.metadata_parts || []).map((p) => text(p.text))).filter(Boolean);
+    // The @handle is one of these parts and may itself contain "video" (@videogamedunkey).
     out.handle = parts.find((p) => p.startsWith('@'));
-    out.subscriberCountText = parts.find((p) => /subscriber/i.test(p));
-    out.videoCountText = parts.find((p) => /video/i.test(p));
+    out.subscriberCountText = parts.find((p) => !p.startsWith('@') && /\bsubscribers?\b/i.test(p));
+    out.videoCountText = parts.find((p) => !p.startsWith('@') && /\bvideos?\b/i.test(p));
     if (!out.description) out.description = text(v?.description?.description);
   } else if (type === 'C4TabbedHeader') {
     out.name = out.name || text(h.author?.name);
@@ -195,7 +215,7 @@ export async function channel({ id }) {
   if (!id) fail('invalid', 'Missing channel id.');
   const ch = await yt.getChannel(id);
   const header = channelHeader(ch, id);
-  const key = register('channel', 'channelBase', ch, { channelId: header.id });
+  const key = register('channel', 'channelBase', ch, { channelId: header.id, requestedId: id });
   const tabs = [];
   const safe = (fn) => {
     try {
@@ -213,7 +233,9 @@ export async function channel({ id }) {
 
 export async function channelTab({ key, id, tab }) {
   let base = key ? state.feeds.get(key) : null;
-  if (!base || base.kind !== 'channelBase') {
+  // Keys restart with every JavaScript context, and Swift can hand back one saved by an earlier
+  // launch: only reuse the entry when it is this channel's.
+  if (!base || base.kind !== 'channelBase' || (id && base.channelId !== id && base.requestedId !== id)) {
     const yt = await requireSession();
     const ch = await yt.getChannel(id);
     base = { kind: 'channelBase', feed: ch };
@@ -270,16 +292,15 @@ export async function playlists() {
   const yt = await requireSession();
   requireLogin(yt);
   const feed = await yt.getPlaylists();
-  const key = register('playlists', 'feed', feed);
-  let sections = sectionsFromNodes(pageNodes(feed));
-  const lists = sections.flatMap((s) => s.items).filter((i) => i.type === 'playlist');
-  if (!lists.length) {
-    const fallback = (feed.playlists || []).map(toItem).filter((i) => i && i.type === 'playlist');
-    sections = fallback.length ? [{ id: `pls-${key}`, style: 'grid', items: fallback }] : [];
-  } else {
-    sections = [{ id: `pls-${key}`, style: 'grid', items: lists }];
-  }
-  return toPage(key, feed, sections);
+  const key = register('playlists', 'feed', feed, { playlistsOnly: true });
+  return toPage(key, feed, onlyPlaylists(sectionsFromNodes(pageNodes(feed)), feed, `pls-${key}`));
+}
+
+// Library → Playlists keeps only playlists (a saved Mix is a video card elsewhere), on every page.
+function onlyPlaylists(sections, feed, id) {
+  let lists = sections.flatMap((s) => s.items).filter((i) => i.type === 'playlist');
+  if (!lists.length) lists = (feed.playlists || []).map(toItem).filter((i) => i && i.type === 'playlist');
+  return lists.length ? [{ id, style: 'grid', items: lists }] : [];
 }
 
 // ---------------------------------------------------------------- Continuations
@@ -299,7 +320,6 @@ export async function more({ key }) {
   const current = entry.feed;
   if (!hasMore(current)) return page([], undefined);
   const next = await current.getContinuation();
-  entry.feed = next;
   let sections;
   switch (entry.kind) {
     case 'search':
@@ -319,7 +339,10 @@ export async function more({ key }) {
     default:
       sections = sectionsFromNodes(pageNodes(next));
       if (entry.channelsOnly) sections = onlyChannels(sections, next);
+      if (entry.playlistsOnly) sections = onlyPlaylists(sections, next, `pls-${key}-${Date.now()}`);
   }
+  // Only move on once this page was read, so a failure (and its Retry) does not skip a page.
+  entry.feed = next;
   return page(sections, hasMore(next) ? key : undefined);
 }
 

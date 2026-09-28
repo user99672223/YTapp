@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 export const PLAYER_ID = '0a1b2c3d';
 export const CH1 = 'UC' + 'a'.repeat(22);
 export const CH2 = 'UC' + 'b'.repeat(22);
+export const CH3 = 'UC' + 'c'.repeat(22);
 export const COOKIE = 'SID=sid; HSID=hsid; SSID=ssid; APISID=apisid; SAPISID=sapisid123/abc; __Secure-3PAPISID=sapisid123/abc; LOGIN_INFO=li';
 
 const playerJs = readFileSync(new URL('./fixtures/player.js', import.meta.url), 'utf8');
@@ -62,6 +63,17 @@ function videoRenderer(id, title, channelId, channelName, extra = {}) {
   };
 }
 
+// A scheduled premiere as a search result: no length, the overlay only says "UPCOMING".
+function upcomingVideoRenderer(id, title) {
+  const r = videoRenderer(id, title, CH1, 'Channel One', {
+    upcomingEventData: { startTime: '1999999999', upcomingEventText: runs('Premieres DATE_PLACEHOLDER') },
+    thumbnailOverlays: [{ thumbnailOverlayTimeStatusRenderer: { text: runs('UPCOMING'), style: 'UPCOMING' } }]
+  });
+  delete r.videoRenderer.lengthText;
+  delete r.videoRenderer.publishedTimeText;
+  return r;
+}
+
 function lockup(id, title, channelId, channelName) {
   return {
     lockupViewModel: {
@@ -103,6 +115,55 @@ function lockup(id, title, channelId, channelName) {
     }
   };
 }
+
+// A lockupViewModel with explicit metadata rows. A part is a string, or { text, browseId } for a
+// part linking to a channel (an attributed-text command run, as YouTube sends the author).
+function lockupView({ id, title, type = 'VIDEO', rows, badge = '12:34', badgeStyle = 'THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT', thumb, onTap }) {
+  const part = (p) => (typeof p === 'string'
+    ? { text: { content: p } }
+    : { text: { content: p.text, commandRuns: [{ startIndex: 0, length: p.text.length, onTap: { innertubeCommand: { browseEndpoint: { browseId: p.browseId } } } }] } });
+  const image = {
+    thumbnailViewModel: {
+      image: { sources: [{ url: thumb || `https://i.ytimg.com/vi/${id}/hq720.jpg`, width: 1280, height: 720 }] },
+      overlays: badge ? [{
+        thumbnailOverlayBadgeViewModel: {
+          thumbnailBadges: [{ thumbnailBadgeViewModel: { text: badge, badgeStyle } }],
+          position: 'THUMBNAIL_OVERLAY_BADGE_POSITION_BOTTOM_END'
+        }
+      }] : []
+    }
+  };
+  return {
+    lockupViewModel: {
+      contentImage: type === 'PLAYLIST' ? { collectionThumbnailViewModel: { primaryThumbnail: image } } : image,
+      metadata: {
+        lockupMetadataViewModel: {
+          title: { content: title },
+          metadata: { contentMetadataViewModel: { metadataRows: rows.map((r) => ({ metadataParts: r.map(part) })), delimiter: ' • ' } }
+        }
+      },
+      contentId: id,
+      contentType: `LOCKUP_CONTENT_TYPE_${type}`,
+      rendererContext: onTap ? { commandContext: { onTap: { innertubeCommand: onTap } } } : {}
+    }
+  };
+}
+
+const richItem = (content) => ({ richItemRenderer: { content } });
+const continuationItem = (token) => ({
+  continuationItemRenderer: {
+    trigger: 'CONTINUATION_TRIGGER_ON_ITEM_SHOWN',
+    continuationEndpoint: { continuationCommand: { token, request: 'CONTINUATION_REQUEST_TYPE_BROWSE' } }
+  }
+});
+const appendItems = (items) => ({
+  responseContext: {},
+  onResponseReceivedActions: [{ appendContinuationItemsAction: { targetId: 'browse-feed', continuationItems: items } }]
+});
+const browseTab = (content) => ({
+  responseContext: {},
+  contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content } }] } }
+});
 
 function shortLockup(id, title) {
   return {
@@ -300,6 +361,11 @@ function nextResponse(id) {
         secondaryResults: {
           secondaryResults: {
             results: [
+              // The Mix of this video: it starts with the video being watched.
+              lockupView({
+                id: `RD${id}`, type: 'PLAYLIST', title: 'Mix – First video', badge: 'Mix', rows: [['Channel One, Channel Two and more'], ['Updated today']],
+                onTap: { watchEndpoint: { videoId: id, playlistId: `RD${id}`, params: 'OAHyAQIIAQ%3D%3D' } }
+              }),
               lockup('RELATEDVID1', 'Related one', CH2, 'Channel Two'),
               lockup('RELATEDVID2', 'Related two', CH2, 'Channel Two')
             ]
@@ -395,6 +461,25 @@ function searchResponse() {
                       title: runs('Shorts'),
                       items: [shortLockup('SHORTID0003', 'Search short')]
                     }
+                  },
+                  upcomingVideoRenderer('UPCOMINGV02', 'Scheduled premiere'),
+                  lockupView({
+                    id: 'RDMIXSEEDVID1', type: 'PLAYLIST', title: 'Mix – Channel One', badge: 'Mix',
+                    thumb: 'https://i.ytimg.com/vi/MIXSEEDVID1/hqdefault.jpg',
+                    rows: [['Channel One, Channel Two and more'], ['Updated today']],
+                    onTap: { watchEndpoint: { videoId: 'MIXSEEDVID1', playlistId: 'RDMIXSEEDVID1', params: 'OAHyAQIIAQ%3D%3D' } }
+                  }),
+                  lockupView({
+                    id: 'PLsearchlist01', type: 'PLAYLIST', title: 'Search playlist', badge: '12 videos',
+                    thumb: 'https://i.ytimg.com/vi/VIDEOID0001/hqdefault.jpg',
+                    rows: [[{ text: 'Channel Two', browseId: CH2 }, 'Playlist'], ['View full playlist']],
+                    onTap: { watchEndpoint: { videoId: 'VIDEOID0001', playlistId: 'PLsearchlist01' } }
+                  }),
+                  {
+                    gridShelfViewModel: {
+                      header: { sectionHeaderViewModel: { headline: { content: 'Latest Shorts from Channel One' } } },
+                      contents: [shortLockup('SHORTID0005', 'Grid short')]
+                    }
                   }
                 ]
               }
@@ -406,42 +491,159 @@ function searchResponse() {
   };
 }
 
+const subscribedChannel = (id, name, subs) => ({
+  channelRenderer: {
+    channelId: id, title: simple(name),
+    thumbnail: thumbs(`//yt3.ggpht.com/${id}=s176-c-k-c0x00ffffff-no-rj`, 176, 176),
+    subscriberCountText: simple(subs),
+    navigationEndpoint: { browseEndpoint: { browseId: id } },
+    subscribeButton: { subscribeButtonRenderer: { buttonText: runs('Subscribed'), subscribed: true, enabled: true, channelId: id } }
+  }
+});
+
+const channelShelf = (...channels) => ({
+  itemSectionRenderer: {
+    contents: [{ shelfRenderer: { content: { expandedShelfContentsRenderer: { items: channels } } } }]
+  }
+});
+
 function channelsBrowse() {
-  const channel = (id, name, subs) => ({
-    channelRenderer: {
-      channelId: id, title: simple(name),
-      thumbnail: thumbs(`//yt3.ggpht.com/${id}=s176-c-k-c0x00ffffff-no-rj`, 176, 176),
-      subscriberCountText: simple(subs),
-      navigationEndpoint: { browseEndpoint: { browseId: id } },
-      subscribeButton: { subscribeButtonRenderer: { buttonText: runs('Subscribed'), subscribed: true, enabled: true, channelId: id } }
+  return browseTab({
+    sectionListRenderer: {
+      contents: [
+        channelShelf(subscribedChannel(CH1, 'Channel One', '1.1K subscribers'), subscribedChannel(CH2, 'Channel Two', '2.1M subscribers')),
+        continuationItem('CHANCONT1')
+      ]
     }
   });
+}
+
+// Subscriptions: lockups only (2026), with an ended stream, a scheduled one and a live one.
+function subscriptionsBrowse() {
+  const by = (text, browseId) => ({ text, browseId });
+  return browseTab({
+    richGridRenderer: {
+      contents: [
+        richItem(lockupView({ id: 'SUBSVIDEO01', title: 'Subscribed video', rows: [[by('Channel Two', CH2)], ['5K views', '1 hour ago']] })),
+        richItem(lockupView({
+          id: 'STREAMVID01', title: 'Yesterday stream', badge: '2:01:15',
+          thumb: 'https://i.ytimg.com/vi/STREAMVID01/hq720_live.jpg?sqp=-oaymwEcCNAFEJQDSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLfake',
+          rows: [[by('Channel One', CH1)], ['20K views', 'Streamed 13 hours ago']]
+        })),
+        richItem(lockupView({
+          id: 'UPCOMINGV01', title: 'Scheduled stream', badge: 'Upcoming',
+          thumb: 'https://i.ytimg.com/vi/UPCOMINGV01/hqdefault_live.jpg',
+          rows: [[by('Channel One', CH1)], ['Scheduled for 10/1/26, 8:00 PM']]
+        })),
+        richItem(lockupView({
+          id: 'LIVENOWVID1', title: 'Live now', badge: 'LIVE', badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE',
+          thumb: 'https://i.ytimg.com/vi/LIVENOWVID1/hq720_live.jpg',
+          rows: [[by('Channel Two', CH2)], ['1.2K watching']]
+        })),
+        continuationItem('SUBSCONT1')
+      ]
+    }
+  });
+}
+
+// Library → Playlists: playlist lockups whose first metadata part is not a channel.
+function playlistsBrowse() {
+  return browseTab({
+    richGridRenderer: {
+      contents: [
+        richItem(lockupView({ id: 'PLmine000001', type: 'PLAYLIST', title: 'My list', badge: '3 videos', rows: [['Private', 'Playlist'], ['View full playlist']] })),
+        richItem(lockupView({
+          id: 'PLother00001', type: 'PLAYLIST', title: 'Saved list', badge: '40 videos',
+          rows: [[{ text: 'Channel Two', browseId: CH2 }, 'Playlist'], ['View full playlist']]
+        })),
+        continuationItem('PLAGGCONT1')
+      ]
+    }
+  });
+}
+
+// Watch later: playlistVideoRenderer rows carry views and age in one "videoInfo" line.
+function watchLaterBrowse() {
+  const row = (id, title, index) => ({
+    playlistVideoRenderer: {
+      videoId: id,
+      thumbnail: thumbs(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`, 480, 360),
+      title: { runs: [{ text: title }], accessibility: { accessibilityData: { label: `${title} by Channel One 4 minutes` } } },
+      index: simple(String(index)),
+      shortBylineText: runs('Channel One', CH1),
+      lengthText: simple('4:20'),
+      lengthSeconds: '260',
+      navigationEndpoint: { watchEndpoint: { videoId: id, playlistId: 'WL', index: index - 1 } },
+      setVideoId: `SET${id}`,
+      isPlayable: true,
+      videoInfo: { runs: [{ text: '1.2M views' }, { text: ' • ' }, { text: '3 years ago' }] },
+      thumbnailOverlays: [{ thumbnailOverlayTimeStatusRenderer: { text: simple('4:20'), style: 'DEFAULT' } }]
+    }
+  });
+  return browseTab({
+    sectionListRenderer: {
+      contents: [{
+        itemSectionRenderer: {
+          contents: [{ playlistVideoListRenderer: { playlistId: 'WL', isEditable: true, canReorder: true, contents: [row('VIDEOID0001', 'First video', 1)] } }]
+        }
+      }]
+    }
+  });
+}
+
+// A channel page. Without params it is the Home tab; params 'VIDEOS' selects the Videos tab,
+// whose lockups have a single "views • date" metadata row and no author.
+function channelBrowse(id, params) {
+  const name = id === CH1 ? 'Channel One' : 'Channel Two';
+  const handle = id === CH1 ? '@videogamefan' : '@channeltwo';
+  const prefix = id === CH1 ? 'ONE' : 'TWO';
+  const tab = (title, path, tabParams, content) => ({
+    tabRenderer: {
+      title,
+      selected: !!content,
+      endpoint: {
+        browseEndpoint: { browseId: id, params: tabParams, canonicalBaseUrl: `/${handle}` },
+        commandMetadata: { webCommandMetadata: { url: `/${handle}/${path}`, webPageType: 'WEB_PAGE_TYPE_CHANNEL', apiUrl: '/youtubei/v1/browse' } }
+      },
+      ...(content ? { content } : {})
+    }
+  });
+  const videos = params === 'VIDEOS' ? {
+    richGridRenderer: {
+      contents: [
+        richItem(lockupView({ id: `${prefix}VIDEO01`, title: `${name} upload`, rows: [['1.2M views', '3 days ago']] })),
+        richItem(lockupView({ id: `${prefix}VIDEO02`, title: `${name} older upload`, rows: [['900 views', '2 years ago']] }))
+      ]
+    }
+  } : null;
   return {
     responseContext: {},
-    contents: {
-      twoColumnBrowseResultsRenderer: {
-        tabs: [{
-          tabRenderer: {
-            selected: true,
-            content: {
-              sectionListRenderer: {
-                contents: [{
-                  itemSectionRenderer: {
-                    contents: [{
-                      shelfRenderer: {
-                        content: {
-                          expandedShelfContentsRenderer: {
-                            items: [channel(CH1, 'Channel One', '1.1K subscribers'), channel(CH2, 'Channel Two', '2.1M subscribers')]
-                          }
-                        }
-                      }
-                    }]
-                  }
-                }]
+    header: {
+      pageHeaderRenderer: {
+        pageTitle: name,
+        content: {
+          pageHeaderViewModel: {
+            title: { dynamicTextViewModel: { text: { content: name } } },
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [
+                  { metadataParts: [{ text: { content: handle } }] },
+                  { metadataParts: [{ text: { content: '1.5M subscribers' } }, { text: { content: '321 videos' } }] }
+                ],
+                delimiter: ' • '
               }
             }
           }
-        }]
+        }
+      }
+    },
+    metadata: { channelMetadataRenderer: { title: name, description: `About ${name}`, externalId: id, avatar: thumbs(`https://yt3.ggpht.com/${prefix}`, 176, 176) } },
+    contents: {
+      twoColumnBrowseResultsRenderer: {
+        tabs: [
+          tab('Home', 'featured', 'HOME', videos ? null : { sectionListRenderer: { contents: [] } }),
+          tab('Videos', 'videos', 'VIDEOS', videos)
+        ]
       }
     }
   };
@@ -527,11 +729,39 @@ export function createFakeYouTube(options = {}) {
     }
     if (path === '/youtubei/v1/browse') {
       if (body?.continuation === 'HOMECONT1') return { status: 200, body: homeContinuation() };
+      if (body?.continuation === 'SUBSCONT1') {
+        return {
+          status: 200,
+          body: appendItems([
+            richItem(lockupView({ id: 'SUBSVIDEO02', title: 'Older subscribed video', rows: [[{ text: 'Channel One', browseId: CH1 }], ['7K views', '2 days ago']] })),
+            // A channel whose name reads like a live or upcoming stat.
+            richItem(lockupView({ id: 'SUBSVIDEO03', title: 'Owls at dusk', rows: [[{ text: 'Bird Watching', browseId: CH3 }], ['300 views', '5 days ago']] }))
+          ])
+        };
+      }
+      if (body?.continuation === 'CHANCONT1') return { status: 200, body: appendItems([channelShelf(subscribedChannel(CH3, 'Channel Three', '300 subscribers'))]) };
+      if (body?.continuation === 'PLAGGCONT1') {
+        return {
+          status: 200,
+          body: appendItems([
+            richItem(lockupView({ id: 'PLmine000002', type: 'PLAYLIST', title: 'Another list', badge: '1 video', rows: [['Unlisted', 'Playlist'], ['Updated today'], ['View full playlist']] })),
+            // A saved Mix: not a playlist page, so Library → Playlists leaves it out.
+            richItem(lockupView({
+              id: 'RDMIXSAVED01', type: 'PLAYLIST', title: 'Mix – Channel Two', badge: 'Mix', rows: [['Channel Two and more'], ['Updated today']],
+              onTap: { watchEndpoint: { videoId: 'MIXSAVEDVID', playlistId: 'RDMIXSAVED01' } }
+            }))
+          ])
+        };
+      }
       if (body?.browseId === 'FEwhat_to_watch') return { status: 200, body: homeBrowse() };
       if (body?.browseId === 'FEchannels') {
         if (options.channelsFeed === 'broken') return { status: 200, body: { responseContext: {} } };
         return { status: 200, body: channelsBrowse() };
       }
+      if (body?.browseId === 'FEsubscriptions') return { status: 200, body: subscriptionsBrowse() };
+      if (body?.browseId === 'FEplaylist_aggregation') return { status: 200, body: playlistsBrowse() };
+      if (body?.browseId === 'VLWL') return { status: 200, body: watchLaterBrowse() };
+      if (body?.browseId === CH1 || body?.browseId === CH2) return { status: 200, body: channelBrowse(body.browseId, body.params) };
       return { status: 404, body: { error: 'unknown browse' } };
     }
     if (path === '/youtubei/v1/guide') return { status: 200, body: guideResponse() };
@@ -570,7 +800,10 @@ export function createFakeYouTube(options = {}) {
     if (path.startsWith('/api/stats/')) return { status: 204, body: '' };
     if (path === '/youtubei/v1/like/like' || path === '/youtubei/v1/like/dislike' || path === '/youtubei/v1/like/removelike') return { status: 200, body: { responseContext: {} } };
     if (path === '/youtubei/v1/subscription/subscribe' || path === '/youtubei/v1/subscription/unsubscribe') return { status: 200, body: { responseContext: {} } };
-    if (path === '/youtubei/v1/browse/edit_playlist') return { status: 200, body: { responseContext: {}, status: 'STATUS_SUCCEEDED', actions: [] } };
+    if (path === '/youtubei/v1/browse/edit_playlist') {
+      // options.editPlaylist 'failed': YouTube answers 200 but did not apply the edit.
+      return { status: 200, body: { responseContext: {}, status: options.editPlaylist === 'failed' ? 'STATUS_FAILED' : 'STATUS_SUCCEEDED', actions: [] } };
+    }
     return { status: 404, body: { error: `unmocked ${path}` } };
   };
   return { router, hits };

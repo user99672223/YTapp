@@ -42487,6 +42487,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : void 0;
   }
   __name(videoThumb, "videoThumb");
+  function notLiveThumb(url, id) {
+    if (typeof url === "string" && id && /\/vi(?:_webp)?\/[\w-]+\/[\w-]+_live\.(?:jpg|webp)(?:[?#]|$)/.test(url)) {
+      return videoThumb(id);
+    }
+    return url;
+  }
+  __name(notLiveThumb, "notLiveThumb");
   function parseDuration(str) {
     if (!str || typeof str !== "string") return void 0;
     const m = str.trim().match(/^(\d+)(?::(\d{1,2}))?(?::(\d{1,2}))?$/);
@@ -43803,6 +43810,21 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   // src/bridge/normalize.js
   var sectionSeq = 0;
   var nextSectionId = /* @__PURE__ */ __name(() => `s${++sectionSeq}`, "nextSectionId");
+  var VIEWS_RE = /\bviews?\b|watching|waiting/i;
+  var AGE_RE = /\bago\b|^streamed\b|^premiere|^scheduled\b/i;
+  var NOT_CHANNEL_RE = /^[\d.,]+\s*[KMB]?\s*(views?|watching|waiting|videos?|episodes?)\b|^no views$|\bago$|^(streamed|scheduled|premieres?|premiered|updated)\b|^view full playlist$|^(private|public|unlisted|playlist|mix|album|podcast)$/i;
+  var UPCOMING_RE = /^(scheduled for|premieres)\b|\bwaiting$/i;
+  function viewsAndAge(texts) {
+    const viewCountText = texts.find((t) => VIEWS_RE.test(t));
+    const publishedText = texts.find((t) => t !== viewCountText && AGE_RE.test(t));
+    if (viewCountText || publishedText) return { viewCountText, publishedText };
+    return { viewCountText: texts[0], publishedText: texts[1] };
+  }
+  __name(viewsAndAge, "viewsAndAge");
+  function isMixId(id) {
+    return typeof id === "string" && id.startsWith("RD") && !id.startsWith("RDCLAK");
+  }
+  __name(isMixId, "isMixId");
   function overlaysInfo(overlays) {
     const info2 = { durationText: void 0, isLive: false, isShort: false, isUpcoming: false, watchedPercent: void 0 };
     const list = Array.isArray(overlays) ? overlays : [];
@@ -43812,7 +43834,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       if (isDurationText(t)) info2.durationText = t;
       if (s.includes("LIVE") || t.toUpperCase() === "LIVE") info2.isLive = true;
       if (s.includes("SHORTS")) info2.isShort = true;
-      if (s.includes("UPCOMING")) info2.isUpcoming = true;
+      if (s.includes("UPCOMING") || t.toUpperCase() === "UPCOMING") info2.isUpcoming = true;
     }, "visitBadge");
     for (const o of list) {
       const type = nodeType(o);
@@ -43843,7 +43865,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const id = node.video_id || node.id || endpointVideoId(node.endpoint);
     if (!id || typeof id !== "string") return null;
     const overlay = overlaysInfo(node.thumbnail_overlays);
-    const durationText = text(node.length_text) || text(node.duration?.text ? node.duration.text : node.duration) || overlay.durationText;
+    const legacyDuration = text(node.duration?.text ?? node.duration);
+    const durationText = text(node.length_text) || (isDurationText(legacyDuration) ? legacyDuration : void 0) || overlay.durationText;
     const author = authorInfo(node.author);
     const badges = (node.badges || []).map((b) => (b.label || b.style || "").toUpperCase());
     const isLive = overlay.isLive || !!node.is_live || badges.some((b) => b.includes("LIVE"));
@@ -43851,6 +43874,16 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     let channelName = author.channelName;
     if (!channelName) channelName = text(node.short_byline_text) || text(node.long_byline_text);
     if (!channelName && typeof node.author === "string") channelName = node.author;
+    let viewCountText = text(node.short_view_count) || text(node.view_count) || text(node.views);
+    let publishedText = text(node.published);
+    const info2 = (text(node.video_info) || "").split(/\s*•\s*/).filter(Boolean);
+    if (info2.length && (!viewCountText || !publishedText)) {
+      const parsed = viewsAndAge(info2);
+      if (!viewCountText) viewCountText = parsed.viewCountText;
+      if (!publishedText) publishedText = parsed.publishedText;
+    }
+    let thumbnail = bestThumb(node.thumbnails || node.thumbnail);
+    if (!isLive && !upcoming) thumbnail = notLiveThumb(thumbnail, id);
     return {
       type: "video",
       id,
@@ -43858,11 +43891,11 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       channelName,
       channelId: author.channelId,
       channelAvatar: author.channelAvatar,
-      thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
+      thumbnail: thumbnail || videoThumb(id),
       durationText,
       durationSeconds: node.duration?.seconds || parseDuration(durationText),
-      viewCountText: text(node.short_view_count) || text(node.view_count) || text(node.views),
-      publishedText: text(node.published),
+      viewCountText,
+      publishedText,
       isLive,
       isShort: overlay.isShort,
       isUpcoming: upcoming,
@@ -43873,20 +43906,25 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(videoFromLegacy, "videoFromLegacy");
   function lockupMetadataParts(lockup) {
     const rows = lockup.metadata?.metadata?.metadata_rows || [];
-    return rows.map((row) => (row.metadata_parts || []).map((part) => ({ text: text(part.text), endpoint: part.text?.endpoint })));
+    return rows.map((row) => (row.metadata_parts || []).map((part) => ({
+      text: text(part.text),
+      endpoint: part.text?.endpoint || part.text?.runs?.find((r) => r && r.endpoint)?.endpoint
+    })));
   }
   __name(lockupMetadataParts, "lockupMetadataParts");
   function lockupChannel(lockup, parts) {
     const image = lockup.metadata?.image;
     let channelId = endpointBrowseId(image?.renderer_context?.command_context?.on_tap);
     let channelAvatar = bestThumb(image?.avatar?.image, 176);
-    for (const row of parts) {
-      for (const part of row) {
-        const id = endpointBrowseId(part.endpoint);
-        if (!channelId && isChannelId(id)) channelId = id;
-      }
+    let channelName;
+    for (const part of parts.flat()) {
+      const id = endpointBrowseId(part.endpoint);
+      if (!isChannelId(id)) continue;
+      if (!isChannelId(channelId)) channelId = id;
+      if (!channelName && part.text) channelName = part.text;
     }
-    const channelName = parts[0]?.[0]?.text;
+    const first = parts[0]?.[0]?.text;
+    if (!channelName && first && parts.length > 1 && !NOT_CHANNEL_RE.test(first)) channelName = first;
     return { channelName, channelId: isChannelId(channelId) ? channelId : void 0, channelAvatar };
   }
   __name(lockupChannel, "lockupChannel");
@@ -43916,6 +43954,20 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         subscriberCountText: parts.flat().map((p) => p.text).find((t) => t && /subscriber/i.test(t))
       };
     }
+    if (type === "PLAYLIST" && isMixId(id)) {
+      const videoId = endpointVideoId(lockup.renderer_context?.command_context?.on_tap);
+      if (!videoId) return null;
+      return {
+        type: "video",
+        id: videoId,
+        title,
+        thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+        channelName: lockupChannel(lockup, parts).channelName,
+        isLive: false,
+        isShort: false,
+        isUpcoming: false
+      };
+    }
     if (type === "PLAYLIST" || type === "ALBUM" || type === "PODCAST" || type === "SHOW") {
       const countBadge = overlays.flatMap((o) => o.badges || []).map((b) => b.text).find((t) => t && /\d/.test(t));
       return {
@@ -43924,15 +43976,17 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         title,
         thumbnail: bestThumb(thumbs),
         videoCountText: countBadge,
-        channelName: parts[0]?.[0]?.text
+        channelName: lockupChannel(lockup, parts).channelName
       };
     }
     if (type !== "VIDEO" && type !== "SHORT" && type !== "MOVIE" && type !== "CLIP") return null;
     const channel2 = lockupChannel(lockup, parts);
-    const secondRow = parts[1] || [];
-    const flat = parts.flat().map((p) => p.text).filter(Boolean);
-    const viewCountText = secondRow[0]?.text || flat.find((t) => /view|watching/i.test(t));
-    const publishedText = secondRow[1]?.text || flat.find((t) => /ago|streamed|premiere/i.test(t));
+    const stats = parts.flat().map((p) => p.text).filter((t) => t && t !== channel2.channelName);
+    const { viewCountText, publishedText } = viewsAndAge(stats);
+    const isLive = overlay.isLive || stats.some((t) => /\bwatching\b/i.test(t));
+    const isUpcoming = overlay.isUpcoming || stats.some((t) => UPCOMING_RE.test(t));
+    let thumbnail = bestThumb(thumbs);
+    if (!isLive && !isUpcoming) thumbnail = notLiveThumb(thumbnail, id);
     return {
       type: "video",
       id,
@@ -43940,14 +43994,14 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       channelName: channel2.channelName,
       channelId: channel2.channelId,
       channelAvatar: channel2.channelAvatar,
-      thumbnail: bestThumb(thumbs) || videoThumb(id),
+      thumbnail: thumbnail || videoThumb(id),
       durationText: overlay.durationText,
       durationSeconds: parseDuration(overlay.durationText),
       viewCountText,
       publishedText,
-      isLive: overlay.isLive || flat.some((t) => /watching/i.test(t)),
+      isLive,
       isShort: type === "SHORT" || overlay.isShort,
-      isUpcoming: overlay.isUpcoming,
+      isUpcoming,
       watchedPercent: overlay.watchedPercent
     };
   }
@@ -44007,6 +44061,19 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const id = node.id || node.endpoint?.payload?.playlistId;
     if (!id) return null;
     const thumbs = node.thumbnails?.length ? node.thumbnails : node.thumbnail_renderer?.thumbnail || node.thumbnail_renderer?.thumbnails;
+    if (isMixId(id)) {
+      const videoId = endpointVideoId(node.endpoint);
+      if (!videoId) return null;
+      return {
+        type: "video",
+        id: videoId,
+        title: text(node.title) || "",
+        thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+        isLive: false,
+        isShort: false,
+        isUpcoming: false
+      };
+    }
     return {
       type: "playlist",
       id,
@@ -44157,7 +44224,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         }
         case "GridShelfView": {
           flushGrid();
-          const s = shelfSection(text(node.header?.title) || text(node.header?.text) || "Shorts", node.contents);
+          const s = shelfSection(text(node.header?.headline) || text(node.header?.title) || text(node.header?.text) || "Shorts", node.contents);
           if (s) sections.push(s);
           return;
         }
@@ -44233,12 +44300,28 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   function pageNodes(feed) {
     if (!feed) return [];
     if (feed.contents && Array.isArray(feed.contents.contents)) return feed.contents.contents;
-    const pc = feed.page_contents;
+    let pc;
+    try {
+      pc = feed.page_contents;
+    } catch {
+      pc = void 0;
+    }
+    if (!pc) pc = continuationContents(feed.page);
     if (pc && Array.isArray(pc.contents)) return pc.contents;
     if (pc && pc.content && Array.isArray(pc.content.contents)) return pc.content.contents;
     return [];
   }
   __name(pageNodes, "pageNodes");
+  function continuationContents(parsed) {
+    if (!parsed) return void 0;
+    const commands = [
+      ...parsed.on_response_received_actions || [],
+      ...parsed.on_response_received_endpoints || [],
+      ...parsed.on_response_received_commands || []
+    ];
+    return commands.find((c) => c && Array.isArray(c.contents)) || parsed.continuation_contents || void 0;
+  }
+  __name(continuationContents, "continuationContents");
   function hasMore(feed) {
     try {
       return !!feed.has_continuation;
@@ -44388,8 +44471,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       out.banner = bestThumb(v?.banner?.image, 2560);
       const parts = (v?.metadata?.metadata_rows || []).flatMap((row) => (row.metadata_parts || []).map((p) => text(p.text))).filter(Boolean);
       out.handle = parts.find((p) => p.startsWith("@"));
-      out.subscriberCountText = parts.find((p) => /subscriber/i.test(p));
-      out.videoCountText = parts.find((p) => /video/i.test(p));
+      out.subscriberCountText = parts.find((p) => !p.startsWith("@") && /\bsubscribers?\b/i.test(p));
+      out.videoCountText = parts.find((p) => !p.startsWith("@") && /\bvideos?\b/i.test(p));
       if (!out.description) out.description = text(v?.description?.description);
     } else if (type === "C4TabbedHeader") {
       out.name = out.name || text(h.author?.name);
@@ -44412,7 +44495,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (!id) fail("invalid", "Missing channel id.");
     const ch = await yt.getChannel(id);
     const header = channelHeader(ch, id);
-    const key = register("channel", "channelBase", ch, { channelId: header.id });
+    const key = register("channel", "channelBase", ch, { channelId: header.id, requestedId: id });
     const tabs = [];
     const safe = /* @__PURE__ */ __name((fn) => {
       try {
@@ -44430,7 +44513,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(channel, "channel");
   async function channelTab({ key, id, tab }) {
     let base = key ? state.feeds.get(key) : null;
-    if (!base || base.kind !== "channelBase") {
+    if (!base || base.kind !== "channelBase" || id && base.channelId !== id && base.requestedId !== id) {
       const yt = await requireSession();
       const ch2 = await yt.getChannel(id);
       base = { kind: "channelBase", feed: ch2 };
@@ -44494,18 +44577,16 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const yt = await requireSession();
     requireLogin(yt);
     const feed = await yt.getPlaylists();
-    const key = register("playlists", "feed", feed);
-    let sections = sectionsFromNodes(pageNodes(feed));
-    const lists = sections.flatMap((s) => s.items).filter((i2) => i2.type === "playlist");
-    if (!lists.length) {
-      const fallback = (feed.playlists || []).map(toItem).filter((i2) => i2 && i2.type === "playlist");
-      sections = fallback.length ? [{ id: `pls-${key}`, style: "grid", items: fallback }] : [];
-    } else {
-      sections = [{ id: `pls-${key}`, style: "grid", items: lists }];
-    }
-    return toPage(key, feed, sections);
+    const key = register("playlists", "feed", feed, { playlistsOnly: true });
+    return toPage(key, feed, onlyPlaylists(sectionsFromNodes(pageNodes(feed)), feed, `pls-${key}`));
   }
   __name(playlists, "playlists");
+  function onlyPlaylists(sections, feed, id) {
+    let lists = sections.flatMap((s) => s.items).filter((i2) => i2.type === "playlist");
+    if (!lists.length) lists = (feed.playlists || []).map(toItem).filter((i2) => i2 && i2.type === "playlist");
+    return lists.length ? [{ id, style: "grid", items: lists }] : [];
+  }
+  __name(onlyPlaylists, "onlyPlaylists");
   function mergeGrids(sections) {
     const out = [];
     for (const s of sections) {
@@ -44521,7 +44602,6 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const current = entry.feed;
     if (!hasMore(current)) return page([], void 0);
     const next = await current.getContinuation();
-    entry.feed = next;
     let sections;
     switch (entry.kind) {
       case "search":
@@ -44541,7 +44621,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       default:
         sections = sectionsFromNodes(pageNodes(next));
         if (entry.channelsOnly) sections = onlyChannels(sections, next);
+        if (entry.playlistsOnly) sections = onlyPlaylists(sections, next, `pls-${key}-${Date.now()}`);
     }
+    entry.feed = next;
     return page(sections, hasMore(next) ? key : void 0);
   }
   __name(more, "more");
@@ -44647,7 +44729,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   function upNextOf(info2) {
     const feed = info2.watch_next_feed || [];
     const items = [];
-    const seen = /* @__PURE__ */ new Set();
+    const seen = new Set([info2.basic_info?.id].filter(Boolean));
     for (const node of feed) {
       const item = toItem(node);
       if (item && item.type === "video" && !item.isShort && !item.isLive && !seen.has(item.id)) {
@@ -45127,8 +45209,16 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const yt = await requireSession();
     requireLogin(yt);
     if (!id) fail("invalid", "Missing video id.");
-    if (add) await yt.playlist.addVideos("WL", [id]);
-    else await yt.playlist.removeVideos("WL", [id]);
+    if (add) {
+      await yt.playlist.addVideos("WL", [id]);
+    } else {
+      const result = ensureOk(await yt.actions.execute("/browse/edit_playlist", {
+        playlistId: "WL",
+        actions: [{ action: "ACTION_REMOVE_VIDEO_BY_VIDEO_ID", removedVideoId: id }]
+      }), "Remove from Watch Later");
+      const status = result?.data?.status;
+      if (typeof status === "string" && !/SUCCEEDED/.test(status)) fail("action", "Remove from Watch Later failed.");
+    }
     return { inWatchLater: !!add };
   }
   __name(watchLater, "watchLater");

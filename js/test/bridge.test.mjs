@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { loadBundle } from './harness.mjs';
-import { createFakeYouTube, COOKIE, CH1, CH2, PLAYER_ID } from './fakeyt.mjs';
+import { createFakeYouTube, COOKIE, CH1, CH2, CH3, PLAYER_ID } from './fakeyt.mjs';
 
 const fixturesDir = new URL('../../Packages/Core/Tests/CoreTests/Fixtures/', import.meta.url);
 mkdirSync(fixturesDir, { recursive: true });
@@ -90,6 +90,7 @@ test('video info, deciphering, history and watch-time pings', async () => {
   assert.equal(details.captions.length, 2);
   assert.match(details.captions[0].url, /[?&]fmt=vtt(&|$)/);
   assert.equal(details.captions[1].isAuto, true);
+  // The Mix of this video opens this very video: it is not "up next" and not the autoplay pick.
   assert.deepEqual(details.upNext.map((v) => v.id), ['RELATEDVID1', 'RELATEDVID2']);
   assert.equal(details.autoplayNextId, 'RELATEDVID1');
   assert.equal(details.playerClient, 'TV');
@@ -155,6 +156,123 @@ test('search, suggestions and channel items', async () => {
   assert.equal(channel.isSubscribed, false);
   assert.ok(items.some((i) => i.id === 'SEARCHVID01'));
   assert.ok(results.sections.some((s) => s.style === 'shorts' && s.items[0].id === 'SHORTID0003'));
+
+  // A Mix has no playlist page: it opens its first video.
+  const mix = items.find((i) => i.title === 'Mix – Channel One');
+  assert.equal(mix.type, 'video');
+  assert.equal(mix.id, 'MIXSEEDVID1');
+  assert.ok(!items.some((i) => i.id === 'RDMIXSEEDVID1'));
+  const list = items.find((i) => i.id === 'PLsearchlist01');
+  assert.equal(list.type, 'playlist');
+  assert.equal(list.channelName, 'Channel Two');
+  assert.equal(list.videoCountText, '12 videos');
+  // A scheduled premiere is flagged upcoming and its "UPCOMING" label is not a duration.
+  const premiere = items.find((i) => i.id === 'UPCOMINGV02');
+  assert.equal(premiere.isUpcoming, true);
+  assert.equal(premiere.durationText, undefined);
+  assert.equal(premiere.durationSeconds, undefined);
+  // Grid shelves keep their own headline.
+  const grid = results.sections.find((s) => s.items.some((i) => i.id === 'SHORTID0005'));
+  assert.equal(grid.title, 'Latest Shorts from Channel One');
+  assert.equal(grid.style, 'shorts');
+});
+
+test('Subscriptions, subscribed channels and Library playlists load past the first page', async () => {
+  const { call } = await connected();
+  const subs = await call('subscriptions');
+  assert.deepEqual(subs.sections.flatMap((s) => s.items).map((i) => i.id), ['SUBSVIDEO01', 'STREAMVID01', 'UPCOMINGV01', 'LIVENOWVID1']);
+  assert.ok(subs.continuation);
+  const moreSubs = await call('more', { key: subs.continuation });
+  assert.deepEqual(moreSubs.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText, i.isLive, i.isUpcoming]),
+    [['SUBSVIDEO02', 'Channel One', '7K views', false, false], ['SUBSVIDEO03', 'Bird Watching', '300 views', false, false]]);
+  assert.equal(moreSubs.continuation, undefined);
+
+  const channels = await call('subscribedChannels');
+  assert.ok(channels.continuation);
+  const moreChannels = await call('more', { key: channels.continuation });
+  assert.deepEqual(moreChannels.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.name]), [['channel', CH3, 'Channel Three']]);
+  assert.equal(moreChannels.continuation, undefined);
+
+  const lists = await call('playlists');
+  // "Private" is a label, not the playlist's channel.
+  assert.deepEqual(lists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName, i.videoCountText]),
+    [['playlist', 'PLmine000001', undefined, '3 videos'], ['playlist', 'PLother00001', 'Channel Two', '40 videos']]);
+  assert.ok(lists.continuation);
+  const moreLists = await call('more', { key: lists.continuation });
+  // Later pages keep only playlists too (the saved Mix is left out).
+  assert.deepEqual(moreLists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName]), [['playlist', 'PLmine000002', undefined]]);
+  assert.equal(moreLists.continuation, undefined);
+});
+
+test('lockups: ended streams lose the live thumbnail, upcoming and live ones are flagged', async () => {
+  const { call } = await connected();
+  const subs = await call('subscriptions');
+  const byId = Object.fromEntries(subs.sections.flatMap((s) => s.items).map((i) => [i.id, i]));
+  const video = byId.SUBSVIDEO01;
+  assert.equal(video.channelName, 'Channel Two');
+  assert.equal(video.channelId, CH2);
+  assert.equal(video.viewCountText, '5K views');
+  assert.equal(video.publishedText, '1 hour ago');
+
+  const ended = byId.STREAMVID01;
+  assert.equal(ended.isLive, false);
+  assert.equal(ended.thumbnail, 'https://i.ytimg.com/vi/STREAMVID01/hqdefault.jpg');
+  assert.equal(ended.publishedText, 'Streamed 13 hours ago');
+  assert.equal(ended.durationText, '2:01:15');
+
+  const upcoming = byId.UPCOMINGV01;
+  assert.equal(upcoming.isUpcoming, true);
+  assert.equal(upcoming.durationText, undefined);
+  assert.equal(upcoming.publishedText, 'Scheduled for 10/1/26, 8:00 PM');
+
+  const live = byId.LIVENOWVID1;
+  assert.equal(live.isLive, true);
+  assert.equal(live.viewCountText, '1.2K watching');
+  assert.equal(live.thumbnail, 'https://i.ytimg.com/vi/LIVENOWVID1/hq720_live.jpg');
+});
+
+test('channel header counts, author-less channel tab lockups and a key from another launch', async () => {
+  const { call, yt } = await connected();
+  const one = await call('channel', { id: CH1 });
+  // The handle contains "video"; the video count is the "321 videos" part.
+  assert.equal(one.channel.handle, '@videogamefan');
+  assert.equal(one.channel.subscriberCountText, '1.5M subscribers');
+  assert.equal(one.channel.videoCountText, '321 videos');
+  assert.deepEqual(one.tabs, ['videos']);
+
+  const videos = await call('channelTab', { key: one.key, id: CH1, tab: 'videos' });
+  assert.deepEqual(videos.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText, i.publishedText]),
+    [['ONEVIDEO01', undefined, '1.2M views', '3 days ago'], ['ONEVIDEO02', undefined, '900 views', '2 years ago']]);
+
+  // Keys restart with every JavaScript context, so a saved key can name another channel's entry.
+  const other = await call('channelTab', { key: one.key, id: CH2, tab: 'videos' });
+  assert.deepEqual(other.sections.flatMap((s) => s.items).map((i) => i.id), ['TWOVIDEO01', 'TWOVIDEO02']);
+  assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/browse' && h.body?.browseId === CH2));
+});
+
+test('Watch Later rows show views and age; removing a video is one request', async () => {
+  const { call, yt } = await connected();
+  const wl = await call('playlist', { id: 'WL' });
+  const row = wl.page.sections[0].items[0];
+  assert.equal(row.id, 'VIDEOID0001');
+  assert.equal(row.channelName, 'Channel One');
+  assert.equal(row.durationText, '4:20');
+  assert.equal(row.viewCountText, '1.2M views');
+  assert.equal(row.publishedText, '3 years ago');
+  assert.equal(row.setVideoId, 'SETVIDEOID0001');
+
+  const before = yt.hits.length;
+  assert.deepEqual(await call('watchLater', { id: 'VIDEOID0002', add: false }), { inWatchLater: false });
+  const hits = yt.hits.slice(before).filter((h) => h.path.startsWith('/youtubei/v1/browse'));
+  assert.deepEqual(hits.map((h) => h.path), ['/youtubei/v1/browse/edit_playlist'], 'no paging through the list');
+  assert.equal(hits[0].body.playlistId, 'WL');
+  assert.deepEqual(hits[0].body.actions, [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: 'VIDEOID0002' }]);
+
+  // A 200 answer whose status is not STATUS_SUCCEEDED is a failure, not a silent success.
+  const failing = createFakeYouTube({ editPlaylist: 'failed' });
+  const bundle = loadBundle({ router: failing.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  await assert.rejects(bundle.call('watchLater', { id: 'VIDEOID0002', add: false }), (e) => e.kind === 'action' && /Remove from Watch Later failed/.test(e.message));
 });
 
 test('Shorts feed seeds from Home and resolves a short', async () => {

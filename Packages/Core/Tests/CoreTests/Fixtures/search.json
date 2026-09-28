@@ -48,6 +48,60 @@
           "isUpcoming": false
         }
       ]
+    },
+    {
+      "id": "s3",
+      "style": "grid",
+      "items": [
+        {
+          "type": "video",
+          "id": "UPCOMINGV02",
+          "title": "Scheduled premiere",
+          "channelName": "Channel One",
+          "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+          "channelAvatar": "https://yt3.ggpht.com/avatar-one",
+          "thumbnail": "https://i.ytimg.com/vi/UPCOMINGV02/hq720.jpg",
+          "viewCountText": "12K views",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": true
+        },
+        {
+          "type": "video",
+          "id": "MIXSEEDVID1",
+          "title": "Mix – Channel One",
+          "thumbnail": "https://i.ytimg.com/vi/MIXSEEDVID1/hqdefault.jpg",
+          "channelName": "Channel One, Channel Two and more",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false
+        },
+        {
+          "type": "playlist",
+          "id": "PLsearchlist01",
+          "title": "Search playlist",
+          "thumbnail": "https://i.ytimg.com/vi/VIDEOID0001/hqdefault.jpg",
+          "videoCountText": "12 videos",
+          "channelName": "Channel Two"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "title": "Latest Shorts from Channel One",
+      "style": "shorts",
+      "items": [
+        {
+          "type": "video",
+          "id": "SHORTID0005",
+          "title": "Grid short",
+          "thumbnail": "https://i.ytimg.com/vi/SHORTID0005/oar2.jpg",
+          "viewCountText": "1.2M views",
+          "isLive": false,
+          "isShort": true,
+          "isUpcoming": false
+        }
+      ]
     }
   ]
 }
