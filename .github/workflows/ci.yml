@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Core unit tests (Swift on Linux)
+        working-directory: Packages/Core
+        run: |
+          swift --version
+          swift test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: js/package-lock.json
+
+      - name: Build JS bundle and run Node smoke test
+        working-directory: js
+        run: |
+          npm ci
+          npm run bundle
+          npm test
+
+      - name: Committed bundle matches the build
+        run: |
+          if ! git diff --quiet -- App/Resources/js/youtubei.bundle.js; then
+            echo "::error::App/Resources/js/youtubei.bundle.js is stale. Run 'npm run bundle' in js/ and commit the result."
+            git diff --stat -- App/Resources/js/youtubei.bundle.js
+            exit 1
+          fi
+
+  build:
+    name: build
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      XCODE_APP: /Applications/Xcode_26.6.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select pinned Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i tvos
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+
+      - name: Build (Release, tvOS device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release -sdk appletvos -destination 'generic/platform=tvOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= -derivedDataPath build build 2>&1 | tee xcodebuild.log | xcbeautify --renderer github-actions
+
+      - name: Show compiler errors
+        if: failure()
+        run: |
+          grep -E "error:|fatal error|Undefined symbol|ld: " xcodebuild.log | sort -u | head -200 || true
+
+      - name: Package unsigned IPA
+        run: |
+          APP=build/Build/Products/Release-appletvos/App.app
+          test -d "$APP"
+          rm -rf Payload App-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry App-unsigned.ipa Payload
+          ls -lh App-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: App-unsigned-ipa
+          path: App-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Attach IPA to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: App-unsigned.ipa
+          fail_on_unmatched_files: true

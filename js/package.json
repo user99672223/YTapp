@@ -1,0 +1,18 @@
+{
+  "name": "tube-js-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "YouTube.js bundled for JavaScriptCore inside the Tube tvOS app",
+  "scripts": {
+    "bundle": "node build.mjs",
+    "test": "node --test --test-reporter=spec test/smoke.test.mjs"
+  },
+  "dependencies": {
+    "bgutils-js": "4.0.3",
+    "youtubei.js": "18.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
