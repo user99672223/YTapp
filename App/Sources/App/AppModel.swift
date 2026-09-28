@@ -112,7 +112,7 @@ final class AppModel: ObservableObject {
         if showProgress { phase = .connecting("Connecting to YouTube…") }
         do {
             let options = SessionOptions(
-                cookie: cookies.header,
+                cookie: cookies.sessionHeader(),
                 client: settings.streamClient,
                 visitorData: settings.visitorData.isEmpty ? nil : settings.visitorData,
                 poTokenMode: settings.poTokenMode

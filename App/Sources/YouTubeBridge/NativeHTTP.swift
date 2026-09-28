@@ -125,6 +125,9 @@ final class CookieStore: @unchecked Sendable {
     /// Every header this session has had since it was stored. A YouTube.js session keeps sending
     /// the header it was created with, so all of them are recognised and upgraded.
     private var known: Set<String> = []
+    /// Headers YouTube.js sessions were created with (`sessionHeader()`), newest last. They are
+    /// never dropped from `known` by its cap, since a session sends its header for as long as it lives.
+    private var sessionHeaders: [String] = []
     private var jar = CookieJar(header: "")
     private var saveWork: DispatchWorkItem?
     private var generation = 0
@@ -146,12 +149,28 @@ final class CookieStore: @unchecked Sendable {
 
     var hasCookies: Bool { !header.isEmpty }
 
+    /// The header to create a YouTube.js session with. That session sends exactly this header
+    /// on every request, so it stays recognised (and upgraded) however often cookies rotate.
+    func sessionHeader() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let header = jar.header
+        guard !header.isEmpty else { return header }
+        known.insert(header)
+        sessionHeaders.removeAll { $0 == header }
+        sessionHeaders.append(header)
+        // Only the latest session is used; a few more cover sessions created concurrently.
+        if sessionHeaders.count > 8 { sessionHeaders.removeFirst(sessionHeaders.count - 8) }
+        return header
+    }
+
     /// Replaces the stored session (after setup or re-entry). Returns false when the Keychain
     /// didn't take it: the sign-in then only lasts until the app quits.
     @discardableResult
     func replace(with header: String) -> Bool {
         lock.lock()
         known = header.isEmpty ? [] : [header]
+        sessionHeaders = []
         jar = CookieJar(header: header)
         generation += 1
         saveWork?.cancel()
@@ -163,6 +182,7 @@ final class CookieStore: @unchecked Sendable {
     func clear() {
         lock.lock()
         known = []
+        sessionHeaders = []
         jar = CookieJar(header: "")
         generation += 1
         saveWork?.cancel()
@@ -200,7 +220,12 @@ final class CookieStore: @unchecked Sendable {
         let header = jar.header
         if changed {
             // Rotations are rare (minutes apart); the cap only guards very long-running sessions.
-            if known.count > 512 { known = [before] }
+            // The headers live sessions send are kept, or their requests would go out stale.
+            if known.count > 512 {
+                var kept = Set(sessionHeaders)
+                kept.insert(before)
+                known = kept
+            }
             known.insert(header)
         }
         lock.unlock()
