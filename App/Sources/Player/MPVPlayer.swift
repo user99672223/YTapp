@@ -59,6 +59,8 @@ final class MPVPlayer: @unchecked Sendable {
     var onEndOfFile: (@MainActor () -> Void)?
     var onError: (@MainActor (String) -> Void)?
     var onTick: (@MainActor (Double, Bool) -> Void)?
+    /// Paused or resumed (time-pos doesn't change while paused, so `onTick` never says so).
+    var onPauseChanged: (@MainActor (Bool) -> Void)?
     /// Called on the mpv queue; mpv's own levels are mapped (fatal/error → error, warn → warn).
     var logSink: ((LogBuffer.Level, String) -> Void)?
 
@@ -436,10 +438,14 @@ final class MPVPlayer: @unchecked Sendable {
         case "pause":
             let value = flag() ?? true
             paused = value
+            let generation = loadGeneration
             DispatchQueue.main.async { [self] in
                 state.isPaused = value
                 guard !destroyedOnMain else { return }
-                MainActor.assumeIsolated { IdleTimer.set(self, playing: !value) }
+                MainActor.assumeIsolated {
+                    IdleTimer.set(self, playing: !value)
+                    if generation == generationOnMain { onPauseChanged?(value) }
+                }
             }
         case "paused-for-cache":
             let value = flag() ?? false

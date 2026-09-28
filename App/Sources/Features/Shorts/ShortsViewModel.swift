@@ -40,6 +40,10 @@ final class ShortsViewModel: ObservableObject {
         let logs = model.logs
         player.logSink = { level, line in logs.append(level, line) }
         player.onTick = { [weak self] position, playing in self?.tick(position: position, playing: playing) }
+        player.onPauseChanged = { [weak self] paused in
+            guard let self else { return }
+            self.reporter?.setPlaying(!paused, position: self.player.state.position)
+        }
         player.onError = { [weak self] message in
             guard let self, !self.closed else { return }
             self.phase = .failed(BridgeError(kind: .network, message: message))

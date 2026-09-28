@@ -58,6 +58,7 @@ final class WatchViewModel: ObservableObject {
         player.onEndOfFile = { [weak self] in self?.endOfFile() }
         player.onError = { [weak self] message in self?.playerFailed(message) }
         player.onTick = { [weak self] position, playing in self?.tick(position: position, playing: playing) }
+        player.onPauseChanged = { [weak self] paused in self?.pauseChanged(paused) }
     }
 
     var nextVideo: VideoItem? {
@@ -248,6 +249,11 @@ final class WatchViewModel: ObservableObject {
         PlaybackDiagnostics.shared.update(videoId: playingDetails.id, title: playingDetails.title, client: playingDetails.playerClient,
                                           selection: selection, state: player.state,
                                           refreshRate: appliedRefreshRate, history: historyStatus)
+    }
+
+    private func pauseChanged(_ paused: Bool) {
+        guard playingDetails != nil else { return }
+        reporter?.setPlaying(!paused, position: player.state.position)
     }
 
     private func saveResume(_ position: Double) {
