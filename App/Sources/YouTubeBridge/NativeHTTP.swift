@@ -130,8 +130,13 @@ final class CookieStore: @unchecked Sendable {
     private var sessionHeaders: [String] = []
     private var jar = CookieJar(header: "")
     private var saveWork: DispatchWorkItem?
+    /// A rotated header of the current generation not yet written to the Keychain.
+    private var pendingSave: String?
     private var generation = 0
     private let keychain: KeychainStore
+    /// Serialises Keychain writes, so a delayed rotation can't overwrite a newer `replace`/`clear`.
+    /// Always taken before `lock`, never while holding it.
+    private let saveLock = NSLock()
 
     init(keychain: KeychainStore) {
         self.keychain = keychain
@@ -168,11 +173,14 @@ final class CookieStore: @unchecked Sendable {
     /// didn't take it: the sign-in then only lasts until the app quits.
     @discardableResult
     func replace(with header: String) -> Bool {
+        saveLock.lock()
+        defer { saveLock.unlock() }
         lock.lock()
         known = header.isEmpty ? [] : [header]
         sessionHeaders = []
         jar = CookieJar(header: header)
         generation += 1
+        pendingSave = nil
         saveWork?.cancel()
         saveWork = nil
         lock.unlock()
@@ -180,15 +188,32 @@ final class CookieStore: @unchecked Sendable {
     }
 
     func clear() {
+        saveLock.lock()
+        defer { saveLock.unlock() }
         lock.lock()
         known = []
         sessionHeaders = []
         jar = CookieJar(header: "")
         generation += 1
+        pendingSave = nil
         saveWork?.cancel()
         saveWork = nil
         lock.unlock()
         keychain.deleteCookie()
+    }
+
+    /// Writes a pending rotation to the Keychain now instead of after the debounce. Called when
+    /// the app leaves the foreground: tvOS may terminate it there before the timer fires.
+    func flush() {
+        saveLock.lock()
+        defer { saveLock.unlock() }
+        lock.lock()
+        let header = pendingSave
+        pendingSave = nil
+        saveWork?.cancel()
+        saveWork = nil
+        lock.unlock()
+        if let header { keychain.saveCookie(header) }
     }
 
     /// If `requestCookie` is a header of the stored session, send the freshest version instead
@@ -227,22 +252,18 @@ final class CookieStore: @unchecked Sendable {
                 known = kept
             }
             known.insert(header)
+            pendingSave = header
         }
         lock.unlock()
         guard changed else { return }
-        scheduleSave(header, generation: generation)
+        scheduleSave()
     }
 
-    private func scheduleSave(_ header: String, generation: Int) {
+    /// Writes `pendingSave` 5 s after the last rotation (they come in bursts).
+    private func scheduleSave() {
+        let work = DispatchWorkItem { [weak self] in self?.flush() }
         lock.lock()
         saveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let current = self.generation == generation
-            self.lock.unlock()
-            if current { self.keychain.saveCookie(header) }
-        }
         saveWork = work
         lock.unlock()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5, execute: work)
