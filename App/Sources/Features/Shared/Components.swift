@@ -22,7 +22,9 @@ enum Layout {
     }
 }
 
-/// Measures the width of the view it is attached to (minus the list's side padding) into `width`.
+/// Measures the width of the view it is attached to into `width`. Attach it to the list's content
+/// (full width, inside the side padding): a scroll view's own frame can reach under tvOS's
+/// safe-area margins, so measuring that would be too wide on some screens.
 struct ContentWidthReader: View {
     @Binding var width: CGFloat
 
@@ -34,9 +36,8 @@ struct ContentWidthReader: View {
         }
     }
 
-    private func update(_ outer: CGFloat) {
-        let inner = outer - 2 * Layout.horizontalPadding
-        if inner > 0, abs(inner - width) > 0.5 { width = inner }
+    private func update(_ measured: CGFloat) {
+        if measured > 0, abs(measured - width) > 0.5 { width = measured }
     }
 }
 

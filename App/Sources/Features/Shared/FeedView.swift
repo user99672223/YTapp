@@ -255,10 +255,11 @@ struct FeedView<Header: View>: View {
                     LoadingView().frame(height: 500)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ContentWidthReader(width: $contentWidth))
             .padding(.horizontal, Layout.horizontalPadding)
             .padding(.vertical, 40)
         }
-        .background(ContentWidthReader(width: $contentWidth))
         .overlay(alignment: .top) { ToastOverlay() }
         // Keyed on the model: when the view is handed a different FeedModel (another channel
         // tab, a new search) it loads that one instead of leaving it on an endless spinner.

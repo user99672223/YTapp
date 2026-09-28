@@ -44,10 +44,11 @@ struct ShortsTabView: View {
                         .frame(height: 500)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ContentWidthReader(width: $contentWidth))
             .padding(.horizontal, Layout.horizontalPadding)
             .padding(.vertical, 40)
         }
-        .background(ContentWidthReader(width: $contentWidth))
         .task { await home.loadIfNeeded(model) }
     }
 }
