@@ -200,15 +200,19 @@ final class AppModel: ObservableObject {
         guard let service else {
             throw BridgeError(kind: .noSession, message: "Not connected to YouTube yet.")
         }
+        let epoch = sessionEpoch
         do {
             let value = try await operation(service)
             authFailures = 0
             return value
         } catch let error as BridgeError where error.kind == .noSession {
+            // Signed out or new cookies meanwhile: nothing to recover for the previous sign-in.
+            guard epoch == sessionEpoch else { throw error }
             await recreateSession()
             guard let fresh = self.service else { throw error }
             return try await operation(fresh)
         } catch let error as BridgeError where error.isAuthFailure {
+            guard epoch == sessionEpoch else { throw error }
             authFailures += 1
             guard authFailures >= 2 else { throw error }
             authFailures = 0
@@ -217,7 +221,10 @@ final class AppModel: ObservableObject {
             do {
                 return try await operation(fresh)
             } catch let retry as BridgeError where retry.isAuthFailure {
-                authProblem = "YouTube keeps rejecting your sign-in. Go to Settings → Re-enter cookies."
+                // Rejections of a previous sign-in's cookies say nothing about the current one.
+                if epoch == sessionEpoch {
+                    authProblem = "YouTube keeps rejecting your sign-in. Go to Settings → Re-enter cookies."
+                }
                 throw retry
             }
         }
