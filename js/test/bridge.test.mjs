@@ -197,6 +197,27 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
   assert.equal(moreLists.continuation, undefined);
 });
 
+test('lockups: upcoming and live ones are flagged', async () => {
+  const { call } = await connected();
+  const subs = await call('subscriptions');
+  const byId = Object.fromEntries(subs.sections.flatMap((s) => s.items).map((i) => [i.id, i]));
+  const video = byId.SUBSVIDEO01;
+  assert.equal(video.channelName, 'Channel Two');
+  assert.equal(video.channelId, CH2);
+  assert.equal(video.viewCountText, '5K views');
+  assert.equal(video.publishedText, '1 hour ago');
+
+  const upcoming = byId.UPCOMINGV01;
+  assert.equal(upcoming.isUpcoming, true);
+  assert.equal(upcoming.durationText, undefined);
+  assert.equal(upcoming.publishedText, 'Scheduled for 10/1/26, 8:00 PM');
+
+  const live = byId.LIVENOWVID1;
+  assert.equal(live.isLive, true);
+  assert.equal(live.viewCountText, '1.2K watching');
+  assert.equal(live.thumbnail, 'https://i.ytimg.com/vi/LIVENOWVID1/hq720_live.jpg');
+});
+
 test('channel header counts, author-less channel tab lockups and a key from another launch', async () => {
   const { call, yt } = await connected();
   const one = await call('channel', { id: CH1 });

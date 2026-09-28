@@ -43775,6 +43775,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   var VIEWS_RE = /\bviews?\b|watching|waiting/i;
   var AGE_RE = /\bago\b|^streamed\b|^premiere|^scheduled\b/i;
   var NOT_CHANNEL_RE = /^[\d.,]+\s*[KMB]?\s*(views?|watching|waiting|videos?|episodes?)\b|^no views$|\bago$|^(streamed|scheduled|premieres?|premiered|updated)\b|^view full playlist$|^(private|public|unlisted|playlist|mix|album|podcast)$/i;
+  var UPCOMING_RE = /^(scheduled for|premieres)\b|\bwaiting$/i;
   function viewsAndAge(texts) {
     const viewCountText = texts.find((t) => VIEWS_RE.test(t));
     const publishedText = texts.find((t) => t !== viewCountText && AGE_RE.test(t));
@@ -43795,7 +43796,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       if (isDurationText(t)) info2.durationText = t;
       if (s.includes("LIVE") || t.toUpperCase() === "LIVE") info2.isLive = true;
       if (s.includes("SHORTS")) info2.isShort = true;
-      if (s.includes("UPCOMING")) info2.isUpcoming = true;
+      if (s.includes("UPCOMING") || t.toUpperCase() === "UPCOMING") info2.isUpcoming = true;
     }, "visitBadge");
     for (const o of list) {
       const type = nodeType(o);
@@ -43942,6 +43943,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const channel2 = lockupChannel(lockup, parts);
     const flat = parts.flat().map((p) => p.text).filter(Boolean);
     const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel2.channelName));
+    const isLive = overlay.isLive || flat.some((t) => /watching/i.test(t));
+    const isUpcoming = overlay.isUpcoming || flat.some((t) => UPCOMING_RE.test(t));
     return {
       type: "video",
       id,
@@ -43954,9 +43957,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       durationSeconds: parseDuration(overlay.durationText),
       viewCountText,
       publishedText,
-      isLive: overlay.isLive || flat.some((t) => /watching/i.test(t)),
+      isLive,
       isShort: type === "SHORT" || overlay.isShort,
-      isUpcoming: overlay.isUpcoming,
+      isUpcoming,
       watchedPercent: overlay.watchedPercent
     };
   }

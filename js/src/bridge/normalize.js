@@ -16,6 +16,7 @@ const VIEWS_RE = /\bviews?\b|watching|waiting/i;
 const AGE_RE = /\bago\b|^streamed\b|^premiere|^scheduled\b/i;
 // Lockup metadata texts that are stats, dates or labels, never a channel name.
 const NOT_CHANNEL_RE = /^[\d.,]+\s*[KMB]?\s*(views?|watching|waiting|videos?|episodes?)\b|^no views$|\bago$|^(streamed|scheduled|premieres?|premiered|updated)\b|^view full playlist$|^(private|public|unlisted|playlist|mix|album|podcast)$/i;
+const UPCOMING_RE = /^(scheduled for|premieres)\b|\bwaiting$/i;
 
 // Picks the view count and the age out of a video's metadata texts. English wording is matched;
 // in other UI languages the texts are taken in YouTube's "<views> • <age>" order.
@@ -41,7 +42,8 @@ function overlaysInfo(overlays) {
     if (isDurationText(t)) info.durationText = t;
     if (s.includes('LIVE') || t.toUpperCase() === 'LIVE') info.isLive = true;
     if (s.includes('SHORTS')) info.isShort = true;
-    if (s.includes('UPCOMING')) info.isUpcoming = true;
+    // Legacy overlays mark upcoming videos by style; lockup badges only say so in their text.
+    if (s.includes('UPCOMING') || t.toUpperCase() === 'UPCOMING') info.isUpcoming = true;
   };
   for (const o of list) {
     const type = nodeType(o);
@@ -186,6 +188,8 @@ function fromLockup(lockup) {
   const channel = lockupChannel(lockup, parts);
   const flat = parts.flat().map((p) => p.text).filter(Boolean);
   const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel.channelName));
+  const isLive = overlay.isLive || flat.some((t) => /watching/i.test(t));
+  const isUpcoming = overlay.isUpcoming || flat.some((t) => UPCOMING_RE.test(t));
   return {
     type: 'video',
     id,
@@ -198,9 +202,9 @@ function fromLockup(lockup) {
     durationSeconds: parseDuration(overlay.durationText),
     viewCountText,
     publishedText,
-    isLive: overlay.isLive || flat.some((t) => /watching/i.test(t)),
+    isLive,
     isShort: type === 'SHORT' || overlay.isShort,
-    isUpcoming: overlay.isUpcoming,
+    isUpcoming,
     watchedPercent: overlay.watchedPercent
   };
 }
