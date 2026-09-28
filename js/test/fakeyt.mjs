@@ -500,6 +500,35 @@ function playlistsBrowse() {
   });
 }
 
+// Watch later: playlistVideoRenderer rows carry views and age in one "videoInfo" line.
+function watchLaterBrowse() {
+  const row = (id, title, index) => ({
+    playlistVideoRenderer: {
+      videoId: id,
+      thumbnail: thumbs(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`, 480, 360),
+      title: { runs: [{ text: title }], accessibility: { accessibilityData: { label: `${title} by Channel One 4 minutes` } } },
+      index: simple(String(index)),
+      shortBylineText: runs('Channel One', CH1),
+      lengthText: simple('4:20'),
+      lengthSeconds: '260',
+      navigationEndpoint: { watchEndpoint: { videoId: id, playlistId: 'WL', index: index - 1 } },
+      setVideoId: `SET${id}`,
+      isPlayable: true,
+      videoInfo: { runs: [{ text: '1.2M views' }, { text: ' • ' }, { text: '3 years ago' }] },
+      thumbnailOverlays: [{ thumbnailOverlayTimeStatusRenderer: { text: simple('4:20'), style: 'DEFAULT' } }]
+    }
+  });
+  return browseTab({
+    sectionListRenderer: {
+      contents: [{
+        itemSectionRenderer: {
+          contents: [{ playlistVideoListRenderer: { playlistId: 'WL', isEditable: true, canReorder: true, contents: [row('VIDEOID0001', 'First video', 1)] } }]
+        }
+      }]
+    }
+  });
+}
+
 // A channel page. Without params it is the Home tab; params 'VIDEOS' selects the Videos tab,
 // whose lockups have a single "views • date" metadata row and no author.
 function channelBrowse(id, params) {
@@ -648,6 +677,7 @@ export function createFakeYouTube(options = {}) {
       }
       if (body?.browseId === 'FEsubscriptions') return { status: 200, body: subscriptionsBrowse() };
       if (body?.browseId === 'FEplaylist_aggregation') return { status: 200, body: playlistsBrowse() };
+      if (body?.browseId === 'VLWL') return { status: 200, body: watchLaterBrowse() };
       if (body?.browseId === CH1 || body?.browseId === CH2) return { status: 200, body: channelBrowse(body.browseId, body.params) };
       return { status: 404, body: { error: 'unknown browse' } };
     }

@@ -211,8 +211,17 @@ test('channel header counts, author-less channel tab lockups and a key from anot
   assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/browse' && h.body?.browseId === CH2));
 });
 
-test('removing a video from Watch Later is one request', async () => {
+test('Watch Later rows show views and age; removing a video is one request', async () => {
   const { call, yt } = await connected();
+  const wl = await call('playlist', { id: 'WL' });
+  const row = wl.page.sections[0].items[0];
+  assert.equal(row.id, 'VIDEOID0001');
+  assert.equal(row.channelName, 'Channel One');
+  assert.equal(row.durationText, '4:20');
+  assert.equal(row.viewCountText, '1.2M views');
+  assert.equal(row.publishedText, '3 years ago');
+  assert.equal(row.setVideoId, 'SETVIDEOID0001');
+
   const before = yt.hits.length;
   assert.deepEqual(await call('watchLater', { id: 'VIDEOID0002', add: false }), { inWatchLater: false });
   const hits = yt.hits.slice(before).filter((h) => h.path.startsWith('/youtubei/v1/browse'));

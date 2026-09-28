@@ -80,6 +80,15 @@ function videoFromLegacy(node) {
   let channelName = author.channelName;
   if (!channelName) channelName = text(node.short_byline_text) || text(node.long_byline_text);
   if (!channelName && typeof node.author === 'string') channelName = node.author;
+  let viewCountText = text(node.short_view_count) || text(node.view_count) || text(node.views);
+  let publishedText = text(node.published);
+  // Playlist rows (Watch Later, Liked, playlist pages) carry both in one "<views> • <age>" line.
+  const info = (text(node.video_info) || '').split(/\s*•\s*/).filter(Boolean);
+  if (info.length && (!viewCountText || !publishedText)) {
+    const parsed = viewsAndAge(info);
+    if (!viewCountText) viewCountText = parsed.viewCountText;
+    if (!publishedText) publishedText = parsed.publishedText;
+  }
   return {
     type: 'video',
     id,
@@ -90,8 +99,8 @@ function videoFromLegacy(node) {
     thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
     durationText,
     durationSeconds: node.duration?.seconds || parseDuration(durationText),
-    viewCountText: text(node.short_view_count) || text(node.view_count) || text(node.views),
-    publishedText: text(node.published),
+    viewCountText,
+    publishedText,
     isLive,
     isShort: overlay.isShort,
     isUpcoming: upcoming,

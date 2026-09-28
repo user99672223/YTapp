@@ -43834,6 +43834,14 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     let channelName = author.channelName;
     if (!channelName) channelName = text(node.short_byline_text) || text(node.long_byline_text);
     if (!channelName && typeof node.author === "string") channelName = node.author;
+    let viewCountText = text(node.short_view_count) || text(node.view_count) || text(node.views);
+    let publishedText = text(node.published);
+    const info2 = (text(node.video_info) || "").split(/\s*•\s*/).filter(Boolean);
+    if (info2.length && (!viewCountText || !publishedText)) {
+      const parsed = viewsAndAge(info2);
+      if (!viewCountText) viewCountText = parsed.viewCountText;
+      if (!publishedText) publishedText = parsed.publishedText;
+    }
     return {
       type: "video",
       id,
@@ -43844,8 +43852,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
       durationText,
       durationSeconds: node.duration?.seconds || parseDuration(durationText),
-      viewCountText: text(node.short_view_count) || text(node.view_count) || text(node.views),
-      publishedText: text(node.published),
+      viewCountText,
+      publishedText,
       isLive,
       isShort: overlay.isShort,
       isUpcoming: upcoming,
