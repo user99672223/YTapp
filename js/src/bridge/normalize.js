@@ -2,7 +2,7 @@
 // (Packages/Core/Sources/Core/Models). Every accessor is defensive: YouTube changes its
 // renderers often, so unknown shapes degrade to "skip this item" instead of throwing.
 import {
-  text, bestThumb, videoThumb, parseDuration, isDurationText, endpointBrowseId, endpointVideoId,
+  text, bestThumb, videoThumb, notLiveThumb, parseDuration, isDurationText, endpointBrowseId, endpointVideoId,
   isChannelId, nodeType, fixUrl
 } from './util.js';
 
@@ -93,6 +93,8 @@ function videoFromLegacy(node) {
     if (!viewCountText) viewCountText = parsed.viewCountText;
     if (!publishedText) publishedText = parsed.publishedText;
   }
+  let thumbnail = bestThumb(node.thumbnails || node.thumbnail);
+  if (!isLive && !upcoming) thumbnail = notLiveThumb(thumbnail, id);
   return {
     type: 'video',
     id,
@@ -100,7 +102,7 @@ function videoFromLegacy(node) {
     channelName,
     channelId: author.channelId,
     channelAvatar: author.channelAvatar,
-    thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
+    thumbnail: thumbnail || videoThumb(id),
     durationText,
     durationSeconds: node.duration?.seconds || parseDuration(durationText),
     viewCountText,
@@ -190,6 +192,8 @@ function fromLockup(lockup) {
   const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel.channelName));
   const isLive = overlay.isLive || flat.some((t) => /watching/i.test(t));
   const isUpcoming = overlay.isUpcoming || flat.some((t) => UPCOMING_RE.test(t));
+  let thumbnail = bestThumb(thumbs);
+  if (!isLive && !isUpcoming) thumbnail = notLiveThumb(thumbnail, id);
   return {
     type: 'video',
     id,
@@ -197,7 +201,7 @@ function fromLockup(lockup) {
     channelName: channel.channelName,
     channelId: channel.channelId,
     channelAvatar: channel.channelAvatar,
-    thumbnail: bestThumb(thumbs) || videoThumb(id),
+    thumbnail: thumbnail || videoThumb(id),
     durationText: overlay.durationText,
     durationSeconds: parseDuration(overlay.durationText),
     viewCountText,

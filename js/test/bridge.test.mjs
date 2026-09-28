@@ -201,7 +201,7 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
   assert.equal(moreLists.continuation, undefined);
 });
 
-test('lockups: upcoming and live ones are flagged', async () => {
+test('lockups: ended streams lose the live thumbnail, upcoming and live ones are flagged', async () => {
   const { call } = await connected();
   const subs = await call('subscriptions');
   const byId = Object.fromEntries(subs.sections.flatMap((s) => s.items).map((i) => [i.id, i]));
@@ -210,6 +210,12 @@ test('lockups: upcoming and live ones are flagged', async () => {
   assert.equal(video.channelId, CH2);
   assert.equal(video.viewCountText, '5K views');
   assert.equal(video.publishedText, '1 hour ago');
+
+  const ended = byId.STREAMVID01;
+  assert.equal(ended.isLive, false);
+  assert.equal(ended.thumbnail, 'https://i.ytimg.com/vi/STREAMVID01/hqdefault.jpg');
+  assert.equal(ended.publishedText, 'Streamed 13 hours ago');
+  assert.equal(ended.durationText, '2:01:15');
 
   const upcoming = byId.UPCOMINGV01;
   assert.equal(upcoming.isUpcoming, true);

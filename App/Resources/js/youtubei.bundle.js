@@ -42485,6 +42485,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : void 0;
   }
   __name(videoThumb, "videoThumb");
+  function notLiveThumb(url, id) {
+    if (typeof url === "string" && id && /\/vi(?:_webp)?\/[\w-]+\/[\w-]+_live\.(?:jpg|webp)(?:[?#]|$)/.test(url)) {
+      return videoThumb(id);
+    }
+    return url;
+  }
+  __name(notLiveThumb, "notLiveThumb");
   function parseDuration(str) {
     if (!str || typeof str !== "string") return void 0;
     const m = str.trim().match(/^(\d+)(?::(\d{1,2}))?(?::(\d{1,2}))?$/);
@@ -43844,6 +43851,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       if (!viewCountText) viewCountText = parsed.viewCountText;
       if (!publishedText) publishedText = parsed.publishedText;
     }
+    let thumbnail = bestThumb(node.thumbnails || node.thumbnail);
+    if (!isLive && !upcoming) thumbnail = notLiveThumb(thumbnail, id);
     return {
       type: "video",
       id,
@@ -43851,7 +43860,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       channelName,
       channelId: author.channelId,
       channelAvatar: author.channelAvatar,
-      thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
+      thumbnail: thumbnail || videoThumb(id),
       durationText,
       durationSeconds: node.duration?.seconds || parseDuration(durationText),
       viewCountText,
@@ -43945,6 +43954,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel2.channelName));
     const isLive = overlay.isLive || flat.some((t) => /watching/i.test(t));
     const isUpcoming = overlay.isUpcoming || flat.some((t) => UPCOMING_RE.test(t));
+    let thumbnail = bestThumb(thumbs);
+    if (!isLive && !isUpcoming) thumbnail = notLiveThumb(thumbnail, id);
     return {
       type: "video",
       id,
@@ -43952,7 +43963,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       channelName: channel2.channelName,
       channelId: channel2.channelId,
       channelAvatar: channel2.channelAvatar,
-      thumbnail: bestThumb(thumbs) || videoThumb(id),
+      thumbnail: thumbnail || videoThumb(id),
       durationText: overlay.durationText,
       durationSeconds: parseDuration(overlay.durationText),
       viewCountText,
