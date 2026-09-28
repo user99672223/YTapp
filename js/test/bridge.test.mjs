@@ -211,6 +211,16 @@ test('channel header counts, author-less channel tab lockups and a key from anot
   assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/browse' && h.body?.browseId === CH2));
 });
 
+test('removing a video from Watch Later is one request', async () => {
+  const { call, yt } = await connected();
+  const before = yt.hits.length;
+  assert.deepEqual(await call('watchLater', { id: 'VIDEOID0002', add: false }), { inWatchLater: false });
+  const hits = yt.hits.slice(before).filter((h) => h.path.startsWith('/youtubei/v1/browse'));
+  assert.deepEqual(hits.map((h) => h.path), ['/youtubei/v1/browse/edit_playlist'], 'no paging through the list');
+  assert.equal(hits[0].body.playlistId, 'WL');
+  assert.deepEqual(hits[0].body.actions, [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: 'VIDEOID0002' }]);
+});
+
 test('Shorts feed seeds from Home and resolves a short', async () => {
   const { call, yt } = await connected();
   const feed = await call('shortsFeed', {});

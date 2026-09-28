@@ -47,8 +47,16 @@ export async function watchLater({ id, add }) {
   const yt = await requireSession();
   requireLogin(yt);
   if (!id) fail('invalid', 'Missing video id.');
-  if (add) await yt.playlist.addVideos('WL', [id]);
-  else await yt.playlist.removeVideos('WL', [id]);
+  if (add) {
+    await yt.playlist.addVideos('WL', [id]);
+  } else {
+    // One request by video id, like YouTube's own Save dialog. YouTube.js' removeVideos pages
+    // through the whole list to find the entry, and fails when the video is not in it.
+    ensureOk(await yt.actions.execute('/browse/edit_playlist', {
+      playlistId: 'WL',
+      actions: [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: id }]
+    }), 'Remove from Watch Later');
+  }
   return { inWatchLater: !!add };
 }
 
