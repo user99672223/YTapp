@@ -68,6 +68,8 @@ final class MPVPlayer: @unchecked Sendable {
     private var position: Double = 0
     private var paused = true
     private var loadGeneration = 0
+    /// Main thread only: set by `destroy()` so late pause events can't keep the screensaver off.
+    private var destroyedOnMain = false
 
     deinit {
         if let handle {
@@ -148,6 +150,11 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// Tears down mpv. The player can't be used afterwards.
     func destroy() {
+        let releaseIdleTimer = { [self] in
+            destroyedOnMain = true
+            MainActor.assumeIsolated { IdleTimer.set(self, playing: false) }
+        }
+        if Thread.isMainThread { releaseIdleTimer() } else { DispatchQueue.main.async(execute: releaseIdleTimer) }
         queue.async { [self] in
             guard let mpv = handle else { return }
             handle = nil
@@ -377,7 +384,11 @@ final class MPVPlayer: @unchecked Sendable {
         case "pause":
             let value = flag() ?? true
             paused = value
-            DispatchQueue.main.async { [state] in state.isPaused = value }
+            DispatchQueue.main.async { [self] in
+                state.isPaused = value
+                guard !destroyedOnMain else { return }
+                MainActor.assumeIsolated { IdleTimer.set(self, playing: !value) }
+            }
         case "paused-for-cache":
             let value = flag() ?? false
             stats.pausedForCache = value

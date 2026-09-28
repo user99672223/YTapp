@@ -40,6 +40,7 @@ struct InvisibleButtonStyle: ButtonStyle {
 private struct WatchContent: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var router: Router
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var vm: WatchViewModel
     @ObservedObject var player: MPVPlayer.State
 
@@ -160,6 +161,10 @@ private struct WatchContent: View {
         .onChange(of: focus) { _, _ in bumpHideTimer() }
         .onChange(of: player.isPaused) { _, paused in
             if paused { showControls() } else { bumpHideTimer() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Leaving the app (TV button) pauses, like the YouTube app.
+            if phase == .background { vm.player.setPaused(true) }
         }
         .onAppear {
             focus = .playPause

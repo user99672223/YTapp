@@ -74,6 +74,7 @@ private struct ShortsScreen: View {
 
 private struct ShortsContent: View {
     @EnvironmentObject private var router: Router
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var vm: ShortsViewModel
     @ObservedObject var player: MPVPlayer.State
     let isFullScreen: Bool
@@ -171,6 +172,9 @@ private struct ShortsContent: View {
             }
         }
         .onAppear { focusedLike = true }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { vm.pause() }
+        }
     }
 
     private var background: some View {

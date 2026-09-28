@@ -53,6 +53,21 @@ struct MPVVideoView: UIViewRepresentable {
     func updateUIView(_ uiView: MPVVideoUIView, context: Context) {}
 }
 
+/// Keeps the screensaver away while any player is playing (mpv doesn't do this like AVPlayer).
+@MainActor
+enum IdleTimer {
+    private static var playing = Set<ObjectIdentifier>()
+
+    static func set(_ owner: AnyObject, playing isPlaying: Bool) {
+        let id = ObjectIdentifier(owner)
+        if isPlaying { playing.insert(id) } else { playing.remove(id) }
+        let disabled = !playing.isEmpty
+        if UIApplication.shared.isIdleTimerDisabled != disabled {
+            UIApplication.shared.isIdleTimerDisabled = disabled
+        }
+    }
+}
+
 /// Frame-rate matching: asks tvOS to switch the display to the stream's frame rate (SDR).
 @MainActor
 enum DisplayCriteriaController {
