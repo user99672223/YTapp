@@ -43761,11 +43761,12 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(sessionState, "sessionState");
   async function setClient({ client, poTokenMode }) {
-    if (client) {
-      state.options.client = String(client).toUpperCase();
+    if (client) state.options.client = String(client).toUpperCase();
+    if (poTokenMode) state.options.poTokenMode = poTokenMode === "off" ? "off" : "auto";
+    if (client || poTokenMode) {
+      state.goodClient = null;
       state.badClients.clear();
     }
-    if (poTokenMode) state.options.poTokenMode = poTokenMode === "off" ? "off" : "auto";
     return { clientName: state.options.client };
   }
   __name(setClient, "setClient");
@@ -44709,9 +44710,14 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   var FALLBACK_CLIENTS = ["TV", "TV_TIZEN", "WEB_EMBEDDED", "MWEB"];
   var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn't available any ?more|no longer available|copyright|account associated/i;
   var CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+  function preferenceOf(preferred) {
+    return String(preferred || state.options.client || "AUTO").toUpperCase();
+  }
+  __name(preferenceOf, "preferenceOf");
   function clientChain(preferred) {
-    const p = String(preferred || state.options.client || "AUTO").toUpperCase();
-    const first = p === "AUTO" ? state.goodClient || FALLBACK_CLIENTS[0] : p;
+    const p = preferenceOf(preferred);
+    const good = FALLBACK_CLIENTS.includes(state.goodClient) ? state.goodClient : null;
+    const first = p === "AUTO" ? good || FALLBACK_CLIENTS[0] : p;
     const chain = [first, ...FALLBACK_CLIENTS.filter((c) => c !== first)];
     return [...chain.filter((c) => !state.badClients.has(c)), ...chain.filter((c) => state.badClients.has(c))];
   }
@@ -44748,8 +44754,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(withPlayabilityReason, "withPlayabilityReason");
   async function playerWithFallback(yt, id, preferred, load) {
+    const p = preferenceOf(preferred);
     const failures = [];
-    for (const c of clientChain(preferred)) {
+    for (const c of clientChain(p)) {
       try {
         const poToken = await contentPoToken(c, id);
         const ytClient = c === "TV_TIZEN" ? "TV" : c;
@@ -44759,7 +44766,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         if (isLiveInfo(info2)) return { info: info2, client: c, poToken: poToken || void 0 };
         const problem = await streamProblem(yt, info2, c);
         if (problem) fail("extraction", problem);
-        state.goodClient = c;
+        if (p === "AUTO") state.goodClient = c;
         state.badClients.delete(c);
         if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(", ")} failed)`);
         return { info: info2, client: c, poToken: poToken || void 0 };

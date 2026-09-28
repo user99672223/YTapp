@@ -216,9 +216,14 @@ const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn't avai
 // Failures that are about the client, not the video: skip that client for the rest of the session.
 const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
 
+function preferenceOf(preferred) {
+  return String(preferred || state.options.client || 'AUTO').toUpperCase();
+}
+
 export function clientChain(preferred) {
-  const p = String(preferred || state.options.client || 'AUTO').toUpperCase();
-  const first = p === 'AUTO' ? (state.goodClient || FALLBACK_CLIENTS[0]) : p;
+  const p = preferenceOf(preferred);
+  const good = FALLBACK_CLIENTS.includes(state.goodClient) ? state.goodClient : null;
+  const first = p === 'AUTO' ? (good || FALLBACK_CLIENTS[0]) : p;
   const chain = [first, ...FALLBACK_CLIENTS.filter((c) => c !== first)];
   return [...chain.filter((c) => !state.badClients.has(c)), ...chain.filter((c) => state.badClients.has(c))];
 }
@@ -263,8 +268,9 @@ function withPlayabilityReason(e) {
 // Loads the player response through the first client that gives directly playable streams.
 // `load(client, poToken)` performs the request (getInfo or getBasicInfo).
 export async function playerWithFallback(yt, id, preferred, load) {
+  const p = preferenceOf(preferred);
   const failures = [];
-  for (const c of clientChain(preferred)) {
+  for (const c of clientChain(p)) {
     try {
       const poToken = await contentPoToken(c, id);
       // TV_TIZEN is YouTube.js' TV client with another device identity (platform.js).
@@ -275,7 +281,9 @@ export async function playerWithFallback(yt, id, preferred, load) {
       if (isLiveInfo(info)) return { info, client: c, poToken: poToken || undefined };
       const problem = await streamProblem(yt, info, c);
       if (problem) fail('extraction', problem);
-      state.goodClient = c;
+      // Remembered for the automatic choice only (a manual choice is always tried first), so a
+      // manually picked client doesn't stay first after switching back to Automatic.
+      if (p === 'AUTO') state.goodClient = c;
       state.badClients.delete(c);
       if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(', ')} failed)`);
       return { info, client: c, poToken: poToken || undefined };

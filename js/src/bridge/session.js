@@ -104,10 +104,13 @@ export async function sessionState() {
 }
 
 export async function setClient({ client, poTokenMode }) {
-  if (client) {
-    state.options.client = String(client).toUpperCase();
+  if (client) state.options.client = String(client).toUpperCase();
+  if (poTokenMode) state.options.poTokenMode = poTokenMode === 'off' ? 'off' : 'auto';
+  if (client || poTokenMode) {
+    // A changed setting starts the automatic choice over: the client remembered as working may
+    // have been the old manual choice, or one that only worked with the old PO-token mode.
+    state.goodClient = null;
     state.badClients.clear();
   }
-  if (poTokenMode) state.options.poTokenMode = poTokenMode === 'off' ? 'off' : 'auto';
   return { clientName: state.options.client };
 }

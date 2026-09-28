@@ -300,3 +300,19 @@ test('live streams come back as segmented formats without trying other clients',
   assert.equal(players().length, 3);
   assert.equal(next.formats.some((f) => f.isOtf), false);
 });
+
+test('changing the stream client setting starts the automatic choice over', async () => {
+  const yt = createFakeYouTube({ tvReload: true });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  assert.equal((await bundle.call('videoInfo', { id: 'VIDEOID0001' })).playerClient, 'TV_TIZEN');
+  await bundle.call('setClient', { client: 'WEB_EMBEDDED' });
+  assert.equal((await bundle.call('videoInfo', { id: 'VIDEOID0002', client: 'WEB_EMBEDDED' })).playerClient, 'WEB_EMBEDDED');
+  await bundle.call('setClient', { client: 'AUTO' });
+  const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player')
+    .map((h) => (h.body.context.client.deviceMake === 'Samsung' ? 'TV_TIZEN' : h.body.context.client.clientName));
+  const before = players().length;
+  assert.equal((await bundle.call('videoInfo', { id: 'VIDEOID0003', client: 'AUTO' })).playerClient, 'TV_TIZEN');
+  // The manual choice (Web embedded) is not kept as the automatic first choice.
+  assert.deepEqual(players().slice(before), ['TVHTML5', 'TV_TIZEN']);
+});
