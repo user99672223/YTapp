@@ -173,15 +173,16 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
   assert.equal(moreChannels.continuation, undefined);
 
   const lists = await call('playlists');
-  assert.deepEqual(lists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.videoCountText]),
-    [['playlist', 'PLmine000001', '3 videos'], ['playlist', 'PLother00001', '40 videos']]);
+  // "Private" is a label, not the playlist's channel.
+  assert.deepEqual(lists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName, i.videoCountText]),
+    [['playlist', 'PLmine000001', undefined, '3 videos'], ['playlist', 'PLother00001', 'Channel Two', '40 videos']]);
   assert.ok(lists.continuation);
   const moreLists = await call('more', { key: lists.continuation });
-  assert.deepEqual(moreLists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id]), [['playlist', 'PLmine000002']]);
+  assert.deepEqual(moreLists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName]), [['playlist', 'PLmine000002', undefined]]);
   assert.equal(moreLists.continuation, undefined);
 });
 
-test('channel header counts and a channel tab key from another launch', async () => {
+test('channel header counts, author-less channel tab lockups and a key from another launch', async () => {
   const { call, yt } = await connected();
   const one = await call('channel', { id: CH1 });
   // The handle contains "video"; the video count is the "321 videos" part.
@@ -189,6 +190,10 @@ test('channel header counts and a channel tab key from another launch', async ()
   assert.equal(one.channel.subscriberCountText, '1.5M subscribers');
   assert.equal(one.channel.videoCountText, '321 videos');
   assert.deepEqual(one.tabs, ['videos']);
+
+  const videos = await call('channelTab', { key: one.key, id: CH1, tab: 'videos' });
+  assert.deepEqual(videos.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText, i.publishedText]),
+    [['ONEVIDEO01', undefined, '1.2M views', '3 days ago'], ['ONEVIDEO02', undefined, '900 views', '2 years ago']]);
 
   // Keys restart with every JavaScript context, so a saved key can name another channel's entry.
   const other = await call('channelTab', { key: one.key, id: CH2, tab: 'videos' });

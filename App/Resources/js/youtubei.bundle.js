@@ -43772,6 +43772,16 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   // src/bridge/normalize.js
   var sectionSeq = 0;
   var nextSectionId = /* @__PURE__ */ __name(() => `s${++sectionSeq}`, "nextSectionId");
+  var VIEWS_RE = /\bviews?\b|watching|waiting/i;
+  var AGE_RE = /\bago\b|^streamed\b|^premiere|^scheduled\b/i;
+  var NOT_CHANNEL_RE = /^[\d.,]+\s*[KMB]?\s*(views?|watching|waiting|videos?|episodes?)\b|^no views$|\bago$|^(streamed|scheduled|premieres?|premiered|updated)\b|^view full playlist$|^(private|public|unlisted|playlist|mix|album|podcast)$/i;
+  function viewsAndAge(texts) {
+    const viewCountText = texts.find((t) => VIEWS_RE.test(t));
+    const publishedText = texts.find((t) => t !== viewCountText && AGE_RE.test(t));
+    if (viewCountText || publishedText) return { viewCountText, publishedText };
+    return { viewCountText: texts[0], publishedText: texts[1] };
+  }
+  __name(viewsAndAge, "viewsAndAge");
   function overlaysInfo(overlays) {
     const info2 = { durationText: void 0, isLive: false, isShort: false, isUpcoming: false, watchedPercent: void 0 };
     const list = Array.isArray(overlays) ? overlays : [];
@@ -43842,20 +43852,25 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(videoFromLegacy, "videoFromLegacy");
   function lockupMetadataParts(lockup) {
     const rows = lockup.metadata?.metadata?.metadata_rows || [];
-    return rows.map((row) => (row.metadata_parts || []).map((part) => ({ text: text(part.text), endpoint: part.text?.endpoint })));
+    return rows.map((row) => (row.metadata_parts || []).map((part) => ({
+      text: text(part.text),
+      endpoint: part.text?.endpoint || part.text?.runs?.find((r) => r && r.endpoint)?.endpoint
+    })));
   }
   __name(lockupMetadataParts, "lockupMetadataParts");
   function lockupChannel(lockup, parts) {
     const image = lockup.metadata?.image;
     let channelId = endpointBrowseId(image?.renderer_context?.command_context?.on_tap);
     let channelAvatar = bestThumb(image?.avatar?.image, 176);
-    for (const row of parts) {
-      for (const part of row) {
-        const id = endpointBrowseId(part.endpoint);
-        if (!channelId && isChannelId(id)) channelId = id;
-      }
+    let channelName;
+    for (const part of parts.flat()) {
+      const id = endpointBrowseId(part.endpoint);
+      if (!isChannelId(id)) continue;
+      if (!isChannelId(channelId)) channelId = id;
+      if (!channelName && part.text) channelName = part.text;
     }
-    const channelName = parts[0]?.[0]?.text;
+    const first = parts[0]?.[0]?.text;
+    if (!channelName && first && parts.length > 1 && !NOT_CHANNEL_RE.test(first)) channelName = first;
     return { channelName, channelId: isChannelId(channelId) ? channelId : void 0, channelAvatar };
   }
   __name(lockupChannel, "lockupChannel");
@@ -43893,15 +43908,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         title,
         thumbnail: bestThumb(thumbs),
         videoCountText: countBadge,
-        channelName: parts[0]?.[0]?.text
+        channelName: lockupChannel(lockup, parts).channelName
       };
     }
     if (type !== "VIDEO" && type !== "SHORT" && type !== "MOVIE" && type !== "CLIP") return null;
     const channel2 = lockupChannel(lockup, parts);
-    const secondRow = parts[1] || [];
     const flat = parts.flat().map((p) => p.text).filter(Boolean);
-    const viewCountText = secondRow[0]?.text || flat.find((t) => /view|watching/i.test(t));
-    const publishedText = secondRow[1]?.text || flat.find((t) => /ago|streamed|premiere/i.test(t));
+    const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel2.channelName));
     return {
       type: "video",
       id,

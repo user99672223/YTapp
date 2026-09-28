@@ -11,6 +11,21 @@ const nextSectionId = () => `s${++sectionSeq}`;
 
 // ------------------------------------------------------------------ items
 
+// English metadata wording: view counts, and the age or schedule of a video.
+const VIEWS_RE = /\bviews?\b|watching|waiting/i;
+const AGE_RE = /\bago\b|^streamed\b|^premiere|^scheduled\b/i;
+// Lockup metadata texts that are stats, dates or labels, never a channel name.
+const NOT_CHANNEL_RE = /^[\d.,]+\s*[KMB]?\s*(views?|watching|waiting|videos?|episodes?)\b|^no views$|\bago$|^(streamed|scheduled|premieres?|premiered|updated)\b|^view full playlist$|^(private|public|unlisted|playlist|mix|album|podcast)$/i;
+
+// Picks the view count and the age out of a video's metadata texts. English wording is matched;
+// in other UI languages the texts are taken in YouTube's "<views> • <age>" order.
+function viewsAndAge(texts) {
+  const viewCountText = texts.find((t) => VIEWS_RE.test(t));
+  const publishedText = texts.find((t) => t !== viewCountText && AGE_RE.test(t));
+  if (viewCountText || publishedText) return { viewCountText, publishedText };
+  return { viewCountText: texts[0], publishedText: texts[1] };
+}
+
 function overlaysInfo(overlays) {
   const info = { durationText: undefined, isLive: false, isShort: false, isUpcoming: false, watchedPercent: undefined };
   const list = Array.isArray(overlays) ? overlays : [];
@@ -81,20 +96,29 @@ function videoFromLegacy(node) {
 
 function lockupMetadataParts(lockup) {
   const rows = lockup.metadata?.metadata?.metadata_rows || [];
-  return rows.map((row) => (row.metadata_parts || []).map((part) => ({ text: text(part.text), endpoint: part.text?.endpoint })));
+  return rows.map((row) => (row.metadata_parts || []).map((part) => ({
+    text: text(part.text),
+    endpoint: part.text?.endpoint || part.text?.runs?.find((r) => r && r.endpoint)?.endpoint
+  })));
 }
 
+// Metadata rows are not positional: Home and Subscriptions put the author in the first row, but
+// a channel's own tabs show a single "views • date" row and playlists show labels like "Private".
+// The author is the part that links to a channel; without such a link the first row is taken
+// only when more rows follow it and it does not read like a stat or a label.
 function lockupChannel(lockup, parts) {
   const image = lockup.metadata?.image;
   let channelId = endpointBrowseId(image?.renderer_context?.command_context?.on_tap);
   let channelAvatar = bestThumb(image?.avatar?.image, 176);
-  for (const row of parts) {
-    for (const part of row) {
-      const id = endpointBrowseId(part.endpoint);
-      if (!channelId && isChannelId(id)) channelId = id;
-    }
+  let channelName;
+  for (const part of parts.flat()) {
+    const id = endpointBrowseId(part.endpoint);
+    if (!isChannelId(id)) continue;
+    if (!isChannelId(channelId)) channelId = id;
+    if (!channelName && part.text) channelName = part.text;
   }
-  const channelName = parts[0]?.[0]?.text;
+  const first = parts[0]?.[0]?.text;
+  if (!channelName && first && parts.length > 1 && !NOT_CHANNEL_RE.test(first)) channelName = first;
   return { channelName, channelId: isChannelId(channelId) ? channelId : undefined, channelAvatar };
 }
 
@@ -128,15 +152,13 @@ function fromLockup(lockup) {
       type: 'playlist', id, title,
       thumbnail: bestThumb(thumbs),
       videoCountText: countBadge,
-      channelName: parts[0]?.[0]?.text
+      channelName: lockupChannel(lockup, parts).channelName
     };
   }
   if (type !== 'VIDEO' && type !== 'SHORT' && type !== 'MOVIE' && type !== 'CLIP') return null;
   const channel = lockupChannel(lockup, parts);
-  const secondRow = parts[1] || [];
   const flat = parts.flat().map((p) => p.text).filter(Boolean);
-  const viewCountText = secondRow[0]?.text || flat.find((t) => /view|watching/i.test(t));
-  const publishedText = secondRow[1]?.text || flat.find((t) => /ago|streamed|premiere/i.test(t));
+  const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel.channelName));
   return {
     type: 'video',
     id,
