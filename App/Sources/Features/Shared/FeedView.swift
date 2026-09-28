@@ -117,22 +117,25 @@ struct FeedView<Header: View>: View {
     }
 
     var body: some View {
-        Group {
-            if let page = feed.page {
-                content(page)
-            } else if let error = feed.error {
-                ScrollView {
-                    header
+        // One scroll view for every state, so the header (a channel's tab picker, for example)
+        // keeps its identity and focus while the list below loads, fails or changes.
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 60) {
+                header
+                if let page = feed.page {
+                    content(page)
+                } else if let error = feed.error {
                     ErrorStateView(error: error) { Task { await feed.refresh(model) } }
-                }
-            } else {
-                ScrollView {
-                    header
+                } else {
                     LoadingView().frame(height: 500)
                 }
             }
+            .padding(.horizontal, Layout.horizontalPadding)
+            .padding(.vertical, 40)
         }
-        .task {
+        // Keyed on the model: when the view is handed a different FeedModel (another channel
+        // tab, a new search) it loads that one instead of leaving it on an endless spinner.
+        .task(id: ObjectIdentifier(feed)) {
             await feed.loadIfNeeded(model)
             guard autoRefresh else { return }
             while !Task.isCancelled {
@@ -145,22 +148,15 @@ struct FeedView<Header: View>: View {
 
     @ViewBuilder
     private func content(_ page: FeedPage) -> some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 60) {
-                header
-                if page.isEmpty {
-                    EmptyStateView(systemImage: "tray", text: emptyText)
-                }
-                ForEach(Array(page.sections.enumerated()), id: \.element.id) { index, section in
-                    FeedSectionView(section: section, isLastSection: index == page.sections.count - 1) {
-                        Task { await feed.loadMore(model) }
-                    }
-                }
-                footer(page)
-            }
-            .padding(.horizontal, Layout.horizontalPadding)
-            .padding(.vertical, 40)
+        if page.isEmpty {
+            EmptyStateView(systemImage: "tray", text: emptyText)
         }
+        ForEach(Array(page.sections.enumerated()), id: \.element.id) { index, section in
+            FeedSectionView(section: section, isLastSection: index == page.sections.count - 1) {
+                Task { await feed.loadMore(model) }
+            }
+        }
+        footer(page)
     }
 
     @ViewBuilder
