@@ -23,8 +23,10 @@ struct SearchView: View {
                     .padding(.top, 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .focusSection()
+                // Its own focus section, so Down from any filter reaches the results.
                 FeedView(feed: results, emptyText: "No results for “\(query)”.", autoRefresh: false)
                     .id(ObjectIdentifier(results))
+                    .focusSection()
             } else {
                 EmptyStateView(systemImage: "magnifyingglass", text: "Search YouTube")
             }
