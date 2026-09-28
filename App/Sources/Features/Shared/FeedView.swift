@@ -164,8 +164,8 @@ final class FeedModel: ObservableObject {
         hasStaleContinuation = false
     }
 
-    /// Appends a page, skipping items the list already shows (pages can repeat videos, and the
-    /// grids are keyed by item id).
+    /// Appends a page, skipping items the list already shows (continuation pages repeat videos,
+    /// and resuming appends the first page again).
     private func appendNew(_ next: FeedPage) {
         guard var current = page else {
             page = next
@@ -352,16 +352,15 @@ struct FeedSectionView: View {
     }
 
     private var grid: some View {
-        let items = Array(section.items.enumerated())
-        let loose = items.filter { !isShort($0.element) }
-        let shorts = items.filter { isShort($0.element) }.map(\.element)
+        let items = section.items.keyed
+        let loose = items.filter { !isShort($0.item) }
+        let shorts = items.filter { isShort($0.item) }.map(\.item)
         return VStack(alignment: .leading, spacing: 40) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 56) {
-                // By item id, so a card keeps its identity (and focus) when the page changes.
-                ForEach(loose, id: \.element.id) { index, item in
-                    FeedItemView(item: item)
+                ForEach(loose) { entry in
+                    FeedItemView(item: entry.item)
                         .onAppear {
-                            if isLastSection, index >= section.items.count - Layout.gridColumns * 2 { onNearEnd() }
+                            if isLastSection, entry.offset >= section.items.count - Layout.gridColumns * 2 { onNearEnd() }
                         }
                 }
             }
@@ -387,13 +386,33 @@ struct ShelfRow: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: Layout.cardSpacing) {
-                ForEach(items) { item in
-                    FeedItemView(item: item)
+                ForEach(items.keyed) { entry in
+                    FeedItemView(item: entry.item)
                 }
             }
             .padding(.vertical, 30)
             .padding(.horizontal, 10)
         }
         .focusSection()
+    }
+}
+
+/// A feed item with a view identity that survives a refresh (so the focused card stays put):
+/// the item's id, numbered when it repeats in the same list (a playlist can hold a video twice).
+struct KeyedFeedItem: Identifiable {
+    let id: String
+    /// Position in the list it came from.
+    let offset: Int
+    let item: FeedItem
+}
+
+extension Array where Element == FeedItem {
+    var keyed: [KeyedFeedItem] {
+        var counts: [String: Int] = [:]
+        return enumerated().map { offset, item in
+            let n = counts[item.id, default: 0]
+            counts[item.id] = n + 1
+            return KeyedFeedItem(id: n == 0 ? item.id : "\(item.id)#\(n)", offset: offset, item: item)
+        }
     }
 }
