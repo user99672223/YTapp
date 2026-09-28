@@ -69,6 +69,10 @@ final class MPVPlayer: @unchecked Sendable {
     private var pendingSource: (source: Source, generation: Int)?
     private var retainedSelf: Unmanaged<MPVPlayer>?
     private var lastErrorLog: String?
+    /// ffmpeg logs HTTP failures ('HTTP error 403 Forbidden') as warnings, below `lastErrorLog`.
+    private var lastHttpError: String?
+    /// The current file came with a separate audio URL.
+    private var expectAudio = false
     private var stats = Stats()
     private var lastPublish = Date.distantPast
     private var lastStatsPublish = Date.distantPast
@@ -124,6 +128,9 @@ final class MPVPlayer: @unchecked Sendable {
                 ("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5"),
                 ("keep-open", "yes"),
                 ("idle", "yes"),
+                // A decoder or video/audio output that fails to start ends the file with an
+                // error (shown with Retry) instead of playing on without picture or sound.
+                ("stop-playback-on-init-failure", "yes"),
                 ("input-default-bindings", "no"),
                 ("input-vo-keyboard", "no"),
                 ("osd-level", "0"),
@@ -199,7 +206,9 @@ final class MPVPlayer: @unchecked Sendable {
     private func performLoad(_ source: Source, generation: Int) {
         loadGeneration = generation
         fileIsLoaded = false
+        expectAudio = source.audioURL != nil
         lastErrorLog = nil
+        lastHttpError = nil
         position = source.startTime ?? 0
         duration = 0
         DispatchQueue.main.async { [state] in
@@ -332,15 +341,21 @@ final class MPVPlayer: @unchecked Sendable {
                 }
             case MPV_EVENT_FILE_LOADED:
                 fileIsLoaded = true
-                // `paused-for-cache` only reports changes; seed the buffering flag with its
-                // current value so a stream that never stalls doesn't look stuck.
-                let buffering = stats.pausedForCache
-                let generation = loadGeneration
-                DispatchQueue.main.async { [self] in
-                    guard generation == generationOnMain else { return }
-                    state.isFileLoaded = true
-                    state.isBuffering = buffering
-                    MainActor.assumeIsolated { onFileLoaded?() }
+                if let problem = missingTrackError() {
+                    report(error: problem, generation: loadGeneration)
+                    // Don't play on without sound (or with sound over black) behind the error.
+                    command(["stop"])
+                } else {
+                    // `paused-for-cache` only reports changes; seed the buffering flag with its
+                    // current value so a stream that never stalls doesn't look stuck.
+                    let buffering = stats.pausedForCache
+                    let generation = loadGeneration
+                    DispatchQueue.main.async { [self] in
+                        guard generation == generationOnMain else { return }
+                        state.isFileLoaded = true
+                        state.isBuffering = buffering
+                        MainActor.assumeIsolated { onFileLoaded?() }
+                    }
                 }
             case MPV_EVENT_END_FILE:
                 if let data = event.pointee.data {
@@ -353,6 +368,7 @@ final class MPVPlayer: @unchecked Sendable {
                     let level = message.level.map { String(cString: $0) } ?? ""
                     let text = message.text.map { String(cString: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if level == "error" || level == "fatal" { lastErrorLog = "\(prefix): \(text)" }
+                    if text.contains("HTTP error") { lastHttpError = "\(prefix): \(text)" }
                     log(Self.logLevel(mpv: level), "[mpv \(level)] \(prefix): \(text)")
                 }
             case MPV_EVENT_SHUTDOWN:
@@ -368,9 +384,9 @@ final class MPVPlayer: @unchecked Sendable {
         let at = "at \(Formatters.duration(position)) of \(Formatters.duration(duration))"
         if end.reason == MPV_END_FILE_REASON_ERROR {
             let reason = String(cString: mpv_error_string(end.error))
-            let detail = lastErrorLog.map { " (\($0))" } ?? ""
+            let detail = problemDetail().map { " (\($0))" } ?? ""
             log(.error, "mpv end-file: error \(at): \(reason)\(detail)")
-            report(error: "Playback failed: \(reason)\(detail)", generation: loadGeneration)
+            report(error: "Playback failed: \(reason)\(detail).", generation: loadGeneration)
         } else if end.reason == MPV_END_FILE_REASON_EOF {
             log(.info, "mpv end-file: eof \(at)")
             reachedEnd()
@@ -384,6 +400,30 @@ final class MPVPlayer: @unchecked Sendable {
         } else {
             log(.warn, "mpv end-file: unknown reason \(at)")
         }
+    }
+
+    /// The mpv log lines that explain a failure of the current file.
+    private func problemDetail() -> String? {
+        var lines: [String] = []
+        if let http = lastHttpError { lines.append(http) }
+        if let error = lastErrorLog, error != lastHttpError { lines.append(error) }
+        return lines.isEmpty ? nil : lines.joined(separator: "; ")
+    }
+
+    /// At FILE_LOADED (after mpv opened the external audio file and started the decoders and
+    /// outputs): the video track and, when one was given, the audio track must be there. mpv only
+    /// logs an audio URL it couldn't open (HTTP 403, timeout) and plays on without sound.
+    private func missingTrackError() -> String? {
+        let detail = problemDetail().map { " (\($0))" } ?? ""
+        if !hasTrack("video") { return "The video stream couldn't be opened or shown\(detail)." }
+        if expectAudio, !hasTrack("audio") { return "The audio stream couldn't be opened\(detail)." }
+        return nil
+    }
+
+    private func hasTrack(_ type: String) -> Bool {
+        guard let handle else { return false }
+        var id: Int64 = 0
+        return mpv_get_property(handle, "current-tracks/\(type)/id", MPV_FORMAT_INT64, &id) >= 0
     }
 
     /// The file played to its end (END_FILE eof, or eof-reached with keep-open).

@@ -273,8 +273,7 @@ final class WatchViewModel: ObservableObject {
 
     private func playerFailed(_ message: String) {
         guard !closed else { return }
-        phase = .failed(BridgeError(kind: .network, message: message,
-                                    detail: "Stream: \(selection?.summary ?? "?")"))
+        phase = .failed(Self.playbackError(message, stream: selection?.summary))
     }
 
     // MARK: - Up next
@@ -452,6 +451,16 @@ final class WatchViewModel: ObservableObject {
         countdownTask?.cancel()
         player.destroy()
         DisplayCriteriaController.reset()
+    }
+
+    /// A player failure, shown with mpv's actual reason (as a network error the screen would only
+    /// say to check the internet connection).
+    static func playbackError(_ message: String, stream: String?) -> BridgeError {
+        let refused = message.contains("HTTP error 403") || message.contains("403 Forbidden")
+        let hint = refused
+            ? "YouTube refused the stream. Press Retry for fresh stream links, or pick another stream client in Settings."
+            : "Press Retry to try again."
+        return BridgeError(kind: .unknown, message: "\(message) \(hint)", detail: "Stream: \(stream ?? "?")")
     }
 
     static func describe(_ error: Error) -> BridgeError {

@@ -46,7 +46,7 @@ final class ShortsViewModel: ObservableObject {
         }
         player.onError = { [weak self] message in
             guard let self, !self.closed else { return }
-            self.phase = .failed(BridgeError(kind: .network, message: message))
+            self.phase = .failed(WatchViewModel.playbackError(message, stream: self.reporterSelection?.summary))
         }
     }
 
