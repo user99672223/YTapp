@@ -1,6 +1,7 @@
 import Foundation
 import QuartzCore
 import Libmpv
+import Core
 
 /// Thin libmpv wrapper. Video URL is the file, audio URL is added via `audio-files`; software
 /// decoding for AV1/VP9/Opus (hwdec only for H.264/HEVC), big demuxer cache, no ytdl.
@@ -55,8 +56,8 @@ final class MPVPlayer: @unchecked Sendable {
     var onEndOfFile: (@MainActor () -> Void)?
     var onError: (@MainActor (String) -> Void)?
     var onTick: (@MainActor (Double, Bool) -> Void)?
-    /// Called on the mpv queue.
-    var logSink: ((String) -> Void)?
+    /// Called on the mpv queue; mpv's own levels are mapped (fatal/error → error, warn → warn).
+    var logSink: ((LogBuffer.Level, String) -> Void)?
 
     private var handle: OpaquePointer?
     private let queue = DispatchQueue(label: "tube.mpv", qos: .userInitiated)
@@ -66,6 +67,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var stats = Stats()
     private var lastPublish = Date.distantPast
     private var position: Double = 0
+    private var duration: Double = 0
     private var paused = true
     private var loadGeneration = 0
     /// Main thread only: set by `destroy()` so late pause events can't keep the screensaver off.
@@ -126,7 +128,7 @@ final class MPVPlayer: @unchecked Sendable {
             ]
             for (name, value) in options {
                 let status = mpv_set_option_string(mpv, name, value)
-                if status < 0 { log("mpv option \(name)=\(value) failed: \(String(cString: mpv_error_string(status)))") }
+                if status < 0 { log(.error, "mpv option \(name)=\(value) failed: \(String(cString: mpv_error_string(status)))") }
             }
             let status = mpv_initialize(mpv)
             guard status >= 0 else {
@@ -179,6 +181,8 @@ final class MPVPlayer: @unchecked Sendable {
     private func performLoad(_ source: Source) {
         loadGeneration += 1
         lastErrorLog = nil
+        position = source.startTime ?? 0
+        duration = 0
         DispatchQueue.main.async { [state] in
             state.isEOF = false
             state.isFileLoaded = false
@@ -252,7 +256,7 @@ final class MPVPlayer: @unchecked Sendable {
         }
         let status = mpv_command(handle, &cargs)
         if status < 0 {
-            log("mpv command \(args.first ?? "") failed: \(String(cString: mpv_error_string(status)))")
+            log(.error, "mpv command \(args.first ?? "") failed: \(String(cString: mpv_error_string(status)))")
         }
         return status
     }
@@ -260,13 +264,14 @@ final class MPVPlayer: @unchecked Sendable {
     private func setString(_ name: String, _ value: String) {
         guard let handle else { return }
         let status = mpv_set_property_string(handle, name, value)
-        if status < 0 { log("mpv set \(name) failed: \(String(cString: mpv_error_string(status)))") }
+        if status < 0 { log(.error, "mpv set \(name) failed: \(String(cString: mpv_error_string(status)))") }
     }
 
     private func setFlag(_ name: String, _ value: Bool) {
         guard let handle else { return }
         var flag: Int32 = value ? 1 : 0
-        mpv_set_property(handle, name, MPV_FORMAT_FLAG, &flag)
+        let status = mpv_set_property(handle, name, MPV_FORMAT_FLAG, &flag)
+        if status < 0 { log(.error, "mpv set \(name)=\(value) failed: \(String(cString: mpv_error_string(status)))") }
     }
 
     private func observe(_ mpv: OpaquePointer) {
@@ -283,7 +288,8 @@ final class MPVPlayer: @unchecked Sendable {
             ("demuxer-cache-state/total-bytes", MPV_FORMAT_INT64)
         ]
         for (name, format) in properties {
-            mpv_observe_property(mpv, 0, name, format)
+            let status = mpv_observe_property(mpv, 0, name, format)
+            if status < 0 { log(.error, "mpv observe \(name) failed: \(String(cString: mpv_error_string(status)))") }
         }
     }
 
@@ -313,18 +319,7 @@ final class MPVPlayer: @unchecked Sendable {
                 }
             case MPV_EVENT_END_FILE:
                 if let data = event.pointee.data {
-                    let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
-                    if end.reason == MPV_END_FILE_REASON_ERROR {
-                        let reason = String(cString: mpv_error_string(end.error))
-                        let detail = lastErrorLog.map { " (\($0))" } ?? ""
-                        report(error: "Playback failed: \(reason)\(detail)")
-                    } else if end.reason == MPV_END_FILE_REASON_EOF {
-                        DispatchQueue.main.async { [self] in
-                            guard !state.isEOF else { return }
-                            state.isEOF = true
-                            MainActor.assumeIsolated { onEndOfFile?() }
-                        }
-                    }
+                    handleEndFile(data.assumingMemoryBound(to: mpv_event_end_file.self).pointee)
                 }
             case MPV_EVENT_LOG_MESSAGE:
                 if let data = event.pointee.data {
@@ -333,13 +328,40 @@ final class MPVPlayer: @unchecked Sendable {
                     let level = message.level.map { String(cString: $0) } ?? ""
                     let text = message.text.map { String(cString: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if level == "error" || level == "fatal" { lastErrorLog = "\(prefix): \(text)" }
-                    log("[mpv \(level)] \(prefix): \(text)")
+                    log(Self.logLevel(mpv: level), "[mpv \(level)] \(prefix): \(text)")
                 }
             case MPV_EVENT_SHUTDOWN:
                 return
             default:
                 break
             }
+        }
+    }
+
+    /// Every end of a file is logged with its reason and where playback was.
+    private func handleEndFile(_ end: mpv_event_end_file) {
+        let at = "at \(Formatters.duration(position)) of \(Formatters.duration(duration))"
+        if end.reason == MPV_END_FILE_REASON_ERROR {
+            let reason = String(cString: mpv_error_string(end.error))
+            let detail = lastErrorLog.map { " (\($0))" } ?? ""
+            log(.error, "mpv end-file: error \(at): \(reason)\(detail)")
+            report(error: "Playback failed: \(reason)\(detail)")
+        } else if end.reason == MPV_END_FILE_REASON_EOF {
+            log(.info, "mpv end-file: eof \(at)")
+            DispatchQueue.main.async { [self] in
+                guard !state.isEOF else { return }
+                state.isEOF = true
+                MainActor.assumeIsolated { onEndOfFile?() }
+            }
+        } else if end.reason == MPV_END_FILE_REASON_STOP {
+            // Every `loadfile replace` and `stop` ends the previous file this way.
+            log(.debug, "mpv end-file: stop \(at)")
+        } else if end.reason == MPV_END_FILE_REASON_QUIT {
+            log(.info, "mpv end-file: quit \(at)")
+        } else if end.reason == MPV_END_FILE_REASON_REDIRECT {
+            log(.info, "mpv end-file: redirect \(at)")
+        } else {
+            log(.warn, "mpv end-file: unknown reason \(at)")
         }
     }
 
@@ -379,6 +401,7 @@ final class MPVPlayer: @unchecked Sendable {
             }
         case "duration":
             let value = double() ?? 0
+            duration = value
             DispatchQueue.main.async { [state] in state.duration = value }
         case "pause":
             let value = flag() ?? true
@@ -402,6 +425,7 @@ final class MPVPlayer: @unchecked Sendable {
             DispatchQueue.main.async { [state] in state.bufferedSeconds = value }
         case "eof-reached":
             if flag() == true {
+                log(.info, "mpv eof-reached at \(Formatters.duration(position)) of \(Formatters.duration(duration))")
                 DispatchQueue.main.async { [self] in
                     guard !state.isEOF else { return }
                     state.isEOF = true
@@ -434,7 +458,7 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     private func report(error: String) {
-        log(error)
+        log(.error, error)
         DispatchQueue.main.async { [self] in
             state.errorMessage = error
             state.isBuffering = false
@@ -442,7 +466,16 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    private func log(_ text: String) {
-        logSink?(text)
+    private func log(_ level: LogBuffer.Level, _ text: String) {
+        logSink?(level, text)
+    }
+
+    private static func logLevel(mpv level: String) -> LogBuffer.Level {
+        switch level {
+        case "fatal", "error": return .error
+        case "warn": return .warn
+        case "info": return .info
+        default: return .debug
+        }
     }
 }

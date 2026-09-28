@@ -38,7 +38,7 @@ final class ShortsViewModel: ObservableObject {
         self.model = model
         comments = CommentsModel(model: model)
         let logs = model.logs
-        player.logSink = { line in logs.append(.info, line) }
+        player.logSink = { level, line in logs.append(level, line) }
         player.onTick = { [weak self] position, playing in self?.tick(position: position, playing: playing) }
         player.onError = { [weak self] message in
             guard let self, !self.closed else { return }

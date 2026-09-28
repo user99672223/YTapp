@@ -45,7 +45,7 @@ final class WatchViewModel: ObservableObject {
         self.model = model
         comments = CommentsModel(model: model)
         let logs = model.logs
-        player.logSink = { line in logs.append(.info, line) }
+        player.logSink = { level, line in logs.append(level, line) }
         player.onFileLoaded = { [weak self] in self?.fileLoaded() }
         player.onEndOfFile = { [weak self] in self?.endOfFile() }
         player.onError = { [weak self] message in self?.playerFailed(message) }
