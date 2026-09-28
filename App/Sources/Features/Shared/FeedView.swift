@@ -7,11 +7,19 @@ import Core
 @MainActor
 final class FeedModel: ObservableObject {
     @Published private(set) var page: FeedPage?
+    /// A newer first page that a background refresh fetched while the list was on screen. It's
+    /// shown when the user picks "Show the latest", so a refresh never swaps the cards (and the
+    /// focused one) out from under them.
+    @Published private(set) var pendingPage: FeedPage?
     @Published private(set) var error: BridgeError?
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var moreError: BridgeError?
+    /// The page came from the cache (or its key expired with the JS session), so its
+    /// continuation can't be used; the next page starts again from the first one.
+    @Published private(set) var hasStaleContinuation = false
     private(set) var fetchedAt: Date?
+    private var lastMoreFailure: Date?
 
     let cacheKey: String?
     let category: RefreshPolicy.Category
@@ -29,39 +37,44 @@ final class FeedModel: ObservableObject {
         return !RefreshPolicy.isFresh(fetchedAt: fetchedAt, category: category)
     }
 
-    /// First appearance: show cache, fetch if missing or stale.
-    func loadIfNeeded(_ model: AppModel) async {
+    var canLoadMore: Bool {
+        page?.continuation != nil || hasStaleContinuation
+    }
+
+    /// First appearance: show cache, fetch if missing or stale. With `keepPlace` (FeedView,
+    /// which offers "Show the latest"), a fetch for a list already on screen is kept aside.
+    func loadIfNeeded(_ model: AppModel, keepPlace: Bool = false) async {
         if page == nil, let key = cacheKey, let cached = model.store.cachedPage(key, as: FeedPage.self) {
             var restored = cached.value
+            hasStaleContinuation = restored.continuation != nil
             restored.continuation = nil
             page = restored
             fetchedAt = cached.fetchedAt
-            hasStaleContinuation = true
         }
         if page == nil || isStale {
-            await refresh(model)
+            await refresh(model, keepPlace: keepPlace)
         }
     }
 
     /// Timer tick: refresh only when the TTL expired.
-    func refreshIfStale(_ model: AppModel) async {
+    func refreshIfStale(_ model: AppModel, keepPlace: Bool = false) async {
         guard !isLoading, isStale else { return }
-        await refresh(model)
+        await refresh(model, keepPlace: keepPlace)
     }
 
-    private var hasStaleContinuation = false
-
-    func refresh(_ model: AppModel) async {
+    func refresh(_ model: AppModel, keepPlace: Bool = false) async {
         if isLoading { return }
         isLoading = true
         defer { isLoading = false }
         do {
             let fresh = try await model.api(loader)
-            page = fresh
+            if keepPlace, let page, !page.isEmpty {
+                pendingPage = fresh
+            } else {
+                show(fresh)
+            }
             error = nil
-            moreError = nil
             fetchedAt = Date()
-            hasStaleContinuation = false
             if let key = cacheKey { model.store.storePage(key, fresh) }
         } catch {
             if page == nil || !(page?.isEmpty == false) {
@@ -72,30 +85,85 @@ final class FeedModel: ObservableObject {
         }
     }
 
-    func loadMore(_ model: AppModel) async {
-        if hasStaleContinuation {
-            // A cached page from a previous launch can't be continued; refresh it once instead.
-            hasStaleContinuation = false
-            await refresh(model)
-            return
+    /// "Show the latest": swaps in the page a background refresh kept aside.
+    func showPending() {
+        guard let pendingPage else { return }
+        show(pendingPage)
+    }
+
+    private func show(_ fresh: FeedPage) {
+        page = fresh
+        pendingPage = nil
+        moreError = nil
+        lastMoreFailure = nil
+        hasStaleContinuation = false
+    }
+
+    /// Next page. `automatic` loads (the footer or the last cards coming on screen) don't retry
+    /// a failure by themselves; the footer's Retry does. Otherwise a key that keeps failing (an
+    /// expired one while YouTube rejects the session) would request pages in a loop.
+    func loadMore(_ model: AppModel, automatic: Bool = false) async {
+        if automatic {
+            if moreError != nil { return }
+            if let lastMoreFailure, Date().timeIntervalSince(lastMoreFailure) < 5 { return }
         }
-        guard !isLoadingMore, !isLoading, let key = page?.continuation else { return }
+        guard !isLoadingMore, !isLoading, canLoadMore else { return }
         isLoadingMore = true
+        moreError = nil
         defer { isLoadingMore = false }
         do {
-            let next = try await model.api { try await $0.more(key) }
-            page?.append(next)
-            moreError = nil
-        } catch let error as BridgeError where error.kind == .expired {
-            await refresh(model)
+            if !hasStaleContinuation, let key = page?.continuation {
+                do {
+                    let next = try await model.api { try await $0.more(key) }
+                    appendNew(next)
+                } catch let error as BridgeError where error.kind == .expired {
+                    // The key died with the JS session (recreated after an auth error, or evicted).
+                    hasStaleContinuation = true
+                    try await resumeFromFirstPage(model)
+                }
+            } else {
+                try await resumeFromFirstPage(model)
+            }
+            lastMoreFailure = nil
         } catch {
             moreError = BridgeError.wrap(error)
+            lastMoreFailure = Date()
         }
+    }
+
+    /// Continues a page whose continuation can't be used: fetches the first page again and
+    /// appends only what isn't shown yet, so the list grows instead of being replaced under the
+    /// user.
+    private func resumeFromFirstPage(_ model: AppModel) async throws {
+        let first = try await model.api(loader)
+        appendNew(first)
+        hasStaleContinuation = false
+    }
+
+    /// Appends a page, skipping items the list already shows (pages can repeat videos, and the
+    /// grids are keyed by item id).
+    private func appendNew(_ next: FeedPage) {
+        guard var current = page else {
+            page = next
+            return
+        }
+        var seen = Set(current.allItems.map(\.id))
+        var unseen = next
+        unseen.sections = next.sections.map { section in
+            var copy = section
+            copy.items = section.items.filter { seen.insert($0.id).inserted }
+            return copy
+        }
+        current.append(unseen)
+        page = current
     }
 
     func clear() {
         page = nil
+        pendingPage = nil
         error = nil
+        moreError = nil
+        hasStaleContinuation = false
         fetchedAt = nil
     }
 }
@@ -136,51 +204,79 @@ struct FeedView<Header: View>: View {
         // Keyed on the model: when the view is handed a different FeedModel (another channel
         // tab, a new search) it loads that one instead of leaving it on an endless spinner.
         .task(id: ObjectIdentifier(feed)) {
-            await feed.loadIfNeeded(model)
+            await feed.loadIfNeeded(model, keepPlace: true)
             guard autoRefresh else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
                 if Task.isCancelled { break }
-                await feed.refreshIfStale(model)
+                await feed.refreshIfStale(model, keepPlace: true)
             }
         }
     }
 
     @ViewBuilder
     private func content(_ page: FeedPage) -> some View {
+        if feed.pendingPage != nil {
+            Button {
+                feed.showPending()
+            } label: {
+                Label("Show the latest", systemImage: "arrow.clockwise")
+            }
+        }
         if page.isEmpty {
             EmptyStateView(systemImage: "tray", text: emptyText)
         }
-        ForEach(Array(page.sections.enumerated()), id: \.element.id) { index, section in
+        // Keyed by position, not by the section ids (the bridge numbers sections anew on every
+        // fetch), so a new page doesn't tear down every section and the focused card with it.
+        ForEach(Array(page.sections.enumerated()), id: \.offset) { index, section in
             FeedSectionView(section: section, isLastSection: index == page.sections.count - 1) {
-                Task { await feed.loadMore(model) }
+                Task { await feed.loadMore(model, automatic: true) }
             }
         }
         footer(page)
     }
 
-    @ViewBuilder
+    /// One button whose label follows the state: replacing it with a spinner while loading would
+    /// remove the focused view and send focus back to the top.
     private func footer(_ page: FeedPage) -> some View {
-        if feed.isLoadingMore {
-            HStack { Spacer(); ProgressView(); Spacer() }.padding(40)
-        } else if let error = feed.moreError {
-            VStack(spacing: 16) {
+        VStack(spacing: 16) {
+            if let error = feed.moreError {
                 Text(error.userMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                Button("Retry") { Task { await feed.loadMore(model) } }
             }
-            .frame(maxWidth: .infinity)
-            .padding(40)
-        } else if page.continuation != nil {
-            Button("Load more") { Task { await feed.loadMore(model) } }
-                .frame(maxWidth: .infinity)
-                .onAppear { Task { await feed.loadMore(model) } }
-        } else {
             Button {
-                Task { await feed.refresh(model) }
+                if feed.canLoadMore {
+                    Task { await feed.loadMore(model) }
+                } else {
+                    Task { await feed.refresh(model) }
+                }
             } label: {
-                Label(feed.isLoading ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
+                footerLabel
             }
-            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        // Infinite scroll: load the next page while the footer is on screen, and again after
+        // each page (the continuation changes).
+        .task(id: page.continuation) {
+            await feed.loadMore(model, automatic: true)
+        }
+    }
+
+    @ViewBuilder
+    private var footerLabel: some View {
+        if feed.isLoadingMore {
+            HStack(spacing: 16) {
+                ProgressView()
+                Text("Loading…")
+            }
+        } else if feed.canLoadMore {
+            if feed.moreError != nil {
+                Label("Retry", systemImage: "arrow.clockwise")
+            } else {
+                Text("Load more")
+            }
+        } else {
+            Label(feed.isLoading ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
         }
     }
 }
@@ -220,7 +316,8 @@ struct FeedSectionView: View {
         let shorts = items.filter { isShort($0.element) }.map(\.element)
         return VStack(alignment: .leading, spacing: 40) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 56) {
-                ForEach(loose, id: \.offset) { index, item in
+                // By item id, so a card keeps its identity (and focus) when the page changes.
+                ForEach(loose, id: \.element.id) { index, item in
                     FeedItemView(item: item)
                         .onAppear {
                             if isLastSection, index >= section.items.count - Layout.gridColumns * 2 { onNearEnd() }
@@ -249,7 +346,7 @@ struct ShelfRow: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: Layout.cardSpacing) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                ForEach(items) { item in
                     FeedItemView(item: item)
                 }
             }
