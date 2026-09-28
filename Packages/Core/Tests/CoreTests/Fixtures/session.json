@@ -1,0 +1,15 @@
+{
+  "loggedIn": true,
+  "account": {
+    "name": "Test Household",
+    "handle": "@testhousehold",
+    "photo": "https://yt3.ggpht.com/me",
+    "byline": "test@example.com"
+  },
+  "visitorData": "CgtWSVNJVE9SREFUQSiAgICAgA%3D%3D",
+  "clientName": "TV",
+  "playerId": "0a1b2c3d",
+  "signatureTimestamp": 20314,
+  "hasDecipher": true,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+}

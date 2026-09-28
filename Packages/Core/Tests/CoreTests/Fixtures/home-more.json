@@ -1,0 +1,27 @@
+{
+  "sections": [
+    {
+      "id": "s4",
+      "style": "grid",
+      "items": [
+        {
+          "type": "video",
+          "id": "VIDEOID0003",
+          "title": "Third video",
+          "channelName": "Channel Two",
+          "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+          "channelAvatar": "https://yt3.ggpht.com/avatar-one",
+          "thumbnail": "https://i.ytimg.com/vi/VIDEOID0003/hq720.jpg",
+          "durationText": "10:05",
+          "durationSeconds": 605,
+          "viewCountText": "12K views",
+          "publishedText": "3 days ago",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false,
+          "watchedPercent": 40
+        }
+      ]
+    }
+  ]
+}

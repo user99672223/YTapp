@@ -1,0 +1,94 @@
+{
+  "sections": [
+    {
+      "id": "s1",
+      "style": "grid",
+      "items": [
+        {
+          "type": "video",
+          "id": "VIDEOID0001",
+          "title": "First video",
+          "channelName": "Channel One",
+          "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+          "channelAvatar": "https://yt3.ggpht.com/avatar-one",
+          "thumbnail": "https://i.ytimg.com/vi/VIDEOID0001/hq720.jpg",
+          "durationText": "10:05",
+          "durationSeconds": 605,
+          "viewCountText": "12K views",
+          "publishedText": "3 days ago",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false,
+          "watchedPercent": 40
+        },
+        {
+          "type": "video",
+          "id": "LOCKUPVID01",
+          "title": "Lockup video",
+          "channelName": "Channel Two",
+          "channelId": "UCbbbbbbbbbbbbbbbbbbbbbb",
+          "channelAvatar": "https://yt3.ggpht.com/avatar-two",
+          "thumbnail": "https://i.ytimg.com/vi/LOCKUPVID01/hq720.jpg",
+          "durationText": "1:02:03",
+          "durationSeconds": 3723,
+          "viewCountText": "1.2M views",
+          "publishedText": "2 weeks ago",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "title": "Shorts",
+      "style": "shorts",
+      "items": [
+        {
+          "type": "video",
+          "id": "SHORTID0001",
+          "title": "Short one",
+          "thumbnail": "https://i.ytimg.com/vi/SHORTID0001/oar2.jpg",
+          "viewCountText": "1.2M views",
+          "isLive": false,
+          "isShort": true,
+          "isUpcoming": false
+        },
+        {
+          "type": "video",
+          "id": "SHORTID0002",
+          "title": "Short two",
+          "thumbnail": "https://i.ytimg.com/vi/SHORTID0002/oar2.jpg",
+          "viewCountText": "1.2M views",
+          "isLive": false,
+          "isShort": true,
+          "isUpcoming": false
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "style": "grid",
+      "items": [
+        {
+          "type": "video",
+          "id": "VIDEOID0002",
+          "title": "Second video",
+          "channelName": "Channel One",
+          "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+          "channelAvatar": "https://yt3.ggpht.com/avatar-one",
+          "thumbnail": "https://i.ytimg.com/vi/VIDEOID0002/hq720.jpg",
+          "durationText": "10:05",
+          "durationSeconds": 605,
+          "viewCountText": "12K views",
+          "publishedText": "3 days ago",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false,
+          "watchedPercent": 40
+        }
+      ]
+    }
+  ],
+  "continuation": "home:1"
+}

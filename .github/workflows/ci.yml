@@ -40,11 +40,12 @@ jobs:
           npm run bundle
           npm test
 
-      - name: Committed bundle matches the build
+      - name: Committed bundle and fixtures match the build
         run: |
-          if ! git diff --quiet -- App/Resources/js/youtubei.bundle.js; then
-            echo "::error::App/Resources/js/youtubei.bundle.js is stale. Run 'npm run bundle' in js/ and commit the result."
-            git diff --stat -- App/Resources/js/youtubei.bundle.js
+          CHANGED=$(git status --porcelain -- App/Resources/js Packages/Core/Tests/CoreTests/Fixtures)
+          if [ -n "$CHANGED" ]; then
+            echo "::error::The JS bundle or the Swift test fixtures are stale. Run 'npm run bundle && npm test' in js/ and commit the result."
+            echo "$CHANGED"
             exit 1
           fi
 

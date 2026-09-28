@@ -25,6 +25,1622 @@
     }
   });
 
+  // src/polyfills/native.js
+  function nativeFn(name) {
+    const n = globalThis.__native;
+    const fn = n && n[name];
+    return typeof fn === "function" ? fn.bind(n) : null;
+  }
+  __name(nativeFn, "nativeFn");
+
+  // src/polyfills/encoding.js
+  function utf8Encode(str) {
+    str = String(str);
+    const nativeEncode = nativeFn("utf8Encode");
+    if (nativeEncode && str.length > 64) {
+      const out = nativeEncode(str);
+      if (out instanceof Uint8Array) return out;
+    }
+    const bytes = [];
+    for (let i2 = 0; i2 < str.length; i2++) {
+      let code = str.charCodeAt(i2);
+      if (code >= 55296 && code <= 56319 && i2 + 1 < str.length) {
+        const next = str.charCodeAt(i2 + 1);
+        if (next >= 56320 && next <= 57343) {
+          code = 65536 + (code - 55296 << 10) + (next - 56320);
+          i2++;
+        } else {
+          code = 65533;
+        }
+      } else if (code >= 55296 && code <= 57343) {
+        code = 65533;
+      }
+      if (code < 128) {
+        bytes.push(code);
+      } else if (code < 2048) {
+        bytes.push(192 | code >> 6, 128 | code & 63);
+      } else if (code < 65536) {
+        bytes.push(224 | code >> 12, 128 | code >> 6 & 63, 128 | code & 63);
+      } else {
+        bytes.push(240 | code >> 18, 128 | code >> 12 & 63, 128 | code >> 6 & 63, 128 | code & 63);
+      }
+    }
+    return new Uint8Array(bytes);
+  }
+  __name(utf8Encode, "utf8Encode");
+  function toUint8Array(input) {
+    if (input == null) return new Uint8Array(0);
+    if (input instanceof Uint8Array) return input;
+    if (input instanceof ArrayBuffer) return new Uint8Array(input);
+    if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    if (typeof input.byteLength === "number" && typeof input.slice === "function") return new Uint8Array(input);
+    throw new TypeError("Expected an ArrayBuffer or ArrayBufferView");
+  }
+  __name(toUint8Array, "toUint8Array");
+  function utf8Decode(input) {
+    const bytes = toUint8Array(input);
+    const nativeDecode = nativeFn("utf8Decode");
+    if (nativeDecode && bytes.length > 64) {
+      const out2 = nativeDecode(bytes);
+      if (typeof out2 === "string") return out2;
+    }
+    let out = "";
+    const chunk = [];
+    const flush = /* @__PURE__ */ __name(() => {
+      out += String.fromCharCode.apply(null, chunk);
+      chunk.length = 0;
+    }, "flush");
+    let i2 = 0;
+    if (bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191) i2 = 3;
+    while (i2 < bytes.length) {
+      const b0 = bytes[i2];
+      let code = 65533;
+      let size = 1;
+      if (b0 < 128) {
+        code = b0;
+      } else if (b0 >= 194 && b0 <= 223 && i2 + 1 < bytes.length && (bytes[i2 + 1] & 192) === 128) {
+        code = (b0 & 31) << 6 | bytes[i2 + 1] & 63;
+        size = 2;
+      } else if (b0 >= 224 && b0 <= 239 && i2 + 2 < bytes.length && (bytes[i2 + 1] & 192) === 128 && (bytes[i2 + 2] & 192) === 128) {
+        const c = (b0 & 15) << 12 | (bytes[i2 + 1] & 63) << 6 | bytes[i2 + 2] & 63;
+        if (c >= 2048 && (c < 55296 || c > 57343)) {
+          code = c;
+          size = 3;
+        }
+      } else if (b0 >= 240 && b0 <= 244 && i2 + 3 < bytes.length && (bytes[i2 + 1] & 192) === 128 && (bytes[i2 + 2] & 192) === 128 && (bytes[i2 + 3] & 192) === 128) {
+        const c = (b0 & 7) << 18 | (bytes[i2 + 1] & 63) << 12 | (bytes[i2 + 2] & 63) << 6 | bytes[i2 + 3] & 63;
+        if (c >= 65536 && c <= 1114111) {
+          code = c;
+          size = 4;
+        }
+      }
+      if (code > 65535) {
+        code -= 65536;
+        chunk.push(55296 + (code >> 10), 56320 + (code & 1023));
+      } else {
+        chunk.push(code);
+      }
+      i2 += size;
+      if (chunk.length >= 8192) flush();
+    }
+    flush();
+    return out;
+  }
+  __name(utf8Decode, "utf8Decode");
+  function latin1Decode(input) {
+    const bytes = toUint8Array(input);
+    let out = "";
+    for (let i2 = 0; i2 < bytes.length; i2 += 8192) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i2, i2 + 8192));
+    }
+    return out;
+  }
+  __name(latin1Decode, "latin1Decode");
+  var _TextEncoder = class _TextEncoder {
+    get encoding() {
+      return "utf-8";
+    }
+    encode(input = "") {
+      return utf8Encode(input);
+    }
+    encodeInto(input, dest) {
+      const bytes = utf8Encode(input);
+      const written = Math.min(bytes.length, dest.length);
+      dest.set(bytes.subarray(0, written));
+      return { read: input.length, written };
+    }
+  };
+  __name(_TextEncoder, "TextEncoder");
+  var TextEncoder2 = _TextEncoder;
+  var _TextDecoder = class _TextDecoder {
+    constructor(label = "utf-8", options = {}) {
+      const normalized = String(label).trim().toLowerCase();
+      this._encoding = normalized === "utf8" ? "utf-8" : normalized;
+      this.fatal = !!options.fatal;
+      this.ignoreBOM = !!options.ignoreBOM;
+    }
+    get encoding() {
+      return this._encoding;
+    }
+    decode(input) {
+      if (input === void 0) return "";
+      if (this._encoding === "utf-8") return utf8Decode(input);
+      if (this._encoding === "utf-16le" || this._encoding === "utf-16") {
+        const bytes = toUint8Array(input);
+        let out = "";
+        for (let i2 = 0; i2 + 1 < bytes.length; i2 += 2) out += String.fromCharCode(bytes[i2] | bytes[i2 + 1] << 8);
+        return out;
+      }
+      return latin1Decode(input);
+    }
+  };
+  __name(_TextDecoder, "TextDecoder");
+  var TextDecoder2 = _TextDecoder;
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var B64_LOOKUP = (() => {
+    const table = new Int16Array(256).fill(-1);
+    for (let i2 = 0; i2 < B64.length; i2++) table[B64.charCodeAt(i2)] = i2;
+    table["-".charCodeAt(0)] = 62;
+    table["_".charCodeAt(0)] = 63;
+    return table;
+  })();
+  function btoa2(input) {
+    const str = String(input);
+    let out = "";
+    for (let i2 = 0; i2 < str.length; i2 += 3) {
+      const a = str.charCodeAt(i2);
+      const b = i2 + 1 < str.length ? str.charCodeAt(i2 + 1) : NaN;
+      const c = i2 + 2 < str.length ? str.charCodeAt(i2 + 2) : NaN;
+      if (a > 255 || b > 255 || c > 255) {
+        throw new Error("InvalidCharacterError: btoa() argument contains characters outside of the Latin1 range");
+      }
+      const triple = a << 16 | (b || 0) << 8 | (c || 0);
+      out += B64[triple >> 18 & 63] + B64[triple >> 12 & 63] + (Number.isNaN(b) ? "=" : B64[triple >> 6 & 63]) + (Number.isNaN(c) ? "=" : B64[triple & 63]);
+    }
+    return out;
+  }
+  __name(btoa2, "btoa");
+  function atob2(input) {
+    const str = String(input).replace(/[\t\n\f\r ]+/g, "").replace(/=+$/, "");
+    if (str.length % 4 === 1) throw new Error("InvalidCharacterError: The string to be decoded is not correctly encoded.");
+    let out = "";
+    let buffer = 0;
+    let bits2 = 0;
+    for (let i2 = 0; i2 < str.length; i2++) {
+      const value = B64_LOOKUP[str.charCodeAt(i2) & 255];
+      if (value < 0 || str.charCodeAt(i2) > 255) {
+        throw new Error("InvalidCharacterError: The string to be decoded is not correctly encoded.");
+      }
+      buffer = buffer << 6 | value;
+      bits2 += 6;
+      if (bits2 >= 8) {
+        bits2 -= 8;
+        out += String.fromCharCode(buffer >> bits2 & 255);
+      }
+    }
+    return out;
+  }
+  __name(atob2, "atob");
+
+  // src/polyfills/base.js
+  function formatArg(arg) {
+    if (typeof arg === "string") return arg;
+    if (arg instanceof Error) return `${arg.name}: ${arg.message}${arg.stack ? `
+${arg.stack}` : ""}`;
+    if (arg === void 0) return "undefined";
+    if (typeof arg === "function") return `[Function ${arg.name || "anonymous"}]`;
+    try {
+      const seen = /* @__PURE__ */ new WeakSet();
+      const json = JSON.stringify(arg, (key, value) => {
+        if (typeof value === "object" && value !== null) {
+          if (seen.has(value)) return "[Circular]";
+          seen.add(value);
+        }
+        if (typeof value === "bigint") return value.toString();
+        return value;
+      });
+      return json && json.length > 4e3 ? json.slice(0, 4e3) + "…" : String(json);
+    } catch {
+      return String(arg);
+    }
+  }
+  __name(formatArg, "formatArg");
+  function makeConsole() {
+    const log = nativeFn("log");
+    const emit = /* @__PURE__ */ __name((level) => (...args) => {
+      const message = args.map(formatArg).join(" ");
+      if (log) log(level, message);
+    }, "emit");
+    return {
+      log: emit("log"),
+      info: emit("info"),
+      warn: emit("warn"),
+      error: emit("error"),
+      debug: emit("debug"),
+      trace: emit("debug"),
+      group() {
+      },
+      groupCollapsed() {
+      },
+      groupEnd() {
+      },
+      time() {
+      },
+      timeEnd() {
+      },
+      assert(cond, ...args) {
+        if (!cond) emit("error")("Assertion failed", ...args);
+      },
+      table: emit("log"),
+      dir: emit("log")
+    };
+  }
+  __name(makeConsole, "makeConsole");
+  function reportError(error2) {
+    const log = nativeFn("log");
+    if (log) log("error", `Uncaught ${formatArg(error2)}`);
+  }
+  __name(reportError, "reportError");
+  var timerSeq = 0;
+  var timers = /* @__PURE__ */ new Map();
+  globalThis.__tubeTimerFire = function(id) {
+    const timer = timers.get(id);
+    if (!timer) return;
+    if (timer.interval) {
+      const setTimer = nativeFn("setTimer");
+      if (setTimer) setTimer(id, timer.delay);
+    } else {
+      timers.delete(id);
+    }
+    try {
+      timer.fn(...timer.args);
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  function startTimer(fn, delay, args, interval) {
+    if (typeof fn !== "function") {
+      const code = String(fn);
+      fn = /* @__PURE__ */ __name(() => (0, eval)(code), "fn");
+    }
+    const id = ++timerSeq;
+    const ms = Math.max(0, Number(delay) || 0);
+    timers.set(id, { fn, args, interval, delay: interval ? Math.max(ms, 1) : ms });
+    const setTimer = nativeFn("setTimer");
+    if (setTimer) {
+      setTimer(id, interval ? Math.max(ms, 1) : ms);
+    } else {
+      Promise.resolve().then(() => globalThis.__tubeTimerFire(id));
+    }
+    return id;
+  }
+  __name(startTimer, "startTimer");
+  function stopTimer(id) {
+    if (!timers.has(id)) return;
+    timers.delete(id);
+    const clearTimer = nativeFn("clearTimer");
+    if (clearTimer) clearTimer(id);
+  }
+  __name(stopTimer, "stopTimer");
+  var setTimeout2 = /* @__PURE__ */ __name((fn, delay, ...args) => startTimer(fn, delay, args, false), "setTimeout");
+  var setInterval2 = /* @__PURE__ */ __name((fn, delay, ...args) => startTimer(fn, delay, args, true), "setInterval");
+  var clearTimeout2 = /* @__PURE__ */ __name((id) => stopTimer(id), "clearTimeout");
+  var clearInterval2 = /* @__PURE__ */ __name((id) => stopTimer(id), "clearInterval");
+  var setImmediate = /* @__PURE__ */ __name((fn, ...args) => startTimer(fn, 0, args, false), "setImmediate");
+  var clearImmediate = /* @__PURE__ */ __name((id) => stopTimer(id), "clearImmediate");
+  function queueMicrotask2(fn) {
+    Promise.resolve().then(fn).catch(reportError);
+  }
+  __name(queueMicrotask2, "queueMicrotask");
+  var startMs = Date.now();
+  var performance = {
+    timeOrigin: startMs,
+    now() {
+      const now = nativeFn("now");
+      return now ? now() : Date.now() - startMs;
+    },
+    mark() {
+    },
+    measure() {
+    },
+    getEntriesByName() {
+      return [];
+    },
+    toJSON() {
+      return { timeOrigin: startMs };
+    }
+  };
+  function randomBytes(length) {
+    const nativeRandom = nativeFn("randomBytes");
+    if (nativeRandom) {
+      const bytes = nativeRandom(length);
+      if (bytes && bytes.length === length) return bytes;
+    }
+    const out = new Uint8Array(length);
+    for (let i2 = 0; i2 < length; i2++) out[i2] = Math.floor(Math.random() * 256);
+    return out;
+  }
+  __name(randomBytes, "randomBytes");
+  var crypto2 = {
+    getRandomValues(array) {
+      if (!ArrayBuffer.isView(array)) throw new TypeError("Expected an integer TypedArray");
+      if (array.byteLength > 65536) throw new Error("QuotaExceededError");
+      const bytes = randomBytes(array.byteLength);
+      new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(bytes);
+      return array;
+    },
+    randomUUID() {
+      const b = randomBytes(16);
+      b[6] = b[6] & 15 | 64;
+      b[8] = b[8] & 63 | 128;
+      const hex = Array.from(b, (x2) => x2.toString(16).padStart(2, "0")).join("");
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+  };
+  function sha1Hex(message) {
+    const nativeSha1 = nativeFn("sha1Hex");
+    if (nativeSha1) {
+      const out = nativeSha1(String(message));
+      if (typeof out === "string" && out.length === 40) return out;
+    }
+    const bytes = utf8Encode(String(message));
+    const bitLength = bytes.length * 8;
+    const paddedLength = (bytes.length + 8 >> 6) + 1 << 6;
+    const data = new Uint8Array(paddedLength);
+    data.set(bytes);
+    data[bytes.length] = 128;
+    const view = new DataView(data.buffer);
+    view.setUint32(paddedLength - 4, bitLength >>> 0);
+    view.setUint32(paddedLength - 8, Math.floor(bitLength / 4294967296));
+    let h0 = 1732584193, h1 = 4023233417, h2 = 2562383102, h3 = 271733878, h4 = 3285377520;
+    const w = new Uint32Array(80);
+    for (let offset = 0; offset < paddedLength; offset += 64) {
+      for (let i2 = 0; i2 < 16; i2++) w[i2] = view.getUint32(offset + i2 * 4);
+      for (let i2 = 16; i2 < 80; i2++) {
+        const x2 = w[i2 - 3] ^ w[i2 - 8] ^ w[i2 - 14] ^ w[i2 - 16];
+        w[i2] = x2 << 1 | x2 >>> 31;
+      }
+      let a = h0, b = h1, c = h2, d = h3, e = h4;
+      for (let i2 = 0; i2 < 80; i2++) {
+        let f, k;
+        if (i2 < 20) {
+          f = b & c | ~b & d;
+          k = 1518500249;
+        } else if (i2 < 40) {
+          f = b ^ c ^ d;
+          k = 1859775393;
+        } else if (i2 < 60) {
+          f = b & c | b & d | c & d;
+          k = 2400959708;
+        } else {
+          f = b ^ c ^ d;
+          k = 3395469782;
+        }
+        const temp = (a << 5 | a >>> 27) + f + e + k + w[i2] >>> 0;
+        e = d;
+        d = c;
+        c = b << 30 | b >>> 2;
+        b = a;
+        a = temp;
+      }
+      h0 = h0 + a >>> 0;
+      h1 = h1 + b >>> 0;
+      h2 = h2 + c >>> 0;
+      h3 = h3 + d >>> 0;
+      h4 = h4 + e >>> 0;
+    }
+    return [h0, h1, h2, h3, h4].map((h) => (h >>> 0).toString(16).padStart(8, "0")).join("");
+  }
+  __name(sha1Hex, "sha1Hex");
+  function structuredClone2(value) {
+    if (value === void 0) return void 0;
+    return JSON.parse(JSON.stringify(value));
+  }
+  __name(structuredClone2, "structuredClone");
+
+  // src/polyfills/url.js
+  var SPECIAL = { "http:": "80", "https:": "443", "ws:": "80", "wss:": "443", "ftp:": "21", "file:": "" };
+  var HEX = "0123456789ABCDEF";
+  function percentEncodeBytes(str, shouldEncode) {
+    let out = "";
+    for (let i2 = 0; i2 < str.length; i2++) {
+      const code = str.charCodeAt(i2);
+      if (code < 128) {
+        const ch = str[i2];
+        if (shouldEncode(code, ch)) {
+          out += "%" + HEX[code >> 4] + HEX[code & 15];
+        } else {
+          out += ch;
+        }
+        continue;
+      }
+      let cp = str[i2];
+      if (code >= 55296 && code <= 56319 && i2 + 1 < str.length) {
+        cp += str[i2 + 1];
+        i2++;
+      }
+      const bytes = utf8Encode(cp);
+      for (const b of bytes) out += "%" + HEX[b >> 4] + HEX[b & 15];
+    }
+    return out;
+  }
+  __name(percentEncodeBytes, "percentEncodeBytes");
+  var C0 = /* @__PURE__ */ __name((c) => c <= 31 || c === 127, "C0");
+  var FRAGMENT_SET = /* @__PURE__ */ __name((c, ch) => C0(c) || ch === " " || ch === '"' || ch === "<" || ch === ">" || ch === "`", "FRAGMENT_SET");
+  var QUERY_SET = /* @__PURE__ */ __name((c, ch) => C0(c) || ch === " " || ch === '"' || ch === "#" || ch === "<" || ch === ">", "QUERY_SET");
+  var SPECIAL_QUERY_SET = /* @__PURE__ */ __name((c, ch) => QUERY_SET(c, ch) || ch === "'", "SPECIAL_QUERY_SET");
+  var PATH_SET = /* @__PURE__ */ __name((c, ch) => QUERY_SET(c, ch) || ch === "?" || ch === "`" || ch === "{" || ch === "}" || ch === "^", "PATH_SET");
+  var USERINFO_SET = /* @__PURE__ */ __name((c, ch) => PATH_SET(c, ch) || "/:;=@[\\]|".includes(ch), "USERINFO_SET");
+  function formEncode(str) {
+    const bytes = utf8Encode(String(str));
+    let out = "";
+    for (const b of bytes) {
+      if (b >= 48 && b <= 57 || b >= 65 && b <= 90 || b >= 97 && b <= 122 || b === 42 || b === 45 || b === 46 || b === 95) {
+        out += String.fromCharCode(b);
+      } else if (b === 32) {
+        out += "+";
+      } else {
+        out += "%" + HEX[b >> 4] + HEX[b & 15];
+      }
+    }
+    return out;
+  }
+  __name(formEncode, "formEncode");
+  function isHex(c) {
+    return c >= 48 && c <= 57 || c >= 65 && c <= 70 || c >= 97 && c <= 102;
+  }
+  __name(isHex, "isHex");
+  function percentDecode(str) {
+    if (str.indexOf("%") === -1) return str;
+    const bytes = utf8Encode(str);
+    const out = [];
+    for (let i2 = 0; i2 < bytes.length; i2++) {
+      const b = bytes[i2];
+      if (b === 37 && i2 + 2 < bytes.length && isHex(bytes[i2 + 1]) && isHex(bytes[i2 + 2])) {
+        out.push(parseInt(String.fromCharCode(bytes[i2 + 1], bytes[i2 + 2]), 16));
+        i2 += 2;
+      } else {
+        out.push(b);
+      }
+    }
+    return utf8Decode(new Uint8Array(out));
+  }
+  __name(percentDecode, "percentDecode");
+  function formDecode(str) {
+    return percentDecode(str.replace(/\+/g, " "));
+  }
+  __name(formDecode, "formDecode");
+  var _URLSearchParams = class _URLSearchParams {
+    constructor(init2) {
+      this._list = [];
+      this._url = null;
+      if (init2 == null || init2 === "") return;
+      if (init2 instanceof _URLSearchParams) {
+        this._list = init2._list.map(([k, v]) => [k, v]);
+      } else if (typeof init2 === "object" && typeof init2[Symbol.iterator] === "function") {
+        for (const pair of init2) {
+          const arr = Array.from(pair);
+          if (arr.length !== 2) throw new TypeError("Each query pair must be an iterable [name, value] tuple");
+          this._list.push([String(arr[0]), String(arr[1])]);
+        }
+      } else if (typeof init2 === "object") {
+        for (const key of Object.keys(init2)) this._list.push([key, String(init2[key])]);
+      } else {
+        this._parse(String(init2));
+      }
+    }
+    _parse(str) {
+      this._list = [];
+      if (str.startsWith("?")) str = str.slice(1);
+      for (const part of str.split("&")) {
+        if (!part) continue;
+        const eq = part.indexOf("=");
+        const name = eq === -1 ? part : part.slice(0, eq);
+        const value = eq === -1 ? "" : part.slice(eq + 1);
+        this._list.push([formDecode(name), formDecode(value)]);
+      }
+    }
+    _update() {
+      if (this._url) {
+        const serialized = this.toString();
+        this._url._query = serialized === "" ? null : serialized;
+      }
+    }
+    get size() {
+      return this._list.length;
+    }
+    append(name, value) {
+      this._list.push([String(name), String(value)]);
+      this._update();
+    }
+    delete(name, value) {
+      name = String(name);
+      this._list = this._list.filter(([k, v]) => !(k === name && (value === void 0 || v === String(value))));
+      this._update();
+    }
+    get(name) {
+      name = String(name);
+      const found = this._list.find(([k]) => k === name);
+      return found ? found[1] : null;
+    }
+    getAll(name) {
+      name = String(name);
+      return this._list.filter(([k]) => k === name).map(([, v]) => v);
+    }
+    has(name, value) {
+      name = String(name);
+      return this._list.some(([k, v]) => k === name && (value === void 0 || v === String(value)));
+    }
+    set(name, value) {
+      name = String(name);
+      value = String(value);
+      const index = this._list.findIndex(([k]) => k === name);
+      if (index === -1) {
+        this._list.push([name, value]);
+      } else {
+        this._list[index][1] = value;
+        this._list = this._list.filter(([k], i2) => k !== name || i2 === index);
+      }
+      this._update();
+    }
+    sort() {
+      this._list = this._list.map((pair, index) => ({ pair, index })).sort((a, b) => a.pair[0] < b.pair[0] ? -1 : a.pair[0] > b.pair[0] ? 1 : a.index - b.index).map(({ pair }) => pair);
+      this._update();
+    }
+    forEach(callback, thisArg) {
+      for (const [k, v] of this._list.slice()) callback.call(thisArg, v, k, this);
+    }
+    keys() {
+      return this._list.map(([k]) => k)[Symbol.iterator]();
+    }
+    values() {
+      return this._list.map(([, v]) => v)[Symbol.iterator]();
+    }
+    entries() {
+      return this._list.map(([k, v]) => [k, v])[Symbol.iterator]();
+    }
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+    toString() {
+      return this._list.map(([k, v]) => `${formEncode(k)}=${formEncode(v)}`).join("&");
+    }
+    get [Symbol.toStringTag]() {
+      return "URLSearchParams";
+    }
+  };
+  __name(_URLSearchParams, "URLSearchParams");
+  var URLSearchParams2 = _URLSearchParams;
+  function removeDotSegments(segments) {
+    const out = [];
+    for (let i2 = 0; i2 < segments.length; i2++) {
+      const seg = segments[i2];
+      const lower = seg.toLowerCase();
+      const isLast = i2 === segments.length - 1;
+      if (seg === ".." || lower === ".%2e" || lower === "%2e." || lower === "%2e%2e") {
+        if (out.length > 0) out.pop();
+        if (isLast) out.push("");
+      } else if (seg === "." || lower === "%2e") {
+        if (isLast) out.push("");
+      } else {
+        out.push(seg);
+      }
+    }
+    return out;
+  }
+  __name(removeDotSegments, "removeDotSegments");
+  function parseHost(host, special) {
+    if (host.startsWith("[")) {
+      if (!host.endsWith("]")) throw new TypeError("Invalid URL: bad IPv6 host");
+      return host.toLowerCase();
+    }
+    const decoded = percentDecode(host);
+    if (special) {
+      if (decoded === "") throw new TypeError("Invalid URL: empty host");
+      if (/[\u0000\t\n\r #/:<>?@[\\\]^|%]/.test(decoded)) throw new TypeError("Invalid URL: forbidden host code point");
+      return decoded.toLowerCase();
+    }
+    return percentEncodeBytes(host, (c) => C0(c) || c === 32);
+  }
+  __name(parseHost, "parseHost");
+  function splitSuffix(rest) {
+    let fragment = null;
+    const hashIndex = rest.indexOf("#");
+    if (hashIndex !== -1) {
+      fragment = rest.slice(hashIndex + 1);
+      rest = rest.slice(0, hashIndex);
+    }
+    let query = null;
+    const qIndex = rest.indexOf("?");
+    if (qIndex !== -1) {
+      query = rest.slice(qIndex + 1);
+      rest = rest.slice(0, qIndex);
+    }
+    return { path: rest, query, fragment };
+  }
+  __name(splitSuffix, "splitSuffix");
+  function parseAbsolute(input) {
+    const m = /^([a-zA-Z][a-zA-Z0-9+.-]*):(.*)$/s.exec(input);
+    if (!m) return null;
+    const protocol = m[1].toLowerCase() + ":";
+    let rest = m[2];
+    const special = Object.prototype.hasOwnProperty.call(SPECIAL, protocol);
+    const record = {
+      protocol,
+      special,
+      username: "",
+      password: "",
+      hostname: "",
+      port: "",
+      path: "",
+      opaque: false,
+      _query: null,
+      fragment: null
+    };
+    if (special) rest = rest.replace(/\\/g, "/");
+    if (special || rest.startsWith("//")) {
+      if (special) rest = rest.replace(/^\/*/, "");
+      else rest = rest.slice(2);
+      let authorityEnd = rest.search(/[/?#]/);
+      if (authorityEnd === -1) authorityEnd = rest.length;
+      let authority = rest.slice(0, authorityEnd);
+      rest = rest.slice(authorityEnd);
+      const at = authority.lastIndexOf("@");
+      if (at !== -1) {
+        const userinfo = authority.slice(0, at);
+        authority = authority.slice(at + 1);
+        const colon = userinfo.indexOf(":");
+        record.username = percentEncodeBytes(colon === -1 ? userinfo : userinfo.slice(0, colon), USERINFO_SET);
+        record.password = colon === -1 ? "" : percentEncodeBytes(userinfo.slice(colon + 1), USERINFO_SET);
+      }
+      let hostPart = authority;
+      let portPart = "";
+      const portMatch = /:(\d*)$/.exec(authority);
+      if (portMatch && !authority.endsWith("]")) {
+        hostPart = authority.slice(0, portMatch.index);
+        portPart = portMatch[1];
+      } else if (/:[^\]]*$/.test(authority) && !authority.startsWith("[")) {
+        throw new TypeError("Invalid URL: bad port");
+      }
+      if (protocol !== "file:" || hostPart !== "") record.hostname = parseHost(hostPart, special);
+      if (portPart !== "") {
+        const port = parseInt(portPart, 10);
+        if (port > 65535) throw new TypeError("Invalid URL: port out of range");
+        record.port = String(port) === SPECIAL[protocol] ? "" : String(port);
+      }
+      const { path: path2, query: query2, fragment: fragment2 } = splitSuffix(rest);
+      record.path = normalizePath(path2, special);
+      record._query = query2 === null ? null : percentEncodeBytes(query2, special ? SPECIAL_QUERY_SET : QUERY_SET);
+      record.fragment = fragment2 === null ? null : percentEncodeBytes(fragment2, FRAGMENT_SET);
+      return record;
+    }
+    const { path, query, fragment } = splitSuffix(rest);
+    if (path.startsWith("/")) {
+      record.path = normalizePath(path, false);
+    } else {
+      record.opaque = true;
+      record.path = percentEncodeBytes(path, C0);
+    }
+    record._query = query === null ? null : percentEncodeBytes(query, QUERY_SET);
+    record.fragment = fragment === null ? null : percentEncodeBytes(fragment, FRAGMENT_SET);
+    return record;
+  }
+  __name(parseAbsolute, "parseAbsolute");
+  function normalizePath(path, special) {
+    if (special && path === "") return "/";
+    if (path === "") return "";
+    const segments = path.split("/").slice(1);
+    const cleaned = removeDotSegments(segments).map((s) => percentEncodeBytes(s, PATH_SET));
+    return "/" + cleaned.join("/");
+  }
+  __name(normalizePath, "normalizePath");
+  function resolveRelative(input, base) {
+    if (base.opaque) {
+      if (input.startsWith("#")) {
+        return { ...base, fragment: percentEncodeBytes(input.slice(1), FRAGMENT_SET) };
+      }
+      throw new TypeError("Invalid URL");
+    }
+    if (base.special) input = input.replace(/\\/g, "/");
+    if (input.startsWith("//")) return parseAbsolute(base.protocol + input);
+    const record = { ...base, fragment: null };
+    const { path, query, fragment } = splitSuffix(input);
+    const encQuery = /* @__PURE__ */ __name((q) => q === null ? null : percentEncodeBytes(q, base.special ? SPECIAL_QUERY_SET : QUERY_SET), "encQuery");
+    record.fragment = fragment === null ? null : percentEncodeBytes(fragment, FRAGMENT_SET);
+    if (path === "") {
+      record._query = query === null ? base._query : encQuery(query);
+      return record;
+    }
+    record._query = encQuery(query);
+    if (path.startsWith("/")) {
+      record.path = normalizePath(path, base.special);
+      return record;
+    }
+    const baseDir = base.path.slice(0, base.path.lastIndexOf("/") + 1) || "/";
+    record.path = normalizePath(baseDir + path, base.special);
+    return record;
+  }
+  __name(resolveRelative, "resolveRelative");
+  var _URL = class _URL {
+    constructor(url, base) {
+      const input = String(url instanceof _URL ? url.href : url).replace(/^[\u0000- ]+|[\u0000- ]+$/g, "").replace(/[\t\n\r]/g, "");
+      let record = parseAbsolute(input);
+      if (!record) {
+        if (base === void 0) throw new TypeError(`Invalid URL: ${input}`);
+        const baseRecord = base instanceof _URL ? base._record() : new _URL(String(base))._record();
+        record = resolveRelative(input, baseRecord);
+      }
+      Object.assign(this, record);
+      this._searchParams = new URLSearchParams2(this._query || "");
+      this._searchParams._url = this;
+    }
+    static canParse(url, base) {
+      try {
+        new _URL(url, base);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    static parse(url, base) {
+      try {
+        return new _URL(url, base);
+      } catch {
+        return null;
+      }
+    }
+    _record() {
+      return {
+        protocol: this.protocol,
+        special: this.special,
+        username: this.username,
+        password: this.password,
+        hostname: this.hostname,
+        port: this.port,
+        path: this.path,
+        opaque: this.opaque,
+        _query: this._query,
+        fragment: this.fragment
+      };
+    }
+    get host() {
+      return this.port ? `${this.hostname}:${this.port}` : this.hostname;
+    }
+    set host(value) {
+      const parsed = parseAbsolute(`${this.protocol}//${value}`);
+      if (parsed) {
+        this.hostname = parsed.hostname;
+        this.port = parsed.port;
+      }
+    }
+    get origin() {
+      if (this.special && this.protocol !== "file:") return `${this.protocol}//${this.host}`;
+      return "null";
+    }
+    get pathname() {
+      return this.path;
+    }
+    set pathname(value) {
+      if (this.opaque) return;
+      const v = String(value);
+      this.path = normalizePath(v.startsWith("/") ? v : "/" + v, this.special);
+    }
+    get search() {
+      return this._query ? `?${this._query}` : "";
+    }
+    set search(value) {
+      let v = String(value);
+      if (v.startsWith("?")) v = v.slice(1);
+      this._query = v === "" ? null : percentEncodeBytes(v, this.special ? SPECIAL_QUERY_SET : QUERY_SET);
+      this._searchParams._list = [];
+      this._searchParams._parse(this._query || "");
+    }
+    get searchParams() {
+      return this._searchParams;
+    }
+    get hash() {
+      return this.fragment ? `#${this.fragment}` : "";
+    }
+    set hash(value) {
+      let v = String(value);
+      if (v.startsWith("#")) v = v.slice(1);
+      this.fragment = v === "" ? null : percentEncodeBytes(v, FRAGMENT_SET);
+    }
+    get href() {
+      let out = this.protocol;
+      if (this.hostname !== "" || this.special) {
+        out += "//";
+        if (this.username || this.password) {
+          out += this.username;
+          if (this.password) out += ":" + this.password;
+          out += "@";
+        }
+        out += this.host;
+      }
+      out += this.path;
+      if (this._query !== null) out += "?" + this._query;
+      if (this.fragment !== null) out += "#" + this.fragment;
+      return out;
+    }
+    set href(value) {
+      const next = new _URL(value);
+      Object.assign(this, next._record());
+      this._searchParams = new URLSearchParams2(this._query || "");
+      this._searchParams._url = this;
+    }
+    toString() {
+      return this.href;
+    }
+    toJSON() {
+      return this.href;
+    }
+    get [Symbol.toStringTag]() {
+      return "URL";
+    }
+  };
+  __name(_URL, "URL");
+  var URL2 = _URL;
+
+  // src/polyfills/events.js
+  var _DOMException = class _DOMException extends Error {
+    constructor(message = "", name = "Error") {
+      super(message);
+      this.name = name;
+    }
+    get code() {
+      return { AbortError: 20, TimeoutError: 23, NotFoundError: 8, InvalidStateError: 11 }[this.name] || 0;
+    }
+  };
+  __name(_DOMException, "DOMException");
+  var DOMException = _DOMException;
+  var _Event = class _Event {
+    constructor(type, init2 = {}) {
+      if (arguments.length === 0) throw new TypeError("Event type is required");
+      this.type = String(type);
+      this.bubbles = !!init2.bubbles;
+      this.cancelable = !!init2.cancelable;
+      this.composed = !!init2.composed;
+      this.defaultPrevented = false;
+      this.timeStamp = Date.now();
+      this.target = null;
+      this.currentTarget = null;
+      this.isTrusted = false;
+      this._stop = false;
+    }
+    preventDefault() {
+      if (this.cancelable) this.defaultPrevented = true;
+    }
+    stopPropagation() {
+    }
+    stopImmediatePropagation() {
+      this._stop = true;
+    }
+    composedPath() {
+      return this.target ? [this.target] : [];
+    }
+  };
+  __name(_Event, "Event");
+  var Event = _Event;
+  var _CustomEvent = class _CustomEvent extends Event {
+    constructor(type, init2 = {}) {
+      super(type, init2);
+      this.detail = init2.detail === void 0 ? null : init2.detail;
+    }
+  };
+  __name(_CustomEvent, "CustomEvent");
+  var CustomEvent = _CustomEvent;
+  var _EventTarget = class _EventTarget {
+    constructor() {
+      Object.defineProperty(this, "_listeners", { value: /* @__PURE__ */ new Map(), enumerable: false, writable: true });
+    }
+    _getListeners() {
+      if (!this._listeners) Object.defineProperty(this, "_listeners", { value: /* @__PURE__ */ new Map(), enumerable: false });
+      return this._listeners;
+    }
+    addEventListener(type, listener, options) {
+      if (!listener) return;
+      const once = typeof options === "object" && options !== null && !!options.once;
+      const signal = typeof options === "object" && options !== null ? options.signal : void 0;
+      const map = this._getListeners();
+      const list = map.get(type) || [];
+      if (list.some((entry2) => entry2.listener === listener)) return;
+      const entry = { listener, once };
+      list.push(entry);
+      map.set(type, list);
+      if (signal) {
+        signal.addEventListener("abort", () => this.removeEventListener(type, listener), { once: true });
+      }
+    }
+    removeEventListener(type, listener) {
+      const map = this._getListeners();
+      const list = map.get(type);
+      if (!list) return;
+      const index = list.findIndex((entry) => entry.listener === listener);
+      if (index !== -1) list.splice(index, 1);
+    }
+    dispatchEvent(event) {
+      if (!(event && typeof event.type === "string")) throw new TypeError("Argument must be an Event");
+      try {
+        event.target = event.target || this;
+      } catch {
+      }
+      try {
+        event.currentTarget = this;
+      } catch {
+      }
+      const handlerName = "on" + event.type;
+      const list = (this._getListeners().get(event.type) || []).slice();
+      const invoke = /* @__PURE__ */ __name((listener) => {
+        try {
+          if (typeof listener === "function") listener.call(this, event);
+          else if (listener && typeof listener.handleEvent === "function") listener.handleEvent(event);
+        } catch (error2) {
+          (globalThis.reportError || ((e) => console.error(e)))(error2);
+        }
+      }, "invoke");
+      if (typeof this[handlerName] === "function") invoke(this[handlerName]);
+      for (const entry of list) {
+        if (entry.once) this.removeEventListener(event.type, entry.listener);
+        invoke(entry.listener);
+        if (event._stop) break;
+      }
+      return !event.defaultPrevented;
+    }
+  };
+  __name(_EventTarget, "EventTarget");
+  var EventTarget = _EventTarget;
+  var _AbortSignal = class _AbortSignal extends EventTarget {
+    constructor() {
+      super();
+      this.aborted = false;
+      this.reason = void 0;
+      this.onabort = null;
+    }
+    throwIfAborted() {
+      if (this.aborted) throw this.reason;
+    }
+    _abort(reason) {
+      if (this.aborted) return;
+      this.aborted = true;
+      this.reason = reason === void 0 ? new DOMException("This operation was aborted", "AbortError") : reason;
+      this.dispatchEvent(new Event("abort"));
+    }
+    static abort(reason) {
+      const signal = new _AbortSignal();
+      signal._abort(reason);
+      return signal;
+    }
+    static timeout(ms) {
+      const signal = new _AbortSignal();
+      setTimeout(() => signal._abort(new DOMException("The operation timed out.", "TimeoutError")), ms);
+      return signal;
+    }
+    static any(signals) {
+      const signal = new _AbortSignal();
+      for (const s of signals) {
+        if (s.aborted) {
+          signal._abort(s.reason);
+          return signal;
+        }
+        s.addEventListener("abort", () => signal._abort(s.reason), { once: true });
+      }
+      return signal;
+    }
+  };
+  __name(_AbortSignal, "AbortSignal");
+  var AbortSignal = _AbortSignal;
+  var _AbortController = class _AbortController {
+    constructor() {
+      this.signal = new AbortSignal();
+    }
+    abort(reason) {
+      this.signal._abort(reason);
+    }
+  };
+  __name(_AbortController, "AbortController");
+  var AbortController2 = _AbortController;
+
+  // src/polyfills/fetch.js
+  function normalizeName(name) {
+    const n = String(name).trim().toLowerCase();
+    if (!/^[!#$%&'*+\-.^_`|~0-9a-z]+$/.test(n)) throw new TypeError(`Invalid header name: ${name}`);
+    return n;
+  }
+  __name(normalizeName, "normalizeName");
+  function normalizeValue(value) {
+    return String(value).replace(/^[\t\n\r ]+|[\t\n\r ]+$/g, "");
+  }
+  __name(normalizeValue, "normalizeValue");
+  var _Headers = class _Headers {
+    constructor(init2) {
+      this._map = /* @__PURE__ */ new Map();
+      if (init2 == null) return;
+      if (init2 instanceof _Headers || typeof init2.forEach === "function" && typeof init2.get === "function" && !Array.isArray(init2)) {
+        init2.forEach((value, name) => this.append(name, value));
+      } else if (Array.isArray(init2) || typeof init2[Symbol.iterator] === "function") {
+        for (const pair of init2) {
+          const arr = Array.from(pair);
+          if (arr.length !== 2) throw new TypeError("Header pairs must contain exactly two items");
+          this.append(arr[0], arr[1]);
+        }
+      } else if (typeof init2 === "object") {
+        for (const key of Object.keys(init2)) this.append(key, init2[key]);
+      }
+    }
+    append(name, value) {
+      const key = normalizeName(name);
+      const list = this._map.get(key) || [];
+      list.push(normalizeValue(value));
+      this._map.set(key, list);
+    }
+    set(name, value) {
+      this._map.set(normalizeName(name), [normalizeValue(value)]);
+    }
+    get(name) {
+      const list = this._map.get(normalizeName(name));
+      if (!list) return null;
+      return list.join(", ");
+    }
+    getSetCookie() {
+      return (this._map.get("set-cookie") || []).slice();
+    }
+    has(name) {
+      return this._map.has(normalizeName(name));
+    }
+    delete(name) {
+      this._map.delete(normalizeName(name));
+    }
+    forEach(callback, thisArg) {
+      for (const [name, value] of this.entries()) callback.call(thisArg, value, name, this);
+    }
+    *entries() {
+      const names = Array.from(this._map.keys()).sort();
+      for (const name of names) {
+        if (name === "set-cookie") {
+          for (const v of this._map.get(name)) yield [name, v];
+        } else {
+          yield [name, this._map.get(name).join(", ")];
+        }
+      }
+    }
+    *keys() {
+      for (const [name] of this.entries()) yield name;
+    }
+    *values() {
+      for (const [, value] of this.entries()) yield value;
+    }
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+    get [Symbol.toStringTag]() {
+      return "Headers";
+    }
+  };
+  __name(_Headers, "Headers");
+  var Headers2 = _Headers;
+  var _Blob = class _Blob {
+    constructor(parts = [], options = {}) {
+      const chunks = [];
+      for (const part of parts) {
+        if (part instanceof _Blob) chunks.push(part._bytes);
+        else if (typeof part === "string") chunks.push(utf8Encode(part));
+        else chunks.push(new Uint8Array(toUint8Array(part)));
+      }
+      const total = chunks.reduce((n, c) => n + c.length, 0);
+      const bytes = new Uint8Array(total);
+      let offset = 0;
+      for (const c of chunks) {
+        bytes.set(c, offset);
+        offset += c.length;
+      }
+      this._bytes = bytes;
+      this.type = options.type ? String(options.type).toLowerCase() : "";
+    }
+    get size() {
+      return this._bytes.length;
+    }
+    async arrayBuffer() {
+      return this._bytes.slice().buffer;
+    }
+    async bytes() {
+      return this._bytes.slice();
+    }
+    async text() {
+      return utf8Decode(this._bytes);
+    }
+    slice(start = 0, end = this._bytes.length, type = "") {
+      const b = new _Blob([], { type });
+      b._bytes = this._bytes.slice(start, end);
+      return b;
+    }
+    stream() {
+      return new ReadableStream({
+        start: /* @__PURE__ */ __name((controller) => {
+          controller.enqueue(this._bytes.slice());
+          controller.close();
+        }, "start")
+      });
+    }
+  };
+  __name(_Blob, "Blob");
+  var Blob2 = _Blob;
+  var _File = class _File extends Blob2 {
+    constructor(parts, name, options = {}) {
+      super(parts, options);
+      this.name = String(name);
+      this.lastModified = options.lastModified || Date.now();
+    }
+  };
+  __name(_File, "File");
+  var File = _File;
+  var _FormData = class _FormData {
+    constructor() {
+      this._entries = [];
+    }
+    append(name, value, filename) {
+      this._entries.push([String(name), this._wrap(value, filename)]);
+    }
+    set(name, value, filename) {
+      this.delete(name);
+      this.append(name, value, filename);
+    }
+    get(name) {
+      const found = this._entries.find(([k]) => k === String(name));
+      return found ? found[1] : null;
+    }
+    getAll(name) {
+      return this._entries.filter(([k]) => k === String(name)).map(([, v]) => v);
+    }
+    has(name) {
+      return this._entries.some(([k]) => k === String(name));
+    }
+    delete(name) {
+      this._entries = this._entries.filter(([k]) => k !== String(name));
+    }
+    forEach(callback, thisArg) {
+      for (const [k, v] of this._entries) callback.call(thisArg, v, k, this);
+    }
+    entries() {
+      return this._entries.map(([k, v]) => [k, v])[Symbol.iterator]();
+    }
+    [Symbol.iterator]() {
+      return this.entries();
+    }
+    _wrap(value, filename) {
+      if (value instanceof Blob2) {
+        if (value instanceof File && filename === void 0) return value;
+        return new File([value], filename !== void 0 ? filename : "blob", { type: value.type });
+      }
+      return String(value);
+    }
+    _serialize() {
+      const boundary = "----TubeFormBoundary" + Math.random().toString(16).slice(2);
+      const parts = [];
+      for (const [name, value] of this._entries) {
+        if (value instanceof File) {
+          parts.push(`--${boundary}\r
+Content-Disposition: form-data; name="${name}"; filename="${value.name}"\r
+Content-Type: ${value.type || "application/octet-stream"}\r
+\r
+`);
+          parts.push(value);
+          parts.push("\r\n");
+        } else {
+          parts.push(`--${boundary}\r
+Content-Disposition: form-data; name="${name}"\r
+\r
+${value}\r
+`);
+        }
+      }
+      parts.push(`--${boundary}--\r
+`);
+      return { bytes: new Blob2(parts)._bytes, contentType: `multipart/form-data; boundary=${boundary}` };
+    }
+  };
+  __name(_FormData, "FormData");
+  var FormData = _FormData;
+  var _ReadableStream = class _ReadableStream {
+    constructor(source = {}) {
+      this._queue = [];
+      this._closed = false;
+      this._error = null;
+      this._waiters = [];
+      this.locked = false;
+      const controller = {
+        enqueue: /* @__PURE__ */ __name((chunk) => {
+          this._queue.push(chunk);
+          this._flush();
+        }, "enqueue"),
+        close: /* @__PURE__ */ __name(() => {
+          this._closed = true;
+          this._flush();
+        }, "close"),
+        error: /* @__PURE__ */ __name((e) => {
+          this._error = e || new Error("Stream errored");
+          this._flush();
+        }, "error"),
+        desiredSize: 1
+      };
+      this._source = source;
+      this._controller = controller;
+      try {
+        const started = source.start ? source.start(controller) : void 0;
+        if (started && typeof started.then === "function") started.catch((e) => controller.error(e));
+      } catch (e) {
+        controller.error(e);
+      }
+    }
+    _flush() {
+      while (this._waiters.length) {
+        if (this._error) {
+          this._waiters.shift().reject(this._error);
+        } else if (this._queue.length) {
+          this._waiters.shift().resolve({ done: false, value: this._queue.shift() });
+        } else if (this._closed) {
+          this._waiters.shift().resolve({ done: true, value: void 0 });
+        } else {
+          break;
+        }
+      }
+    }
+    getReader() {
+      if (this.locked) throw new TypeError("ReadableStream is locked");
+      this.locked = true;
+      return {
+        read: /* @__PURE__ */ __name(() => new Promise((resolve, reject) => {
+          this._waiters.push({ resolve, reject });
+          if (!this._queue.length && !this._closed && !this._error && this._source.pull) {
+            Promise.resolve(this._source.pull(this._controller)).catch((e) => this._controller.error(e));
+          }
+          this._flush();
+        }), "read"),
+        releaseLock: /* @__PURE__ */ __name(() => {
+          this.locked = false;
+        }, "releaseLock"),
+        cancel: /* @__PURE__ */ __name(async () => {
+          this._closed = true;
+          this._queue = [];
+          if (this._source.cancel) await this._source.cancel();
+          this._flush();
+        }, "cancel"),
+        closed: Promise.resolve()
+      };
+    }
+    cancel() {
+      this._closed = true;
+      this._queue = [];
+      return Promise.resolve();
+    }
+    async *[Symbol.asyncIterator]() {
+      const reader = this.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          yield value;
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+  };
+  __name(_ReadableStream, "ReadableStream");
+  var ReadableStream = _ReadableStream;
+  function extractBody(body) {
+    if (body == null) return { bytes: null, text: null, contentType: null };
+    if (typeof body === "string") return { bytes: null, text: body, contentType: "text/plain;charset=UTF-8" };
+    if (body instanceof URLSearchParams2) {
+      return { bytes: null, text: body.toString(), contentType: "application/x-www-form-urlencoded;charset=UTF-8" };
+    }
+    if (body instanceof FormData) {
+      const { bytes, contentType } = body._serialize();
+      return { bytes, text: null, contentType };
+    }
+    if (body instanceof Blob2) return { bytes: body._bytes, text: null, contentType: body.type || null };
+    if (body instanceof ReadableStream) {
+      if (!body._closed || body._error) throw new TypeError("Streaming request bodies are not supported");
+      const chunks = body._queue.map((c) => typeof c === "string" ? utf8Encode(c) : toUint8Array(c));
+      return { bytes: new Blob2(chunks)._bytes, text: null, contentType: null };
+    }
+    return { bytes: new Uint8Array(toUint8Array(body)), text: null, contentType: null };
+  }
+  __name(extractBody, "extractBody");
+  var hooks = [];
+  function addJSONResponseHook(fn) {
+    hooks.push(fn);
+  }
+  __name(addJSONResponseHook, "addJSONResponseHook");
+  var _Body = class _Body {
+    _initBody(body) {
+      const { bytes, text: text2, contentType } = extractBody(body);
+      this._bodyBytes = bytes;
+      this._bodyText = text2;
+      this._bodyUsed = false;
+      this._hasBody = bytes !== null || text2 !== null;
+      return contentType;
+    }
+    get bodyUsed() {
+      return this._bodyUsed;
+    }
+    get body() {
+      if (!this._hasBody) return null;
+      if (!this._stream) {
+        const bytes = this._peekBytes();
+        this._stream = new ReadableStream({
+          start(controller) {
+            if (bytes.length) controller.enqueue(bytes);
+            controller.close();
+          }
+        });
+      }
+      return this._stream;
+    }
+    _peekBytes() {
+      if (this._bodyBytes === null && this._bodyText !== null) this._bodyBytes = utf8Encode(this._bodyText);
+      return this._bodyBytes || new Uint8Array(0);
+    }
+    _consume() {
+      if (this._bodyUsed) return Promise.reject(new TypeError("Body has already been consumed."));
+      this._bodyUsed = true;
+      return Promise.resolve();
+    }
+    async text() {
+      await this._consume();
+      if (this._bodyText !== null) return this._bodyText;
+      if (this._bodyBytes === null) return "";
+      this._bodyText = utf8Decode(this._bodyBytes);
+      return this._bodyText;
+    }
+    async json() {
+      const text2 = await this.text();
+      const value = JSON.parse(text2);
+      for (const hook of hooks) {
+        try {
+          hook(this.url || "", value);
+        } catch (e) {
+          console.warn("response hook failed", e);
+        }
+      }
+      return value;
+    }
+    async arrayBuffer() {
+      await this._consume();
+      const bytes = this._peekBytes();
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
+    async bytes() {
+      await this._consume();
+      return this._peekBytes().slice();
+    }
+    async blob() {
+      await this._consume();
+      return new Blob2([this._peekBytes()], { type: this.headers && this.headers.get("content-type") || "" });
+    }
+    async formData() {
+      throw new TypeError("formData() is not supported");
+    }
+  };
+  __name(_Body, "Body");
+  var Body = _Body;
+  var METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH"];
+  var _Request = class _Request extends Body {
+    constructor(input, init2 = {}) {
+      super();
+      init2 = init2 || {};
+      let source = null;
+      if (input instanceof _Request) {
+        source = input;
+        this.url = input.url;
+      } else {
+        this.url = String(input && typeof input === "object" && "href" in input ? input.href : input);
+      }
+      let method = init2.method || (source ? source.method : "GET");
+      method = String(method);
+      this.method = METHODS.includes(method.toUpperCase()) ? method.toUpperCase() : method;
+      this.headers = new Headers2(init2.headers || (source ? source.headers : void 0));
+      this.redirect = init2.redirect || (source ? source.redirect : "follow");
+      this.credentials = init2.credentials || (source ? source.credentials : "same-origin");
+      this.mode = init2.mode || (source ? source.mode : "cors");
+      this.cache = init2.cache || (source ? source.cache : "default");
+      this.referrer = init2.referrer || (source ? source.referrer : "about:client");
+      this.signal = init2.signal || (source ? source.signal : null);
+      this.keepalive = !!init2.keepalive;
+      this.integrity = init2.integrity || "";
+      let body = init2.body;
+      if (body === void 0 && source) {
+        body = source._bodyText !== null ? source._bodyText : source._bodyBytes;
+      }
+      if (body != null && (this.method === "GET" || this.method === "HEAD")) {
+        throw new TypeError("Request with GET/HEAD method cannot have body.");
+      }
+      const contentType = this._initBody(body);
+      if (contentType && !this.headers.has("content-type")) this.headers.set("content-type", contentType);
+    }
+    clone() {
+      if (this.bodyUsed) throw new TypeError("Request body is already used");
+      return new _Request(this);
+    }
+  };
+  __name(_Request, "Request");
+  var Request2 = _Request;
+  var REDIRECT_STATUSES = [301, 302, 303, 307, 308];
+  var _Response = class _Response extends Body {
+    constructor(body = null, init2 = {}) {
+      super();
+      init2 = init2 || {};
+      const status = init2.status === void 0 ? 200 : Number(init2.status);
+      if (!init2._internal && (status < 200 || status > 599)) {
+        throw new RangeError(`Failed to construct 'Response': The status provided (${status}) is outside the range [200, 599].`);
+      }
+      this.status = status;
+      this.statusText = init2.statusText === void 0 ? "" : String(init2.statusText);
+      this.headers = new Headers2(init2.headers);
+      this.url = init2._url || "";
+      this.redirected = !!init2._redirected;
+      this.type = init2._type || "default";
+      const contentType = this._initBody(body);
+      if (contentType && !this.headers.has("content-type")) this.headers.set("content-type", contentType);
+    }
+    get ok() {
+      return this.status >= 200 && this.status <= 299;
+    }
+    clone() {
+      if (this.bodyUsed) throw new TypeError("Response body is already used");
+      const copy = new _Response(null, {
+        status: this.status,
+        statusText: this.statusText,
+        headers: this.headers,
+        _internal: true,
+        _url: this.url,
+        _redirected: this.redirected,
+        _type: this.type
+      });
+      copy._bodyBytes = this._bodyBytes;
+      copy._bodyText = this._bodyText;
+      copy._hasBody = this._hasBody;
+      return copy;
+    }
+    static error() {
+      return new _Response(null, { status: 0, statusText: "", _internal: true, _type: "error" });
+    }
+    static redirect(url, status = 302) {
+      if (!REDIRECT_STATUSES.includes(status)) throw new RangeError("Invalid status code");
+      return new _Response(null, { status, headers: { location: String(url) } });
+    }
+    static json(data, init2 = {}) {
+      const headers = new Headers2(init2.headers);
+      if (!headers.has("content-type")) headers.set("content-type", "application/json");
+      return new _Response(JSON.stringify(data), { ...init2, headers });
+    }
+  };
+  __name(_Response, "Response");
+  var Response = _Response;
+  var fetchSeq = 0;
+  var pendingFetches = /* @__PURE__ */ new Map();
+  globalThis.__tubeFetchDone = function(id, error2, status, statusText, finalUrl, headersJSON, body) {
+    const pending = pendingFetches.get(id);
+    if (!pending) return;
+    pendingFetches.delete(id);
+    if (pending.cleanup) pending.cleanup();
+    if (error2) {
+      pending.reject(new TypeError(`Network request failed: ${error2}`));
+      return;
+    }
+    let headerPairs = [];
+    try {
+      headerPairs = headersJSON ? JSON.parse(headersJSON) : [];
+    } catch {
+      headerPairs = [];
+    }
+    const response = new Response(null, {
+      status,
+      statusText: statusText || "",
+      headers: headerPairs,
+      _internal: true,
+      _url: finalUrl || pending.url,
+      _redirected: !!finalUrl && finalUrl !== pending.url,
+      _type: "basic"
+    });
+    if (typeof body === "string") {
+      response._bodyText = body;
+      response._hasBody = true;
+    } else if (body != null) {
+      response._bodyBytes = body instanceof Uint8Array ? body : new Uint8Array(toUint8Array(body));
+      response._hasBody = true;
+    }
+    pending.resolve(response);
+  };
+  function fetch2(input, init2) {
+    return new Promise((resolve, reject) => {
+      let request;
+      try {
+        request = new Request2(input, init2);
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      const signal = request.signal;
+      if (signal && signal.aborted) {
+        reject(signal.reason || new DOMException("The operation was aborted.", "AbortError"));
+        return;
+      }
+      const nativeFetch = nativeFn("fetch");
+      if (!nativeFetch) {
+        reject(new TypeError("Network request failed: no native fetch available"));
+        return;
+      }
+      const id = ++fetchSeq;
+      const entry = { resolve, reject, url: request.url, cleanup: null };
+      pendingFetches.set(id, entry);
+      if (signal) {
+        const onAbort = /* @__PURE__ */ __name(() => {
+          if (!pendingFetches.has(id)) return;
+          pendingFetches.delete(id);
+          const cancel = nativeFn("fetchCancel");
+          if (cancel) cancel(id);
+          reject(signal.reason || new DOMException("The operation was aborted.", "AbortError"));
+        }, "onAbort");
+        signal.addEventListener("abort", onAbort, { once: true });
+        entry.cleanup = () => signal.removeEventListener("abort", onAbort);
+      }
+      const headerPairs = Array.from(request.headers.entries());
+      const body = request._bodyText !== null ? request._bodyText : request._bodyBytes;
+      try {
+        nativeFetch(id, request.url, request.method, JSON.stringify(headerPairs), body === void 0 ? null : body, request.redirect);
+      } catch (e) {
+        pendingFetches.delete(id);
+        reject(new TypeError(`Network request failed: ${e && e.message ? e.message : e}`));
+      }
+    });
+  }
+  __name(fetch2, "fetch");
+
+  // src/polyfills/index.js
+  var g = globalThis;
+  function define(name, value, force = false) {
+    if (!force && typeof g[name] !== "undefined") return;
+    Object.defineProperty(g, name, { value, writable: true, configurable: true, enumerable: false });
+  }
+  __name(define, "define");
+  define("console", makeConsole(), true);
+  define("reportError", reportError);
+  define("self", g);
+  define("setTimeout", setTimeout2);
+  define("setInterval", setInterval2);
+  define("clearTimeout", clearTimeout2);
+  define("clearInterval", clearInterval2);
+  define("setImmediate", setImmediate);
+  define("clearImmediate", clearImmediate);
+  define("queueMicrotask", queueMicrotask2);
+  define("performance", performance);
+  define("structuredClone", structuredClone2);
+  define("TextEncoder", TextEncoder2);
+  define("TextDecoder", TextDecoder2);
+  define("atob", atob2);
+  define("btoa", btoa2);
+  define("URL", URL2);
+  define("URLSearchParams", URLSearchParams2);
+  define("Event", Event);
+  define("CustomEvent", CustomEvent);
+  define("EventTarget", EventTarget);
+  define("DOMException", DOMException);
+  define("AbortController", AbortController2);
+  define("AbortSignal", AbortSignal);
+  if (typeof g.crypto === "undefined" || typeof g.crypto.getRandomValues !== "function") {
+    define("crypto", crypto2, true);
+  } else if (typeof g.crypto.randomUUID !== "function") {
+    g.crypto.randomUUID = crypto2.randomUUID;
+  }
+  define("fetch", fetch2, true);
+  define("Headers", Headers2, true);
+  define("Request", Request2, true);
+  define("Response", Response, true);
+  define("Blob", Blob2);
+  define("File", File);
+  define("FormData", FormData);
+  define("ReadableStream", ReadableStream);
+
   // node_modules/youtubei.js/dist/src/utils/Log.js
   var Log_exports = {};
   __export(Log_exports, {
@@ -2323,25 +3939,25 @@ format:`, anonymisedFormat);
   // node_modules/youtubei.js/dist/src/utils/HTTPClient.js
   var _session, _cookie, _fetch, _HTTPClient_instances, processJsonPayload_fn, setupCommonHeaders_fn, adjustContext_fn;
   var _HTTPClient = class _HTTPClient {
-    constructor(session, cookie, fetch) {
+    constructor(session, cookie, fetch3) {
       __privateAdd(this, _HTTPClient_instances);
       __privateAdd(this, _session);
       __privateAdd(this, _cookie);
       __privateAdd(this, _fetch);
       __privateSet(this, _session, session);
       __privateSet(this, _cookie, cookie);
-      __privateSet(this, _fetch, fetch || Platform.shim.fetch);
+      __privateSet(this, _fetch, fetch3 || Platform.shim.fetch);
     }
     get fetch_function() {
       return __privateGet(this, _fetch);
     }
-    async fetch(input, init) {
+    async fetch(input, init2) {
       const session = __privateGet(this, _session);
       const innertube_url = URLS.API.PRODUCTION_1 + session.api_version;
-      const baseURL = init?.baseURL || innertube_url;
+      const baseURL = init2?.baseURL || innertube_url;
       const request_url = typeof input === "string" ? new URL(`${baseURL}${baseURL.endsWith("/") || input.startsWith("/") ? "" : "/"}${input}`) : input instanceof URL ? input : new URL(input.url, baseURL);
-      const headers = init?.headers || (input instanceof Platform.shim.Request ? input.headers : new Platform.shim.Headers()) || new Platform.shim.Headers();
-      const body = init?.body || (input instanceof Platform.shim.Request ? input.body : void 0);
+      const headers = init2?.headers || (input instanceof Platform.shim.Request ? input.headers : new Platform.shim.Headers()) || new Platform.shim.Headers();
+      const body = init2?.body || (input instanceof Platform.shim.Request ? input.body : void 0);
       const request_headers = new Platform.shim.Headers(headers);
       __privateMethod(this, _HTTPClient_instances, setupCommonHeaders_fn).call(this, request_headers, session, request_url);
       request_url.searchParams.set("prettyPrint", "false");
@@ -2397,11 +4013,11 @@ format:`, anonymisedFormat);
           request_headers.set("Cookie", cookie);
         }
       }
-      const request = new Platform.shim.Request(request_url, input instanceof Platform.shim.Request ? input : init);
+      const request = new Platform.shim.Request(request_url, input instanceof Platform.shim.Request ? input : init2);
       const response = await __privateGet(this, _fetch).call(this, request, {
         body: request_body,
         headers: request_headers,
-        redirect: input instanceof Platform.shim.Request ? input.redirect : init?.redirect || "follow",
+        redirect: input instanceof Platform.shim.Request ? input.redirect : init2?.redirect || "follow",
         ...Platform.shim.runtime !== "cf-worker" ? { credentials: "include" } : {}
       });
       if (response.ok) {
@@ -3686,8 +5302,8 @@ format:`, anonymisedFormat);
       const textDecoder = new globals.TextDecoder();
       let textDecoderStrict;
       const config = {
-        encodeUtf8(text) {
-          return textEncoder.encode(text);
+        encodeUtf8(text2) {
+          return textEncoder.encode(text2);
         },
         decodeUtf8(bytes, strict) {
           if (strict) {
@@ -3700,9 +5316,9 @@ format:`, anonymisedFormat);
           }
           return textDecoder.decode(bytes);
         },
-        checkUtf8(text) {
+        checkUtf8(text2) {
           try {
-            encodeURIComponent(text);
+            encodeURIComponent(text2);
             return true;
           } catch (_) {
             return false;
@@ -3714,8 +5330,8 @@ format:`, anonymisedFormat);
       }
       const nativeStringIsWellFormed = String.prototype.isWellFormed;
       if (nativeStringIsWellFormed) {
-        config.checkUtf8 = (text) => {
-          return nativeStringIsWellFormed.call(text);
+        config.checkUtf8 = (text2) => {
+          return nativeStringIsWellFormed.call(text2);
         };
       }
       configureTextEncoding(config);
@@ -3724,8 +5340,8 @@ format:`, anonymisedFormat);
   }
   __name(getTextEncoding, "getTextEncoding");
   function emulateEncodeInto(encodeUtf8) {
-    return (text, dest) => {
-      const bytes = encodeUtf8(text);
+    return (text2, dest) => {
+      const bytes = encodeUtf8(text2);
       dest.set(bytes);
       return { written: bytes.byteLength };
     };
@@ -6493,15 +8109,15 @@ format:`, anonymisedFormat);
   function nsigMatcher(node) {
     if (node.type !== "VariableDeclarator")
       return false;
-    const init = node.init;
-    if (!init || init.type !== "FunctionExpression")
+    const init2 = node.init;
+    if (!init2 || init2.type !== "FunctionExpression")
       return false;
-    if (init.params.length < 3)
+    if (init2.params.length < 3)
       return false;
-    const [url, sigName, sigValue] = init.params;
+    const [url, sigName, sigValue] = init2.params;
     if (url.type !== "Identifier" || sigName.type !== "AssignmentPattern" || sigValue.type !== "AssignmentPattern")
       return false;
-    const body = init.body;
+    const body = init2.body;
     const blockStatementBody = body?.body || [];
     let hasUrlCtor = false;
     let hasSetAlr = false;
@@ -6990,10 +8606,10 @@ format:`, anonymisedFormat);
     return 65536 + ((hi & 1023) << 10) + (lo & 1023);
   }
   __name(consumePossibleSurrogatePair, "consumePossibleSurrogatePair");
-  function consumeLineFeed(parser, state) {
+  function consumeLineFeed(parser, state2) {
     parser.currentChar = parser.source.charCodeAt(++parser.index);
     parser.flags |= 1;
-    if ((state & 4) === 0) {
+    if ((state2 & 4) === 0) {
       parser.column = 0;
       parser.line++;
     }
@@ -7050,13 +8666,13 @@ format:`, anonymisedFormat);
     }
   }
   __name(skipHashBang, "skipHashBang");
-  function skipSingleHTMLComment(parser, source, state, context, type, start) {
+  function skipSingleHTMLComment(parser, source, state2, context, type, start) {
     if (context & 2)
       parser.report(0);
-    return skipSingleLineComment(parser, source, state, type, start);
+    return skipSingleLineComment(parser, source, state2, type, start);
   }
   __name(skipSingleHTMLComment, "skipSingleHTMLComment");
-  function skipSingleLineComment(parser, source, state, type, start) {
+  function skipSingleLineComment(parser, source, state2, type, start) {
     const { index } = parser;
     parser.tokenIndex = parser.index;
     parser.tokenLine = parser.line;
@@ -7090,17 +8706,17 @@ format:`, anonymisedFormat);
       };
       parser.options.onComment(CommentTypes[type & 255], source.slice(index, parser.tokenIndex), start.index, parser.tokenIndex, loc);
     }
-    return state | 1;
+    return state2 | 1;
   }
   __name(skipSingleLineComment, "skipSingleLineComment");
-  function skipMultiLineComment(parser, source, state) {
+  function skipMultiLineComment(parser, source, state2) {
     const { index } = parser;
     while (parser.index < parser.end) {
       if (parser.currentChar < 43) {
         let skippedOneAsterisk = false;
         while (parser.currentChar === 42) {
           if (!skippedOneAsterisk) {
-            state &= -5;
+            state2 &= -5;
             skippedOneAsterisk = true;
           }
           if (advanceChar(parser) === 47) {
@@ -7121,7 +8737,7 @@ format:`, anonymisedFormat);
             parser.tokenIndex = parser.index;
             parser.tokenLine = parser.line;
             parser.tokenColumn = parser.column;
-            return state;
+            return state2;
           }
         }
         if (skippedOneAsterisk) {
@@ -7129,20 +8745,20 @@ format:`, anonymisedFormat);
         }
         if (CharTypes[parser.currentChar] & 8) {
           if (parser.currentChar === 13) {
-            state |= 1 | 4;
+            state2 |= 1 | 4;
             scanNewLine(parser);
           } else {
-            consumeLineFeed(parser, state);
-            state = state & -5 | 1;
+            consumeLineFeed(parser, state2);
+            state2 = state2 & -5 | 1;
           }
         } else {
           advanceChar(parser);
         }
       } else if ((parser.currentChar ^ 8232) <= 1) {
-        state = state & -5 | 1;
+        state2 = state2 & -5 | 1;
         scanNewLine(parser);
       } else {
-        state &= -5;
+        state2 &= -5;
         advanceChar(parser);
       }
     }
@@ -8456,7 +10072,7 @@ format:`, anonymisedFormat);
     parser.setToken(scanSingleToken(parser, context, 0));
   }
   __name(nextToken, "nextToken");
-  function scanSingleToken(parser, context, state) {
+  function scanSingleToken(parser, context, state2) {
     const isStartOfLine = parser.index === 0;
     const { source } = parser;
     while (parser.index < parser.end) {
@@ -8499,12 +10115,12 @@ format:`, anonymisedFormat);
             advanceChar(parser);
             break;
           case 130:
-            state |= 1 | 4;
+            state2 |= 1 | 4;
             scanNewLine(parser);
             break;
           case 136:
-            consumeLineFeed(parser, state);
-            state = state & -5 | 1;
+            consumeLineFeed(parser, state2);
+            state2 = state2 & -5 | 1;
             break;
           case 8456256: {
             const ch = advanceChar(parser);
@@ -8524,7 +10140,7 @@ format:`, anonymisedFormat);
                 if (index + 1 < parser.end && source.charCodeAt(index) === 45 && source.charCodeAt(index + 1) == 45) {
                   parser.column += 3;
                   parser.currentChar = source.charCodeAt(parser.index += 3);
-                  state = skipSingleHTMLComment(parser, source, state, context, 2, parser.tokenStart);
+                  state2 = skipSingleHTMLComment(parser, source, state2, context, 2, parser.tokenStart);
                   continue;
                 }
                 return 8456256;
@@ -8601,11 +10217,11 @@ format:`, anonymisedFormat);
             const ch = parser.currentChar;
             if (ch === 45) {
               advanceChar(parser);
-              if ((state & 1 || isStartOfLine) && parser.currentChar === 62) {
+              if ((state2 & 1 || isStartOfLine) && parser.currentChar === 62) {
                 if (!parser.options.webcompat)
                   parser.report(114);
                 advanceChar(parser);
-                state = skipSingleHTMLComment(parser, source, state, context, 3, parser.tokenStart);
+                state2 = skipSingleHTMLComment(parser, source, state2, context, 3, parser.tokenStart);
                 continue;
               }
               return 33619994;
@@ -8622,12 +10238,12 @@ format:`, anonymisedFormat);
               const ch = parser.currentChar;
               if (ch === 47) {
                 advanceChar(parser);
-                state = skipSingleLineComment(parser, source, state, 0, parser.tokenStart);
+                state2 = skipSingleLineComment(parser, source, state2, 0, parser.tokenStart);
                 continue;
               }
               if (ch === 42) {
                 advanceChar(parser);
-                state = skipMultiLineComment(parser, source, state);
+                state2 = skipMultiLineComment(parser, source, state2);
                 continue;
               }
               if (context & 32) {
@@ -8742,7 +10358,7 @@ format:`, anonymisedFormat);
         }
       } else {
         if ((char ^ 8232) <= 1) {
-          state = state & -5 | 1;
+          state2 = state2 & -5 | 1;
           scanNewLine(parser);
           continue;
         }
@@ -9215,8 +10831,8 @@ format:`, anonymisedFormat);
     hearts: "♥",
     diams: "♦"
   }));
-  function decodeHTMLStrict(text) {
-    return text.replaceAll(/&(?:[\da-zA-Z]+|#x[\da-fA-F]+|#\d+);/g, (key) => {
+  function decodeHTMLStrict(text2) {
+    return text2.replaceAll(/&(?:[\da-zA-Z]+|#x[\da-fA-F]+|#\d+);/g, (key) => {
       if (key.charAt(1) === "#") {
         const secondChar = key.charAt(2);
         const codePoint = secondChar === "x" ? parseInt(key.slice(3), 16) : parseInt(key.slice(2), 10);
@@ -9285,23 +10901,23 @@ format:`, anonymisedFormat);
     if (parser.currentChar === 62) {
       parser.report(181);
     }
-    let state = 0;
+    let state2 = 0;
     let hasCarriageReturn = false;
     while (parser.index < parser.end) {
       const char = parser.source.charCodeAt(parser.index);
       if (char === 13) {
-        state |= 1 | 4;
+        state2 |= 1 | 4;
         hasCarriageReturn = true;
         scanNewLine(parser);
       } else if (char === 10) {
-        consumeLineFeed(parser, state);
-        state = state & -5 | 1;
+        consumeLineFeed(parser, state2);
+        state2 = state2 & -5 | 1;
       } else if (char === 8232 || char === 8233) {
         parser.flags |= 1;
         parser.currentChar = parser.source.charCodeAt(++parser.index);
         parser.column = 0;
         parser.line++;
-        state = state & -5 | 1;
+        state2 = state2 & -5 | 1;
       } else {
         advanceChar(parser);
       }
@@ -9661,7 +11277,7 @@ format:`, anonymisedFormat);
   };
   __name(_Parser, "Parser");
   var Parser = _Parser;
-  function pushComment(comments, options) {
+  function pushComment(comments2, options) {
     return function(type, value, start, end, loc) {
       const comment = {
         type,
@@ -9679,7 +11295,7 @@ format:`, anonymisedFormat);
       if (options.loc) {
         comment.loc = loc;
       }
-      comments.push(comment);
+      comments2.push(comment);
     };
   }
   __name(pushComment, "pushComment");
@@ -10443,14 +12059,14 @@ format:`, anonymisedFormat);
   function parseVariableDeclaration(parser, context, scope, privateScope, kind, origin, declarationKind) {
     const { tokenStart } = parser;
     const token = parser.getToken();
-    let init = null;
+    let init2 = null;
     if (declarationKind && (token & 2097152) === 2097152) {
       parser.report(50);
     }
     const id = parseBindingPattern(parser, context, scope, privateScope, kind, origin);
     if (parser.getToken() === 1077936155) {
       nextToken(parser, context | 32);
-      init = parseExpression(parser, context, privateScope, 1, 0, parser.tokenStart, origin);
+      init2 = parseExpression(parser, context, privateScope, 1, 0, parser.tokenStart, origin);
       if (origin & 32) {
         if (parser.getToken() === 471156 || parser.getToken() === 8673330 && (token & 2097152 || (kind & 4) === 0 || context & 1 || !parser.options.webcompat)) {
           throw new ParseError(tokenStart, parser.currentLocation, 60, parser.getToken() === 471156 ? "of" : "in");
@@ -10462,7 +12078,7 @@ format:`, anonymisedFormat);
     return parser.finishNode({
       type: "VariableDeclarator",
       id,
-      init
+      init: init2
     }, tokenStart);
   }
   __name(parseVariableDeclaration, "parseVariableDeclaration");
@@ -10475,7 +12091,7 @@ format:`, anonymisedFormat);
     let test = null;
     let update = null;
     let destructible = 0;
-    let init = null;
+    let init2 = null;
     let isVarDecl = parser.getToken() === 86088 || parser.getToken() === 241737 || parser.getToken() === 86090 || parser.getToken() === 209013;
     let resourceDeclarationKind;
     let consumedForOfDelimiter = false;
@@ -10484,9 +12100,9 @@ format:`, anonymisedFormat);
     const token = parser.getToken();
     if (isVarDecl) {
       if (token === 241737) {
-        init = parseIdentifier(parser, context);
+        init2 = parseIdentifier(parser, context);
         if (parser.getToken() & (143360 | 2097152) && (parser.getToken() & 20480) !== 20480) {
-          init = parser.finishNode({
+          init2 = parser.finishNode({
             type: "VariableDeclaration",
             kind: "let",
             declarations: parseVariableDeclarationList(parser, context | 131072, scope, privateScope, 8, 32)
@@ -10497,7 +12113,7 @@ format:`, anonymisedFormat);
         } else {
           isVarDecl = false;
           parser.assignable = 1;
-          init = parseMemberOrUpdateExpression(parser, context, privateScope, init, 0, 0, tokenStart);
+          init2 = parseMemberOrUpdateExpression(parser, context, privateScope, init2, 0, 0, tokenStart);
           if (parser.getToken() === 471156)
             parser.report(117);
         }
@@ -10506,7 +12122,7 @@ format:`, anonymisedFormat);
         if ((parser.flags & 1) !== 0 || !isResourceBindingStart(parser.getToken())) {
           isVarDecl = false;
           parser.assignable = 1;
-          init = parseMemberOrUpdateExpression(parser, context, privateScope, usingIdentifier, 0, 0, tokenStart);
+          init2 = parseMemberOrUpdateExpression(parser, context, privateScope, usingIdentifier, 0, 0, tokenStart);
         } else if (parser.getToken() === 471156) {
           const ofStart = parser.tokenStart;
           const ofEnd = parser.currentLocation;
@@ -10517,7 +12133,7 @@ format:`, anonymisedFormat);
             isVarDecl = false;
             consumedForOfDelimiter = true;
             parser.assignable = 1;
-            init = usingIdentifier;
+            init2 = usingIdentifier;
           } else {
             resourceDeclarationKind = "using";
             validateBindingIdentifier(parser, context, 16, ofToken, 0);
@@ -10553,7 +12169,7 @@ format:`, anonymisedFormat);
             if (declarations.length > 1 && parser.getToken() & 262144) {
               parser.report(61, KeywordDescTable[parser.getToken() & 255]);
             }
-            init = parser.finishNode({
+            init2 = parser.finishNode({
               type: "VariableDeclaration",
               kind: resourceDeclarationKind,
               declarations
@@ -10562,7 +12178,7 @@ format:`, anonymisedFormat);
           }
         } else {
           resourceDeclarationKind = "using";
-          init = parser.finishNode({
+          init2 = parser.finishNode({
             type: "VariableDeclaration",
             kind: resourceDeclarationKind,
             declarations: parseVariableDeclarationList(parser, context | 131072, scope, privateScope, 16, 32, resourceDeclarationKind)
@@ -10571,7 +12187,7 @@ format:`, anonymisedFormat);
         }
       } else {
         nextToken(parser, context);
-        init = parser.finishNode(token === 86088 ? {
+        init2 = parser.finishNode(token === 86088 ? {
           type: "VariableDeclaration",
           kind: "var",
           declarations: parseVariableDeclarationList(parser, context | 131072, scope, privateScope, 4, 32)
@@ -10593,7 +12209,7 @@ format:`, anonymisedFormat);
         if ((parser.flags & 1) === 0 && isResourceBindingStart(parser.getToken())) {
           resourceDeclarationKind = "await using";
           isVarDecl = true;
-          init = parser.finishNode({
+          init2 = parser.finishNode({
             type: "VariableDeclaration",
             kind: resourceDeclarationKind,
             declarations: parseVariableDeclarationList(parser, context | 131072, scope, privateScope, 16, 32, resourceDeclarationKind)
@@ -10609,7 +12225,7 @@ format:`, anonymisedFormat);
         if (parser.getToken() === 8391735)
           parser.report(33);
         parser.assignable = 2;
-        init = parser.finishNode({
+        init2 = parser.finishNode({
           type: "AwaitExpression",
           argument: awaitArgument
         }, tokenStart);
@@ -10617,27 +12233,27 @@ format:`, anonymisedFormat);
     } else if (forAwait && token === 209005) {
       const asyncIdentifier = parseIdentifier(parser, context);
       parser.assignable = 1;
-      init = parseMemberOrUpdateExpression(parser, context | 131072, privateScope, asyncIdentifier, 0, 0, tokenStart);
+      init2 = parseMemberOrUpdateExpression(parser, context | 131072, privateScope, asyncIdentifier, 0, 0, tokenStart);
     } else if (token === 1074790417) {
       if (forAwait)
         parser.report(82);
     } else if ((token & 2097152) === 2097152) {
       const patternStart = parser.tokenStart;
-      init = token === 2162700 ? parseObjectLiteralOrPattern(parser, context, void 0, privateScope, 1, 0, 0, 2, 32) : parseArrayExpressionOrPattern(parser, context, void 0, privateScope, 1, 0, 0, 2, 32);
+      init2 = token === 2162700 ? parseObjectLiteralOrPattern(parser, context, void 0, privateScope, 1, 0, 0, 2, 32) : parseArrayExpressionOrPattern(parser, context, void 0, privateScope, 1, 0, 0, 2, 32);
       destructible = parser.destructible;
       if (destructible & 64) {
         parser.report(63);
       }
       parser.assignable = destructible & 16 ? 2 : 1;
-      init = parseMemberOrUpdateExpression(parser, context | 131072, privateScope, init, 0, 0, patternStart);
+      init2 = parseMemberOrUpdateExpression(parser, context | 131072, privateScope, init2, 0, 0, patternStart);
     } else {
-      init = parseLeftHandSideExpression(parser, context | 131072, privateScope, 1, 0, 1);
+      init2 = parseLeftHandSideExpression(parser, context | 131072, privateScope, 1, 0, 1);
     }
     if (consumedForOfDelimiter || (parser.getToken() & 262144) === 262144) {
       if (consumedForOfDelimiter || parser.getToken() === 471156) {
         if (parser.assignable & 2)
           parser.report(80, forAwait ? "await" : "of");
-        reinterpretToPattern(parser, init);
+        reinterpretToPattern(parser, init2);
         if (!consumedForOfDelimiter)
           nextToken(parser, context | 32);
         right = parseExpression(parser, context, privateScope, 1, 0, parser.tokenStart);
@@ -10645,7 +12261,7 @@ format:`, anonymisedFormat);
         const body3 = parseIterationStatementBody(parser, context, scope, privateScope, labels);
         return parser.finishNode({
           type: "ForOfStatement",
-          left: init,
+          left: init2,
           right,
           body: body3,
           await: forAwait
@@ -10655,7 +12271,7 @@ format:`, anonymisedFormat);
         parser.report(30, "in");
       if (parser.assignable & 2)
         parser.report(80, "in");
-      reinterpretToPattern(parser, init);
+      reinterpretToPattern(parser, init2);
       nextToken(parser, context | 32);
       if (forAwait)
         parser.report(82);
@@ -10665,7 +12281,7 @@ format:`, anonymisedFormat);
       return parser.finishNode({
         type: "ForInStatement",
         body: body2,
-        left: init,
+        left: init2,
         right
       }, start);
     }
@@ -10675,10 +12291,10 @@ format:`, anonymisedFormat);
       if (destructible & 8 && parser.getToken() !== 1077936155) {
         parser.report(80, "loop");
       }
-      init = parseAssignmentExpression(parser, context | 131072, privateScope, 0, 0, tokenStart, init);
+      init2 = parseAssignmentExpression(parser, context | 131072, privateScope, 0, 0, tokenStart, init2);
     }
     if (parser.getToken() === 18)
-      init = parseSequenceExpression(parser, context, privateScope, 0, tokenStart, init);
+      init2 = parseSequenceExpression(parser, context, privateScope, 0, tokenStart, init2);
     consume(parser, context | 32, 1074790417);
     if (parser.getToken() !== 1074790417)
       test = parseExpressions(parser, context, privateScope, 0, 1, parser.tokenStart);
@@ -10689,7 +12305,7 @@ format:`, anonymisedFormat);
     const body = parseIterationStatementBody(parser, context, scope, privateScope, labels);
     return parser.finishNode({
       type: "ForStatement",
-      init,
+      init: init2,
       test,
       update,
       body
@@ -12397,7 +14013,7 @@ format:`, anonymisedFormat);
       if (token === 14) {
         properties.push(parseSpreadOrRestElement(parser, context, scope, privateScope, 1074790415, kind, 0, inGroup, isPattern, origin));
       } else {
-        let state = 0;
+        let state2 = 0;
         let key = null;
         let value;
         if (parser.getToken() & 143360 || parser.getToken() === -2147483527 || parser.getToken() === -2147483526) {
@@ -12405,7 +14021,7 @@ format:`, anonymisedFormat);
             destructible |= 16;
           key = parseIdentifier(parser, context);
           if (parser.getToken() === 18 || parser.getToken() === 1074790415 || parser.getToken() === 1077936155) {
-            state |= 4;
+            state2 |= 4;
             if (context & 1 && (token & 537079808) === 537079808) {
               destructible |= 16;
             } else {
@@ -12507,11 +14123,11 @@ format:`, anonymisedFormat);
           } else if (parser.getToken() === 69271571) {
             destructible |= 16;
             if (token === 209005)
-              state |= 16;
-            state |= (token === 209008 ? 256 : token === 209009 ? 512 : 1) | 2;
+              state2 |= 16;
+            state2 |= (token === 209008 ? 256 : token === 209009 ? 512 : 1) | 2;
             key = parseComputedPropertyName(parser, context, privateScope, inGroup);
             destructible |= parser.assignable;
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else if (parser.getToken() & 143360) {
             destructible |= 16;
             if (token === -2147483527)
@@ -12519,20 +14135,20 @@ format:`, anonymisedFormat);
             if (token === 209005) {
               if (parser.flags & 1)
                 parser.report(134);
-              state |= 16 | 1;
+              state2 |= 16 | 1;
             } else if (token === 209008) {
-              state |= 256;
+              state2 |= 256;
             } else if (token === 209009) {
-              state |= 512;
+              state2 |= 512;
             } else {
               parser.report(0);
             }
             key = parseIdentifier(parser, context);
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else if (parser.getToken() === 67174411) {
             destructible |= 16;
-            state |= 1;
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            state2 |= 1;
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else if (parser.getToken() === 8391476) {
             destructible |= 16;
             if (token === 209008) {
@@ -12543,26 +14159,26 @@ format:`, anonymisedFormat);
               parser.report(30, KeywordDescTable[8391476 & 255]);
             }
             nextToken(parser, context);
-            state |= 8 | 1 | (token === 209005 ? 16 : 0);
+            state2 |= 8 | 1 | (token === 209005 ? 16 : 0);
             if (parser.getToken() & 143360) {
               key = parseIdentifier(parser, context);
             } else if ((parser.getToken() & 134217728) === 134217728) {
               key = parseLiteral(parser, context);
             } else if (parser.getToken() === 69271571) {
-              state |= 2;
+              state2 |= 2;
               key = parseComputedPropertyName(parser, context, privateScope, inGroup);
               destructible |= parser.assignable;
             } else {
               parser.report(30, KeywordDescTable[parser.getToken() & 255]);
             }
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else if ((parser.getToken() & 134217728) === 134217728) {
             if (token === 209005)
-              state |= 16;
-            state |= token === 209008 ? 256 : token === 209009 ? 512 : 1;
+              state2 |= 16;
+            state2 |= token === 209008 ? 256 : token === 209009 ? 512 : 1;
             destructible |= 16;
             key = parseLiteral(parser, context);
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else {
             parser.report(135);
           }
@@ -12637,8 +14253,8 @@ format:`, anonymisedFormat);
               }
             }
           } else if (parser.getToken() === 67174411) {
-            state |= 1;
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            state2 |= 1;
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
             destructible = 16;
           } else {
             parser.report(136);
@@ -12646,7 +14262,7 @@ format:`, anonymisedFormat);
         } else if (parser.getToken() === 69271571) {
           key = parseComputedPropertyName(parser, context, privateScope, inGroup);
           destructible |= parser.destructible & 256 ? 256 : 0;
-          state |= 2;
+          state2 |= 2;
           if (parser.getToken() === 21) {
             nextToken(parser, context | 32);
             const { tokenStart: tokenStart2, tokenValue: tokenValue2, currentLocation: currentLocation2 } = parser;
@@ -12715,35 +14331,35 @@ format:`, anonymisedFormat);
               }
             }
           } else if (parser.getToken() === 67174411) {
-            state |= 1;
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            state2 |= 1;
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
             destructible = 16;
           } else {
             parser.report(44);
           }
         } else if (token === 8391476) {
           consume(parser, context | 32, 8391476);
-          state |= 8;
+          state2 |= 8;
           if (parser.getToken() & 143360) {
             const token2 = parser.getToken();
             key = parseIdentifier(parser, context);
-            state |= 1;
+            state2 |= 1;
             if (parser.getToken() === 67174411) {
               destructible |= 16;
-              value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+              value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
             } else {
               throw new ParseError(parser.tokenStart, parser.currentLocation, token2 === 209005 ? 46 : token2 === 209008 || parser.getToken() === 209009 ? 45 : 47, KeywordDescTable[token2 & 255]);
             }
           } else if ((parser.getToken() & 134217728) === 134217728) {
             destructible |= 16;
             key = parseLiteral(parser, context);
-            state |= 1;
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            state2 |= 1;
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else if (parser.getToken() === 69271571) {
             destructible |= 16;
-            state |= 2 | 1;
+            state2 |= 2 | 1;
             key = parseComputedPropertyName(parser, context, privateScope, inGroup);
-            value = parseMethodDefinition(parser, context, privateScope, state, inGroup, parser.tokenStart);
+            value = parseMethodDefinition(parser, context, privateScope, state2, inGroup, parser.tokenStart);
           } else {
             parser.report(128);
           }
@@ -12756,10 +14372,10 @@ format:`, anonymisedFormat);
           type: "Property",
           key,
           value,
-          kind: !(state & 768) ? "init" : state & 512 ? "set" : "get",
-          computed: (state & 2) > 0,
-          method: (state & 1) > 0,
-          shorthand: (state & 4) > 0
+          kind: !(state2 & 768) ? "init" : state2 & 512 ? "set" : "get",
+          computed: (state2 & 2) > 0,
+          method: (state2 & 1) > 0,
+          shorthand: (state2 & 4) > 0
         }, tokenStart));
       }
       destructible |= parser.destructible;
@@ -13759,17 +15375,17 @@ format:`, anonymisedFormat);
     }, tokenStart);
   }
   __name(parsePrivateIdentifier, "parsePrivateIdentifier");
-  function parsePropertyDefinition(parser, context, privateScope, key, state, decorators, start) {
+  function parsePropertyDefinition(parser, context, privateScope, key, state2, decorators, start) {
     let value = null;
-    if (state & 8)
+    if (state2 & 8)
       parser.report(0);
     if (parser.getToken() === 1077936155) {
       nextToken(parser, context | 32);
       const { tokenStart } = parser;
       if (parser.getToken() === 537079928)
         parser.report(121);
-      const modifierFlags = 1024 | 2048 | 8192 | ((state & 64) === 0 ? 512 | 16384 : 0);
-      context = (context | modifierFlags) ^ modifierFlags | (state & 8 ? 1024 : 0) | (state & 16 ? 2048 : 0) | (state & 64 ? 16384 : 0) | 256 | 65536;
+      const modifierFlags = 1024 | 2048 | 8192 | ((state2 & 64) === 0 ? 512 | 16384 : 0);
+      context = (context | modifierFlags) ^ modifierFlags | (state2 & 8 ? 1024 : 0) | (state2 & 16 ? 2048 : 0) | (state2 & 64 ? 16384 : 0) | 256 | 65536;
       value = parsePrimaryExpression(parser, context | 16, privateScope, 2, 0, 1, 0, 1, tokenStart, 0, 1);
       if ((parser.getToken() & 1073741824) !== 1073741824 || (parser.getToken() & 4194304) === 4194304) {
         value = parseMemberOrUpdateExpression(parser, context | 16, privateScope, value, 0, 0, tokenStart);
@@ -13778,11 +15394,11 @@ format:`, anonymisedFormat);
     }
     matchOrInsertSemicolon(parser, context);
     return parser.finishNode({
-      type: state & 1024 ? "AccessorProperty" : "PropertyDefinition",
+      type: state2 & 1024 ? "AccessorProperty" : "PropertyDefinition",
       key,
       value,
-      static: (state & 32) > 0,
-      computed: (state & 2) > 0,
+      static: (state2 & 32) > 0,
+      computed: (state2 & 2) > 0,
       ...parser.features & 1 ? { decorators } : null
     }, start);
   }
@@ -14295,11 +15911,11 @@ format:`, anonymisedFormat);
                 dependencies: /* @__PURE__ */ new Set(),
                 predeclared: false
               };
-              const init = declaration.init;
-              if (!init && currentNode.kind === "var") {
+              const init2 = declaration.init;
+              if (!init2 && currentNode.kind === "var") {
                 metadata.predeclared = true;
-              } else if (init && this.needsDependencyAnalysis(init)) {
-                metadata.dependencies = this.findDependencies(init, metadata.name);
+              } else if (init2 && this.needsDependencyAnalysis(init2)) {
+                metadata.dependencies = this.findDependencies(init2, metadata.name);
               }
               if (this.dependentsTracker.has(metadata.name)) {
                 this.dependentsTracker.delete(metadata.name);
@@ -14347,25 +15963,25 @@ format:`, anonymisedFormat);
         return false;
       let matched = false;
       let result = false;
-      for (const state of this.extractionStates) {
-        if (!state.node) {
+      for (const state2 of this.extractionStates) {
+        if (!state2.node) {
           if (node.type === "VariableDeclarator" && !node.init)
             continue;
-          result = state.config.match(node);
+          result = state2.config.match(node);
           if (!result)
             continue;
-          state.node = node;
+          state2.node = node;
           matched = true;
           if (metadata) {
-            state.metadata = metadata;
-            state.dependents = metadata.dependents;
-            state.dependencies = metadata.dependencies;
+            state2.metadata = metadata;
+            state2.dependents = metadata.dependents;
+            state2.dependencies = metadata.dependencies;
             if (typeof result !== "boolean")
-              state.matchContext = result;
+              state2.matchContext = result;
           }
-          this.refreshExtractionState(state);
-        } else if (state.node !== node) {
-          this.refreshExtractionState(state);
+          this.refreshExtractionState(state2);
+        } else if (state2.node !== node) {
+          this.refreshExtractionState(state2);
           if (this.shouldStopTraversal()) {
             return true;
           }
@@ -14380,20 +15996,20 @@ format:`, anonymisedFormat);
      * and/or configuration.
      * @param state - State to refresh.
      */
-    refreshExtractionState(state) {
-      if (!state.node) {
-        state.ready = false;
+    refreshExtractionState(state2) {
+      if (!state2.node) {
+        state2.ready = false;
         return;
       }
-      if (state.config.collectDependencies === false) {
-        state.ready = true;
+      if (state2.config.collectDependencies === false) {
+        state2.ready = true;
         return;
       }
-      if (!state.metadata) {
-        state.ready = false;
+      if (!state2.metadata) {
+        state2.ready = false;
         return;
       }
-      state.ready = this.areDependenciesResolved(state.dependencies);
+      state2.ready = this.areDependenciesResolved(state2.dependencies);
     }
     /**
      * Determines whether traversal should stop based on extraction states and configuration.
@@ -14402,13 +16018,13 @@ format:`, anonymisedFormat);
       if (!this.hasExtractions)
         return false;
       let hasStoppingTarget = false;
-      for (const state of this.extractionStates) {
-        if (state.config.stopWhenReady === false)
+      for (const state2 of this.extractionStates) {
+        if (state2.config.stopWhenReady === false)
           continue;
         hasStoppingTarget = true;
-        if (!state.node)
+        if (!state2.node)
           return false;
-        if (!state.ready)
+        if (!state2.ready)
           return false;
       }
       return hasStoppingTarget;
@@ -14633,7 +16249,7 @@ format:`, anonymisedFormat);
      * Returns the current set of matched extractions.
      */
     getExtractedMatches() {
-      return this.extractionStates.filter((state) => !!state.node);
+      return this.extractionStates.filter((state2) => !!state2.node);
     }
     /**
      * Returns the raw, original source.
@@ -14792,8 +16408,8 @@ format:`, anonymisedFormat);
      * @TODO: Check more cases.
      * @param init - The initializer expression to evaluate.
      */
-    getInitializerFallback(init) {
-      switch (init?.type) {
+    getInitializerFallback(init2) {
+      switch (init2?.type) {
         case "ObjectExpression":
         case "NewExpression":
         case "MemberExpression":
@@ -14818,25 +16434,25 @@ format:`, anonymisedFormat);
       const sideEffectMode = typeof sideEffectPolicy === "object" && sideEffectPolicy !== null ? sideEffectPolicy.mode ?? "strict" : "strict";
       const canDisallow = Boolean(sideEffectPolicy);
       const assignmentTarget = node.type === "AssignmentExpression" ? node : node.type === "ExpressionStatement" && node.expression.type === "AssignmentExpression" ? node.expression : null;
-      const init = assignmentTarget && assignmentTarget.operator === "=" ? assignmentTarget.right : node.type === "VariableDeclarator" ? node.init : null;
-      const forceRemove = canDisallow && init && !this.isSafeInitializer(init, sideEffectMode);
-      const initializerFallback = this.getInitializerFallback(init);
+      const init2 = assignmentTarget && assignmentTarget.operator === "=" ? assignmentTarget.right : node.type === "VariableDeclarator" ? node.init : null;
+      const forceRemove = canDisallow && init2 && !this.isSafeInitializer(init2, sideEffectMode);
+      const initializerFallback = this.getInitializerFallback(init2);
       let initSource = initializerFallback;
-      if (!forceRemove && init) {
-        if (!preDeclared && init.type === "Identifier" && !declaredVariables.has(init.name)) {
+      if (!forceRemove && init2) {
+        if (!preDeclared && init2.type === "Identifier" && !declaredVariables.has(init2.name)) {
           initSource = initializerFallback;
         } else {
           const left = assignmentTarget?.left;
-          const isPrototypeAlias = init?.type === "MemberExpression" && !init.computed && init.property.type === "Identifier" && init.property.name === "prototype";
-          if (!isPrototypeAlias && left?.type === "MemberExpression" && init) {
-            if (canDisallow && left.object.type === "Identifier" && init.type !== "FunctionExpression" && init.type !== "ArrowFunctionExpression" && init.type !== "LogicalExpression" && init.type !== "ClassExpression") {
+          const isPrototypeAlias = init2?.type === "MemberExpression" && !init2.computed && init2.property.type === "Identifier" && init2.property.name === "prototype";
+          if (!isPrototypeAlias && left?.type === "MemberExpression" && init2) {
+            if (canDisallow && left.object.type === "Identifier" && init2.type !== "FunctionExpression" && init2.type !== "ArrowFunctionExpression" && init2.type !== "LogicalExpression" && init2.type !== "ClassExpression") {
               return `${indent}// Skipped ${memberToString(left, source)} assignment.`;
             }
           }
-          initSource = extractNodeSource(init, source)?.trim().replace(/;\s*$/, "") || "undefined // [JsExtractor] Failed to extract initializer source.";
+          initSource = extractNodeSource(init2, source)?.trim().replace(/;\s*$/, "") || "undefined // [JsExtractor] Failed to extract initializer source.";
         }
       }
-      if (!forceRemove && init && init.type === "SequenceExpression" && !initSource.startsWith("(")) {
+      if (!forceRemove && init2 && init2.type === "SequenceExpression" && !initSource.startsWith("(")) {
         initSource = `(${initSource})`;
       }
       const idName = node.type === "VariableDeclarator" && node.id.type === "Identifier" ? node.id.name : assignmentTarget && assignmentTarget.left.type === "Identifier" ? assignmentTarget.left.name : assignmentTarget?.type === "AssignmentExpression" ? memberToString(assignmentTarget.left, source)?.trim() : "unknown";
@@ -15384,8 +17000,8 @@ ${rawJsonLines.slice(1).map((line) => indent + line).join("\n")}`;
   var TextRun = _TextRun;
 
   // node_modules/youtubei.js/dist/src/parser/classes/misc/Text.js
-  function escape(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  function escape(text2) {
+    return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
   __name(escape, "escape");
   var TAG = "Text";
@@ -15540,13 +17156,13 @@ ${rawJsonLines.slice(1).map((line) => indent + line).join("\n")}`;
           matching_run.attachment = attachment_run;
         } else {
           const offset_start_index = attachment_run.startIndex - matching_run.startIndex;
-          const text = matching_run.text.substring(offset_start_index, offset_start_index + attachment_run.length);
-          const is_custom_emoji = /^:[^:]+:$/.test(text);
-          if (attachment_run.element?.type?.imageType?.image && (is_custom_emoji || new RegExp("^(?:\\p{Emoji}|\\u200d)+$", "u").test(text))) {
+          const text2 = matching_run.text.substring(offset_start_index, offset_start_index + attachment_run.length);
+          const is_custom_emoji = /^:[^:]+:$/.test(text2);
+          if (attachment_run.element?.type?.imageType?.image && (is_custom_emoji || new RegExp("^(?:\\p{Emoji}|\\u200d)+$", "u").test(text2))) {
             const emoji = {
               image: attachment_run.element.type.imageType.image,
               isCustomEmoji: is_custom_emoji,
-              shortcuts: is_custom_emoji ? [text] : void 0
+              shortcuts: is_custom_emoji ? [text2] : void 0
             };
             insertSubRun(runs, matching_run, attachment_run, { emoji });
           } else {
@@ -15917,10 +17533,10 @@ ${rawJsonLines.slice(1).map((line) => indent + line).join("\n")}`;
     contents;
     constructor(data) {
       super();
-      const page = parser_exports.parseItem(data.page, ChannelSwitcherPage);
-      if (page) {
-        this.header = page.header;
-        this.contents = page.contents;
+      const page2 = parser_exports.parseItem(data.page, ChannelSwitcherPage);
+      if (page2) {
+        this.header = page2.header;
+        this.contents = page2.contents;
       }
     }
   };
@@ -19751,8 +21367,8 @@ ${rawJsonLines.slice(1).map((line) => indent + line).join("\n")}`;
         throw new InnertubeError("Actions instance not set for this comment.");
       if (!this.content)
         throw new InnertubeError("Comment content not found.", { comment_id: this.comment_id });
-      const text = this.content.toString().replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
-      const payload = { text, target_language };
+      const text2 = this.content.toString().replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, "");
+      const payload = { text: text2, target_language };
       const action = encodeCommentActionParams(22, payload);
       const response = await __privateGet(this, _actions).execute("comment/perform_comment_action", { action });
       const mutations = response.data.frameworkUpdates?.entityBatchUpdate?.mutations;
@@ -27498,7 +29114,7 @@ ${rawJsonLines.slice(1).map((line) => indent + line).join("\n")}`;
     texts;
     constructor(data) {
       super();
-      this.texts = data.texts.map((text) => new Text2(text));
+      this.texts = data.texts.map((text2) => new Text2(text2));
     }
   };
   __name(_ThumbnailOverlayPlaybackStatus, "ThumbnailOverlayPlaybackStatus");
@@ -30168,6 +31784,30 @@ ${generateTypescriptClass(classname, context.key_info)}`);
   }
   __name(applyCommentsMutations, "applyCommentsMutations");
 
+  // node_modules/youtubei.js/dist/src/parser/youtube/index.js
+  var youtube_exports = {};
+  __export(youtube_exports, {
+    AccountInfo: () => AccountInfo,
+    Channel: () => Channel2,
+    ChannelListContinuation: () => ChannelListContinuation,
+    Comments: () => Comments,
+    FilteredChannelList: () => FilteredChannelList,
+    Guide: () => Guide,
+    HashtagFeed: () => HashtagFeed,
+    History: () => History,
+    HomeFeed: () => HomeFeed,
+    ItemMenu: () => ItemMenu,
+    Library: () => Library,
+    LiveChat: () => LiveChat2,
+    NotificationsMenu: () => NotificationsMenu,
+    Playlist: () => Playlist2,
+    Search: () => Search,
+    Settings: () => Settings,
+    SmoothedQueue: () => SmoothedQueue,
+    TranscriptInfo: () => TranscriptInfo,
+    VideoInfo: () => VideoInfo
+  });
+
   // node_modules/youtubei.js/dist/src/parser/youtube/AccountInfo.js
   var _page;
   var _AccountInfo = class _AccountInfo {
@@ -30228,14 +31868,14 @@ ${generateTypescriptClass(classname, context.key_info)}`);
      * Get all playlists on a given page via memo
      */
     static getPlaylistsFromMemo(memo) {
-      const playlists = memo.getType(Playlist, GridPlaylist, GridShow);
+      const playlists2 = memo.getType(Playlist, GridPlaylist, GridShow);
       const lockup_views = memo.getType(LockupView).filter((lockup) => {
         return ["PLAYLIST", "ALBUM", "PODCAST", "SHOW"].includes(lockup.content_type);
       });
       if (lockup_views.length > 0) {
-        playlists.push(...lockup_views);
+        playlists2.push(...lockup_views);
       }
-      return playlists;
+      return playlists2;
     }
     /**
      * Get all the videos in the feed
@@ -30772,8 +32412,8 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       }
       if (!endpoint)
         throw new InnertubeError("Could not find endpoint for the specified filter");
-      const page = await endpoint.call(this.actions, { parse: true });
-      let filteredChannelList = new FilteredChannelList(this.actions, page, true);
+      const page2 = await endpoint.call(this.actions, { parse: true });
+      let filteredChannelList = new FilteredChannelList(this.actions, page2, true);
       if (secondaryFilter) {
         filteredChannelList = await filteredChannelList.applyFilter(primaryFilter, secondaryFilter);
       }
@@ -30792,8 +32432,8 @@ ${generateTypescriptClass(classname, context.key_info)}`);
         throw new InnertubeError(`Sort filter '${sortFilter}' not found`, { available_sort_filters: this.sort_filters });
       if (target_sort.selected)
         return this;
-      const page = await target_sort.endpoint.call(this.actions, { parse: true });
-      return new _Channel2(this.actions, page, true);
+      const page2 = await target_sort.endpoint.call(this.actions, { parse: true });
+      return new _Channel2(this.actions, page2, true);
     }
     /**
      * Applies given content type filter to the list. Use {@link content_type_filters} to get available filters.
@@ -30808,8 +32448,8 @@ ${generateTypescriptClass(classname, context.key_info)}`);
         throw new InnertubeError(`Sub menu item '${content_type_filter}' not found`, { available_filters: this.content_type_filters });
       if (item.selected)
         return this;
-      const page = await item.endpoint.call(this.actions, { parse: true });
-      return new _Channel2(this.actions, page, true);
+      const page2 = await item.endpoint.call(this.actions, { parse: true });
+      return new _Channel2(this.actions, page2, true);
     }
     /**
      * Returns the InnerTube renderer nodes representing filters.
@@ -30952,8 +32592,8 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       const tab = this.memo.getType(ExpandableTab)?.[0];
       if (!tab)
         throw new InnertubeError("Search tab not found", this);
-      const page = await tab.endpoint.call(this.actions, { query, parse: true });
-      return new _Channel2(this.actions, page, true);
+      const page2 = await tab.endpoint.call(this.actions, { query, parse: true });
+      return new _Channel2(this.actions, page2, true);
     }
     get has_home() {
       return this.hasTabWithURL("featured");
@@ -30992,10 +32632,10 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       return this.memo.getType(ExpandableTab)?.length > 0;
     }
     async getContinuation() {
-      const page = await super.getContinuationData();
-      if (!page)
+      const page2 = await super.getContinuationData();
+      if (!page2)
         throw new InnertubeError("Could not get continuation data");
-      return new ChannelListContinuation(this.actions, page, true);
+      return new ChannelListContinuation(this.actions, page2, true);
     }
   };
   _filter_nodes2 = new WeakMap();
@@ -31008,10 +32648,10 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       this.contents = this.page.on_response_received_actions?.[0] || this.page.on_response_received_endpoints?.[0];
     }
     async getContinuation() {
-      const page = await super.getContinuationData();
-      if (!page)
+      const page2 = await super.getContinuationData();
+      if (!page2)
         throw new InnertubeError("Could not get continuation data");
-      return new _ChannelListContinuation(this.actions, page, true);
+      return new _ChannelListContinuation(this.actions, page2, true);
     }
   };
   __name(_ChannelListContinuation, "ChannelListContinuation");
@@ -31050,22 +32690,22 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       return new _FilteredChannelList(this.actions, feed.page, true);
     }
     async getContinuation() {
-      const page = await super.getContinuationData();
-      if (!page?.on_response_received_actions_memo)
-        throw new InnertubeError("Unexpected continuation data", page);
+      const page2 = await super.getContinuationData();
+      if (!page2?.on_response_received_actions_memo)
+        throw new InnertubeError("Unexpected continuation data", page2);
       if (this.memo.has("FeedFilterChipBar")) {
-        page.on_response_received_actions_memo.set("FeedFilterChipBar", this.memo.getType(FeedFilterChipBar));
+        page2.on_response_received_actions_memo.set("FeedFilterChipBar", this.memo.getType(FeedFilterChipBar));
       }
       if (this.memo.has("ChipCloudChip")) {
-        page.on_response_received_actions_memo.set("ChipCloudChip", this.memo.getType(ChipCloudChip));
+        page2.on_response_received_actions_memo.set("ChipCloudChip", this.memo.getType(ChipCloudChip));
       }
       if (this.memo.has("ChipBarView")) {
-        page.on_response_received_actions_memo.set("ChipBarView", this.memo.getType(ChipBarView));
+        page2.on_response_received_actions_memo.set("ChipBarView", this.memo.getType(ChipBarView));
       }
       if (this.memo.has("ChipView")) {
-        page.on_response_received_actions_memo.set("ChipView", this.memo.getType(ChipView));
+        page2.on_response_received_actions_memo.set("ChipView", this.memo.getType(ChipView));
       }
-      return new _FilteredChannelList(this.actions, page, true);
+      return new _FilteredChannelList(this.actions, page2, true);
     }
   };
   __name(_FilteredChannelList, "FilteredChannelList");
@@ -31122,7 +32762,7 @@ ${generateTypescriptClass(classname, context.key_info)}`);
      * Creates a top-level comment.
      * @param text - Comment text.
      */
-    async createComment(text) {
+    async createComment(text2) {
       if (!this.header)
         throw new InnertubeError("Comment could not be created because the page header is missing");
       const button = this.header.create_renderer?.as(CommentSimplebox).submit_button;
@@ -31130,7 +32770,7 @@ ${generateTypescriptClass(classname, context.key_info)}`);
         throw new InnertubeError("Comment could not be created because the comment button is missing");
       if (!button.endpoint)
         throw new InnertubeError("Comment could not be created because the comment button does not have an endpoint");
-      return await button.endpoint.call(__privateGet(this, _actions8), { commentText: text });
+      return await button.endpoint.call(__privateGet(this, _actions8), { commentText: text2 });
     }
     /**
      * Retrieves next batch of comments.
@@ -31139,12 +32779,12 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       if (!__privateGet(this, _continuation3))
         throw new InnertubeError("No continuation item found");
       const data = await __privateGet(this, _continuation3).endpoint.call(__privateGet(this, _actions8), { parse: true });
-      const page = Object.assign({}, __privateGet(this, _page4));
-      if (!page.on_response_received_endpoints || !data.on_response_received_endpoints)
+      const page2 = Object.assign({}, __privateGet(this, _page4));
+      if (!page2.on_response_received_endpoints || !data.on_response_received_endpoints)
         throw new InnertubeError("Invalid reponse format, missing on_response_received_endpoints");
-      page.on_response_received_endpoints.pop();
-      page.on_response_received_endpoints.push(data.on_response_received_endpoints[0]);
-      return new _Comments(__privateGet(this, _actions8), page, true);
+      page2.on_response_received_endpoints.pop();
+      page2.on_response_received_endpoints.push(data.on_response_received_endpoints[0]);
+      return new _Comments(__privateGet(this, _actions8), page2, true);
     }
     get has_continuation() {
       return !!__privateGet(this, _continuation3);
@@ -31425,10 +33065,10 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       return await playlist_contents_continuation.endpoint.call(this.actions, { parse: true });
     }
     async getContinuation() {
-      const page = await this.getContinuationData();
-      if (!page)
+      const page2 = await this.getContinuationData();
+      if (!page2)
         throw new InnertubeError("Could not get continuation data");
-      return new _Playlist2(this.actions, page, true);
+      return new _Playlist2(this.actions, page2, true);
     }
   };
   _Playlist_instances = new WeakSet();
@@ -31482,15 +33122,15 @@ ${generateTypescriptClass(classname, context.key_info)}`);
     const button = shelf.menu.as(Menu).top_level_buttons.firstOfType(Button);
     if (!button)
       throw new InnertubeError("Did not find target button.");
-    const page = await button.as(Button).endpoint.call(this.actions, { parse: true });
+    const page2 = await button.as(Button).endpoint.call(this.actions, { parse: true });
     switch (shelf.icon_type) {
       case "LIKE":
       case "WATCH_LATER":
-        return new Playlist2(this.actions, page, true);
+        return new Playlist2(this.actions, page2, true);
       case "WATCH_HISTORY":
-        return new History(this.actions, page, true);
+        return new History(this.actions, page2, true);
       case "CONTENT_CUT":
-        return new Feed(this.actions, page, true);
+        return new Feed(this.actions, page2, true);
       default:
         throw new InnertubeError("Target shelf not implemented.");
     }
@@ -31686,7 +33326,7 @@ ${generateTypescriptClass(classname, context.key_info)}`);
      * Sends a message.
      * @param text - Text to send.
      */
-    async sendMessage(text) {
+    async sendMessage(text2) {
       const writer = LiveMessageParams.encode({
         params: {
           ids: {
@@ -31699,7 +33339,7 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       });
       const params = btoa(encodeURIComponent(u8ToBase64(writer.finish())));
       const response = await __privateGet(this, _actions10).execute("/live_chat/send_message", {
-        richMessage: { textSegments: [{ text }] },
+        richMessage: { textSegments: [{ text: text2 }] },
         clientMessageId: Platform.shim.uuidv4(),
         client: "WEB",
         parse: true,
@@ -31925,8 +33565,8 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       }
       if (!endpoint)
         throw new InnertubeError("Could not find endpoint for the specified filter");
-      const page = await endpoint.call(this.actions, { parse: true });
-      return new _Search(this.actions, page, true);
+      const page2 = await endpoint.call(this.actions, { parse: true });
+      return new _Search(this.actions, page2, true);
     }
     /**
      * Returns a list of available refinement filters. Use {@link Search.applyRefinement} to apply a filter.
@@ -32493,8 +34133,8 @@ ${generateTypescriptClass(classname, context.key_info)}`);
         throw new InnertubeError("Could not find target shelf (Top songs).");
       if (!shelf.endpoint)
         throw new InnertubeError("Target shelf (Top songs) did not have an endpoint.");
-      const page = await shelf.endpoint.call(__privateGet(this, _actions14), { client: "YTMUSIC", parse: true });
-      return page.contents_memo?.getType(MusicPlaylistShelf)?.[0];
+      const page2 = await shelf.endpoint.call(__privateGet(this, _actions14), { client: "YTMUSIC", parse: true });
+      return page2.contents_memo?.getType(MusicPlaylistShelf)?.[0];
     }
     get page() {
       return __privateGet(this, _page11);
@@ -32675,11 +34315,11 @@ ${generateTypescriptClass(classname, context.key_info)}`);
     async getContinuation() {
       if (!__privateGet(this, _continuation6))
         throw new InnertubeError("No continuation available");
-      const page = await __privateGet(this, _actions16).execute("/browse", {
+      const page2 = await __privateGet(this, _actions16).execute("/browse", {
         client: "YTMUSIC",
         continuation: __privateGet(this, _continuation6)
       });
-      return new LibraryContinuation(page, __privateGet(this, _actions16));
+      return new LibraryContinuation(page2, __privateGet(this, _actions16));
     }
     get has_continuation() {
       return !!__privateGet(this, _continuation6);
@@ -32843,12 +34483,12 @@ ${generateTypescriptClass(classname, context.key_info)}`);
     const target_section_list = __privateGet(this, _page16).contents_memo?.getType(SectionList).find((section_list) => section_list.continuation);
     const continuation = __privateGet(this, _suggestions_continuation) || target_section_list?.continuation;
     if (continuation) {
-      const page = await __privateGet(this, _actions18).execute("/browse", {
+      const page2 = await __privateGet(this, _actions18).execute("/browse", {
         client: "YTMUSIC",
         continuation,
         parse: true
       });
-      const section_list = page.continuation_contents?.as(SectionListContinuation);
+      const section_list = page2.continuation_contents?.as(SectionListContinuation);
       const sections = section_list?.contents?.as(MusicCarouselShelf, MusicShelf);
       const suggestions = sections?.find((section) => section.is(MusicShelf))?.as(MusicShelf);
       return {
@@ -33069,12 +34709,12 @@ ${generateTypescriptClass(classname, context.key_info)}`);
         throw new InnertubeError(`Tab "${title_or_page_type}" not found`, { available_tabs: this.available_tabs });
       if (target_tab.content)
         return target_tab.content;
-      const page = await target_tab.endpoint.call(this.actions, { client: "YTMUSIC", parse: true });
-      if (page.contents?.item().type === "Message")
-        return page.contents.item().as(Message);
-      if (!page.contents)
-        throw new InnertubeError("Page contents was empty", page);
-      return page.contents.item().as(SectionList).contents;
+      const page2 = await target_tab.endpoint.call(this.actions, { client: "YTMUSIC", parse: true });
+      if (page2.contents?.item().type === "Message")
+        return page2.contents.item().as(Message);
+      if (!page2.contents)
+        throw new InnertubeError("Page contents was empty", page2);
+      return page2.contents.item().as(SectionList).contents;
     }
     /**
      * Retrieves up next.
@@ -33088,14 +34728,14 @@ ${generateTypescriptClass(classname, context.key_info)}`);
         const automix_preview_video = playlist_panel.contents.firstOfType(AutomixPreviewVideo);
         if (!automix_preview_video)
           throw new InnertubeError("Automix item not found");
-        const page = await automix_preview_video.playlist_video?.endpoint.call(this.actions, {
+        const page2 = await automix_preview_video.playlist_video?.endpoint.call(this.actions, {
           videoId: this.basic_info.id,
           client: "YTMUSIC",
           parse: true
         });
-        if (!page || !page.contents_memo)
+        if (!page2 || !page2.contents_memo)
           throw new InnertubeError("Could not fetch automix");
-        return page.contents_memo.getType(PlaylistPanel)?.[0];
+        return page2.contents_memo.getType(PlaylistPanel)?.[0];
       }
       return playlist_panel;
     }
@@ -33201,10 +34841,10 @@ ${generateTypescriptClass(classname, context.key_info)}`);
       }
       if (!target_tab)
         throw new InnertubeError(`Tab "${tab}" not found`);
-      const page = await target_tab.endpoint.call(this.actions, { client: "YTKIDS", parse: true });
-      page.header = this.page.header;
-      page.header_memo = this.page.header_memo;
-      return new _HomeFeed3(this.actions, page, true);
+      const page2 = await target_tab.endpoint.call(this.actions, { client: "YTKIDS", parse: true });
+      page2.header = this.page.header;
+      page2.header_memo = this.page.header_memo;
+      return new _HomeFeed3(this.actions, page2, true);
     }
     get categories() {
       return this.header?.category_tabs.map((tab) => tab.title.toString()) || [];
@@ -34260,10 +35900,10 @@ return process("${n || ""}", "${sp || ""}", "${s || ""}");`;
       this.signature_timestamp = signature_timestamp;
       this.data = data;
     }
-    static async create(cache, fetch = Platform.shim.fetch, po_token, player_id) {
+    static async create(cache2, fetch3 = Platform.shim.fetch, po_token, player_id) {
       if (!player_id) {
         const url = new URL("/iframe_api", Constants_exports.URLS.YT_BASE);
-        const res = await fetch(url);
+        const res = await fetch3(url);
         if (!res.ok)
           throw new PlayerError(`Failed to get player id: ${res.status} (${res.statusText})`);
         const js = await res.text();
@@ -34272,8 +35912,8 @@ return process("${n || ""}", "${sp || ""}", "${s || ""}");`;
       Log_exports.info(TAG4, `Using player id (${player_id}). Checking for cached players..`);
       if (!player_id)
         throw new PlayerError("Failed to get player id");
-      if (cache) {
-        const cached_player = await _Player.fromCache(cache, player_id);
+      if (cache2) {
+        const cached_player = await _Player.fromCache(cache2, player_id);
         if (cached_player) {
           Log_exports.info(TAG4, "Found up-to-date player data in cache.");
           cached_player.po_token = po_token;
@@ -34282,7 +35922,7 @@ return process("${n || ""}", "${sp || ""}", "${s || ""}");`;
       }
       const player_url = new URL(`/s/player/${player_id}/player_es6.vflset/en_US/base.js`, Constants_exports.URLS.YT_BASE);
       Log_exports.info(TAG4, `Could not find any cached player. Will download a new player from ${player_url}.`);
-      const player_res = await fetch(player_url, {
+      const player_res = await fetch3(player_url, {
         headers: {
           "user-agent": getRandomUserAgent("desktop")
         }
@@ -34312,7 +35952,7 @@ return process("${n || ""}", "${sp || ""}", "${s || ""}");`;
       }
       const signatureTimestamp = result.exportedRawValues?.[timestampVarName];
       const player = await _Player.fromSource(player_id, {
-        cache,
+        cache: cache2,
         signature_timestamp: parseInt(signatureTimestamp) || 0,
         data: result
       });
@@ -34408,8 +36048,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       Log_exports.info(TAG4, `Deciphered URL: ${result}`);
       return url_components.toString();
     }
-    static async fromCache(cache, player_id) {
-      const buffer = await cache.get(player_id);
+    static async fromCache(cache2, player_id) {
+      const buffer = await cache2.get(player_id);
       if (!buffer)
         return null;
       try {
@@ -34429,8 +36069,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       await player.cache(options.cache);
       return player;
     }
-    async cache(cache) {
-      if (!cache || !this.data)
+    async cache(cache2) {
+      if (!cache2 || !this.data)
         return;
       const buffer = BinarySerializer_exports.serialize({
         playerId: this.player_id,
@@ -34438,7 +36078,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
         libraryVersion: package_default.version,
         data: this.data
       });
-      await cache.set(this.player_id, buffer);
+      await cache2.set(this.player_id, buffer);
     }
     get url() {
       return new URL(`/s/player/${this.player_id}/player_ias.vflset/en_US/base.js`, Constants_exports.URLS.YT_BASE).toString();
@@ -34485,7 +36125,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
     logged_in;
     actions;
     user_agent;
-    constructor(context, api_key, api_version, account_index, config_data, player, cookie, fetch, cache, po_token) {
+    constructor(context, api_key, api_version, account_index, config_data, player, cookie, fetch3, cache2, po_token) {
       super();
       this.context = context;
       this.api_key = api_key;
@@ -34494,9 +36134,9 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       this.config_data = config_data;
       this.player = player;
       this.cookie = cookie;
-      this.cache = cache;
+      this.cache = cache2;
       this.po_token = po_token;
-      this.http = new HTTPClient(this, cookie, fetch);
+      this.http = new HTTPClient(this, cookie, fetch3);
       this.actions = new Actions(this);
       this.oauth = new OAuth2(this);
       this.logged_in = !!cookie;
@@ -34511,8 +36151,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
      * @param cache - A valid cache implementation.
      * @param session_args - User provided session arguments.
      */
-    static async fromCache(cache, session_args) {
-      const buffer = await cache.get("innertube_session_data");
+    static async fromCache(cache2, session_args) {
+      const buffer = await cache2.get("innertube_session_data");
       if (!buffer)
         return null;
       try {
@@ -34549,7 +36189,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
         return null;
       }
     }
-    static async getSessionData(lang = "", location = "", account_index = 0, visitor_data = "", user_agent = getRandomUserAgent("desktop"), enable_safety_mode = false, generate_session_locally = false, fail_fast = false, device_category = "desktop", client_name = ClientType.WEB, tz = Intl.DateTimeFormat().resolvedOptions().timeZone, fetch = Platform.shim.fetch, on_behalf_of_user, cache, enable_session_cache = true, po_token, retrieve_innertube_config = true) {
+    static async getSessionData(lang = "", location = "", account_index = 0, visitor_data = "", user_agent = getRandomUserAgent("desktop"), enable_safety_mode = false, generate_session_locally = false, fail_fast = false, device_category = "desktop", client_name = ClientType.WEB, tz = Intl.DateTimeFormat().resolvedOptions().timeZone, fetch3 = Platform.shim.fetch, on_behalf_of_user, cache2, enable_session_cache = true, po_token, retrieve_innertube_config = true) {
       const session_args = {
         lang,
         location,
@@ -34563,8 +36203,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
         po_token
       };
       let session_data;
-      if (cache && enable_session_cache) {
-        const cached_session_data = await this.fromCache(cache, session_args);
+      if (cache2 && enable_session_cache) {
+        const cached_session_data = await this.fromCache(cache2, session_args);
         if (cached_session_data) {
           Log_exports.info(TAG5, "Found session data in cache.");
           session_data = cached_session_data;
@@ -34594,7 +36234,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
         };
         if (!generate_session_locally) {
           try {
-            const sw_session_data = await __privateMethod(this, _Session_static, getSessionData_fn).call(this, session_args, fetch);
+            const sw_session_data = await __privateMethod(this, _Session_static, getSessionData_fn).call(this, session_args, fetch3);
             api_key = sw_session_data.api_key;
             api_version = sw_session_data.api_version;
             context_data = sw_session_data.context_data;
@@ -34627,7 +36267,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
               config_headers["User-Agent"] = user_agent;
               config_headers["Origin"] = URLS.YT_BASE;
             }
-            const config = await fetch(`${URLS.API.PRODUCTION_1}v1/config?prettyPrint=false`, {
+            const config = await fetch3(`${URLS.API.PRODUCTION_1}v1/config?prettyPrint=false`, {
               headers: config_headers,
               method: "POST",
               body: JSON.stringify({ context: session_data.context })
@@ -34648,7 +36288,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
           }
         }
         if (enable_session_cache)
-          await __privateMethod(this, _Session_static, storeSession_fn).call(this, session_data, cache);
+          await __privateMethod(this, _Session_static, storeSession_fn).call(this, session_data, cache2);
       }
       Log_exports.debug(TAG5, "Session data:", session_data);
       return { ...session_data, account_index };
@@ -34690,22 +36330,22 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
     }
   };
   _Session_static = new WeakSet();
-  storeSession_fn = /* @__PURE__ */ __name(async function(session_data, cache) {
-    if (!cache)
+  storeSession_fn = /* @__PURE__ */ __name(async function(session_data, cache2) {
+    if (!cache2)
       return;
     Log_exports.info(TAG5, "Compressing and caching session data.");
     const buffer = BinarySerializer_exports.serialize({
       ...session_data,
       library_version: parseInt(package_default.version.split(".", 1)[0])
     });
-    await cache.set("innertube_session_data", buffer);
+    await cache2.set("innertube_session_data", buffer);
   }, "#storeSession");
-  getSessionData_fn = /* @__PURE__ */ __name(async function(options, fetch = Platform.shim.fetch) {
+  getSessionData_fn = /* @__PURE__ */ __name(async function(options, fetch3 = Platform.shim.fetch) {
     let visitor_id = generateRandomString(11);
     if (options.visitor_data)
       visitor_id = __privateMethod(this, _Session_static, getVisitorID_fn).call(this, options.visitor_data);
     const url = new URL("/sw.js_data", URLS.YT_BASE);
-    const res = await fetch(url, {
+    const res = await fetch3(url, {
       headers: {
         "Accept-Language": options.lang || "en-US",
         "User-Agent": options.user_agent,
@@ -34716,10 +36356,10 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
     });
     if (!res.ok)
       throw new SessionError(`Failed to retrieve session data: ${res.status}`);
-    const text = await res.text();
-    if (!text.startsWith(")]}'"))
+    const text2 = await res.text();
+    if (!text2.startsWith(")]}'"))
       throw new SessionError("Incorrect JSPB formatting");
-    const data = JSON.parse(text.substring(5));
+    const data = JSON.parse(text2.substring(5));
     const ytcfg = data[0][2];
     const api_version = CLIENTS.WEB.API_VERSION;
     const [[device_info], api_key] = ytcfg;
@@ -34992,14 +36632,14 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
         const automix_preview_video = playlist_panel.contents.firstOfType(AutomixPreviewVideo);
         if (!automix_preview_video)
           throw new InnertubeError("Automix item not found");
-        const page = await automix_preview_video.playlist_video?.endpoint.call(__privateGet(this, _actions22), {
+        const page2 = await automix_preview_video.playlist_video?.endpoint.call(__privateGet(this, _actions22), {
           videoId: video_id,
           client: "YTMUSIC",
           parse: true
         });
-        if (!page || !page.contents_memo)
+        if (!page2 || !page2.contents_memo)
           throw new InnertubeError("Could not fetch automix");
-        return page.contents_memo.getType(PlaylistPanel)[0];
+        return page2.contents_memo.getType(PlaylistPanel)[0];
       }
       return playlist_panel;
     }
@@ -35011,10 +36651,10 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       const tab = tabs?.find((tab2) => tab2.endpoint.payload.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType === "MUSIC_PAGE_TYPE_TRACK_RELATED");
       if (!tab)
         throw new InnertubeError("Could not find target tab.");
-      const page = await tab.endpoint.call(__privateGet(this, _actions22), { client: "YTMUSIC", parse: true });
-      if (!page.contents)
-        throw new InnertubeError("Unexpected response", page);
-      return page.contents.item().as(SectionList, Message);
+      const page2 = await tab.endpoint.call(__privateGet(this, _actions22), { client: "YTMUSIC", parse: true });
+      if (!page2.contents)
+        throw new InnertubeError("Unexpected response", page2);
+      return page2.contents.item().as(SectionList, Message);
     }
     async getLyrics(video_id) {
       throwIfMissing({ video_id });
@@ -35024,12 +36664,12 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       const tab = tabs?.find((tab2) => tab2.endpoint.payload.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType === "MUSIC_PAGE_TYPE_TRACK_LYRICS");
       if (!tab)
         throw new InnertubeError("Could not find target tab.");
-      const page = await tab.endpoint.call(__privateGet(this, _actions22), { client: "YTMUSIC", parse: true });
-      if (!page.contents)
-        throw new InnertubeError("Unexpected response", page);
-      if (page.contents.item().type === "Message")
-        throw new InnertubeError(page.contents.item().as(Message).text.toString(), video_id);
-      const section_list = page.contents.item().as(SectionList).contents;
+      const page2 = await tab.endpoint.call(__privateGet(this, _actions22), { client: "YTMUSIC", parse: true });
+      if (!page2.contents)
+        throw new InnertubeError("Unexpected response", page2);
+      if (page2.contents.item().type === "Message")
+        throw new InnertubeError(page2.contents.item().as(Message).text.toString(), video_id);
+      const section_list = page2.contents.item().as(SectionList).contents;
       return section_list.firstOfType(MusicDescriptionShelf);
     }
     async getRecap() {
@@ -39754,8 +41394,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       throwIfMissing({ playlist_id, video_ids });
       if (!__privateGet(this, _actions24).session.logged_in)
         throw new InnertubeError("You must be signed in to perform this operation.");
-      const playlist = await __privateMethod(this, _PlaylistManager_instances, getPlaylist_fn).call(this, playlist_id);
-      if (!playlist.info.is_editable)
+      const playlist2 = await __privateMethod(this, _PlaylistManager_instances, getPlaylist_fn).call(this, playlist_id);
+      if (!playlist2.info.is_editable)
         throw new InnertubeError("This playlist cannot be edited.", playlist_id);
       const payload = { playlistId: playlist_id, actions: [] };
       const getSetVideoIds = /* @__PURE__ */ __name(async (pl) => {
@@ -39770,7 +41410,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
           return getSetVideoIds(next);
         }
       }, "getSetVideoIds");
-      await getSetVideoIds(playlist);
+      await getSetVideoIds(playlist2);
       if (!payload.actions.length)
         throw new InnertubeError("Given video ids were not found in this playlist.", video_ids);
       const playlist_edit_endpoint = new NavigationEndpoint({ playlistEditEndpoint: payload });
@@ -39791,8 +41431,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       throwIfMissing({ playlist_id, moved_video_id, predecessor_video_id });
       if (!__privateGet(this, _actions24).session.logged_in)
         throw new InnertubeError("You must be signed in to perform this operation.");
-      const playlist = await __privateMethod(this, _PlaylistManager_instances, getPlaylist_fn).call(this, playlist_id);
-      if (!playlist.info.is_editable)
+      const playlist2 = await __privateMethod(this, _PlaylistManager_instances, getPlaylist_fn).call(this, playlist_id);
+      if (!playlist2.info.is_editable)
         throw new InnertubeError("This playlist cannot be edited.", playlist_id);
       const payload = { playlistId: playlist_id, actions: [] };
       let set_video_id_0, set_video_id_1;
@@ -39806,7 +41446,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
           return getSetVideoIds(next);
         }
       }, "getSetVideoIds");
-      await getSetVideoIds(playlist);
+      await getSetVideoIds(playlist2);
       payload.actions.push({
         action: "ACTION_MOVE_VIDEO_AFTER",
         setVideoId: set_video_id_0,
@@ -39968,8 +41608,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
      * @param video_id - The video ID
      * @param text - The comment text
      */
-    async comment(video_id, text) {
-      throwIfMissing({ video_id, text });
+    async comment(video_id, text2) {
+      throwIfMissing({ video_id, text: text2 });
       if (!__privateGet(this, _actions25).session.logged_in)
         throw new Error("You must be signed in to perform this operation.");
       const writer = CreateCommentParams.encode({
@@ -39982,7 +41622,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
       const params = encodeURIComponent(u8ToBase64(writer.finish()));
       const create_comment_endpoint = new NavigationEndpoint({
         createCommentEndpoint: {
-          commentText: text,
+          commentText: text2,
           createCommentParams: params
         }
       });
@@ -39994,9 +41634,9 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
      * @param target_language - an ISO language code
      * @param args - optional arguments
      */
-    async translate(text, target_language, args = {}) {
-      throwIfMissing({ text, target_language });
-      const action = encodeCommentActionParams(22, { text, target_language, ...args });
+    async translate(text2, target_language, args = {}) {
+      throwIfMissing({ text: text2, target_language });
+      const action = encodeCommentActionParams(22, { text: text2, target_language, ...args });
       const perform_comment_action_endpoint = new NavigationEndpoint({ performCommentActionEndpoint: { action } });
       const response = await perform_comment_action_endpoint.call(__privateGet(this, _actions25));
       const mutation = response.data.frameworkUpdates.entityBatchUpdate.mutations[0].payload.commentEntityPayload;
@@ -40234,8 +41874,8 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
           "Cookie": session.cookie || ""
         }
       });
-      const text = await response.text();
-      const data = JSON.parse(text.replace("window.google.ac.h(", "").slice(0, -1));
+      const text2 = await response.text();
+      const data = JSON.parse(text2.replace("window.google.ac.h(", "").slice(0, -1));
       return data[1].map((suggestion) => suggestion[0]);
     }
     async getComments(video_id, sort_by, comment_id) {
@@ -40613,13 +42253,2710 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
     CustomEvent: globalThis.CustomEvent
   });
 
-  // src/index.js
-  globalThis.TubeBridge = {
-    bundleInfo: {
-      bundleVersion: "1.0.0+yt18.1.0",
-      youtubeiVersion: "18.1.0",
-      bgutilsVersion: "4.0.3"
-    },
-    hasInnertube: typeof Innertube === "function"
+  // src/bridge/platform.js
+  var _NativeCache = class _NativeCache {
+    constructor(persistent = true, persistentDirectory) {
+      this._dir = persistentDirectory || "youtubei";
+      this._memory = /* @__PURE__ */ new Map();
+      this._persistent = persistent;
+    }
+    get cache_dir() {
+      return this._dir;
+    }
+    async get(key) {
+      const k = String(key);
+      const getter = nativeFn("cacheGet");
+      if (getter) {
+        const bytes = getter(k);
+        if (bytes == null) return void 0;
+        const u82 = toUint8Array(bytes);
+        return u82.buffer.slice(u82.byteOffset, u82.byteOffset + u82.byteLength);
+      }
+      return this._memory.get(k);
+    }
+    async set(key, value) {
+      const k = String(key);
+      const setter = nativeFn("cacheSet");
+      const u82 = new Uint8Array(toUint8Array(value));
+      if (setter) setter(k, u82);
+      else this._memory.set(k, u82.buffer);
+    }
+    async remove(key) {
+      const k = String(key);
+      const remover = nativeFn("cacheRemove");
+      if (remover) remover(k);
+      this._memory.delete(k);
+    }
   };
+  __name(_NativeCache, "NativeCache");
+  var NativeCache = _NativeCache;
+  var compiled = /* @__PURE__ */ new Map();
+  var MAX_COMPILED = 4;
+  function evaluate2(data, env) {
+    const code = data && typeof data.output === "string" ? data.output : String(data);
+    const marker = "\nreturn process(";
+    const cut = code.lastIndexOf(marker);
+    if (cut > 0 && code.indexOf("function process(") !== -1) {
+      const head = code.slice(0, cut);
+      let fn = compiled.get(head);
+      if (!fn) {
+        fn = new Function("__tube_n", "__tube_sp", "__tube_s", `${head}
+return process(__tube_n, __tube_sp, __tube_s);`);
+        compiled.set(head, fn);
+        if (compiled.size > MAX_COMPILED) compiled.delete(compiled.keys().next().value);
+      }
+      const e = env || {};
+      return fn(e.n || "", e.sp || "", e.sig || "");
+    }
+    return new Function(code)();
+  }
+  __name(evaluate2, "evaluate");
+  var loaded = false;
+  function loadPlatform() {
+    if (loaded) return;
+    loaded = true;
+    Platform.load({
+      runtime: "unknown",
+      // We are a native client (URLSession), so YouTube.js may set User-Agent / Origin headers.
+      server: true,
+      Cache: NativeCache,
+      sha1Hash: /* @__PURE__ */ __name(async (data) => sha1Hex(data), "sha1Hash"),
+      uuidv4: /* @__PURE__ */ __name(() => globalThis.crypto.randomUUID(), "uuidv4"),
+      eval: evaluate2,
+      fetch: /* @__PURE__ */ __name((input, init2) => globalThis.fetch(input, init2), "fetch"),
+      Request: globalThis.Request,
+      Response: globalThis.Response,
+      Headers: globalThis.Headers,
+      FormData: globalThis.FormData,
+      File: globalThis.File,
+      ReadableStream: globalThis.ReadableStream,
+      CustomEvent: globalThis.CustomEvent
+    });
+    Log_exports.setLevel(Log_exports.Level.WARNING, Log_exports.Level.ERROR);
+  }
+  __name(loadPlatform, "loadPlatform");
+
+  // src/bridge/errors.js
+  var _BridgeError = class _BridgeError extends Error {
+    constructor(kind, message, detail) {
+      super(message);
+      this.name = "BridgeError";
+      this.kind = kind;
+      this.detail = detail;
+    }
+  };
+  __name(_BridgeError, "BridgeError");
+  var BridgeError = _BridgeError;
+  function fail(kind, message, detail) {
+    throw new BridgeError(kind, message, detail);
+  }
+  __name(fail, "fail");
+  function extractStatus(message) {
+    const m = /status(?: code)? (\d{3})/i.exec(message) || /failed: (\d{3})/i.exec(message);
+    return m ? Number(m[1]) : void 0;
+  }
+  __name(extractStatus, "extractStatus");
+  function classify(error2) {
+    if (error2 instanceof BridgeError) {
+      return { kind: error2.kind, message: error2.message, detail: error2.detail ? String(error2.detail).slice(0, 2e3) : void 0 };
+    }
+    const message = error2 && (error2.message || error2.reason) ? String(error2.message || error2.reason) : String(error2);
+    let info2 = "";
+    try {
+      if (error2 && error2.info) info2 = typeof error2.info === "string" ? error2.info : JSON.stringify(error2.info);
+    } catch {
+      info2 = "";
+    }
+    const status = extractStatus(message);
+    const haystack = `${message} ${info2}`;
+    let kind = "unknown";
+    if (status === 401 || status === 403) kind = "auth";
+    else if (status === 429) kind = "rateLimited";
+    else if (status === 404) kind = "notFound";
+    else if (status && status >= 500) kind = "network";
+    else if (/Network request failed|timed out|offline|could not connect|NSURLErrorDomain|network connection/i.test(haystack)) kind = "network";
+    else if (/not a bot|confirm you/i.test(haystack)) kind = "botCheck";
+    else if (/must be signed in|sign in|login|log in/i.test(haystack)) kind = "loginRequired";
+    else if (/po ?token|botguard|integrity token/i.test(haystack)) kind = "poToken";
+    else if (/decipher|nsig|n\/sig|signature|player script|player id|player data/i.test(haystack)) kind = "extraction";
+    else if (/unavailable|private|removed|not available|copyright|terminated/i.test(haystack)) kind = "unavailable";
+    else if (/pars(e|ing)|unexpected token|JSON/i.test(haystack)) kind = "parse";
+    return {
+      kind,
+      message,
+      detail: info2 ? info2.slice(0, 2e3) : error2 && error2.stack ? String(error2.stack).slice(0, 2e3) : void 0,
+      status
+    };
+  }
+  __name(classify, "classify");
+
+  // src/bridge/util.js
+  function text(value) {
+    if (value == null) return void 0;
+    if (typeof value === "string") {
+      const s = value.trim();
+      return s && s !== "N/A" ? s : void 0;
+    }
+    if (typeof value === "number") return String(value);
+    if (typeof value === "object") {
+      if (typeof value.text === "string" && value.text.trim()) return value.text.trim();
+      if (Array.isArray(value.runs)) {
+        const joined = value.runs.map((r) => r && typeof r.text === "string" ? r.text : "").join("").trim();
+        if (joined) return joined;
+      }
+      if (typeof value.toString === "function" && value.toString !== Object.prototype.toString) {
+        const s = String(value.toString()).trim();
+        if (s && s !== "N/A" && s !== "[object Object]") return s;
+      }
+      if (value.content && typeof value.content === "string") return value.content.trim() || void 0;
+    }
+    return void 0;
+  }
+  __name(text, "text");
+  function fixUrl(url) {
+    if (!url || typeof url !== "string") return void 0;
+    if (url.startsWith("//")) return "https:" + url;
+    if (url.startsWith("http://")) return "https://" + url.slice(7);
+    return url;
+  }
+  __name(fixUrl, "fixUrl");
+  function bestThumb(thumbs, maxWidth = 1280) {
+    if (!thumbs) return void 0;
+    if (!Array.isArray(thumbs)) {
+      if (Array.isArray(thumbs.thumbnails)) thumbs = thumbs.thumbnails;
+      else if (Array.isArray(thumbs.image)) thumbs = thumbs.image;
+      else if (thumbs.url) thumbs = [thumbs];
+      else return void 0;
+    }
+    const list = thumbs.filter((t) => t && typeof t.url === "string");
+    if (!list.length) return void 0;
+    let best = null;
+    for (const t of list) {
+      const w = Number(t.width) || 0;
+      if (w <= maxWidth && (!best || w > (Number(best.width) || 0))) best = t;
+    }
+    if (!best) {
+      best = list.reduce((a, b) => (Number(a.width) || 0) <= (Number(b.width) || 0) ? a : b);
+    }
+    return fixUrl(best.url);
+  }
+  __name(bestThumb, "bestThumb");
+  function videoThumb(id) {
+    return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : void 0;
+  }
+  __name(videoThumb, "videoThumb");
+  function parseDuration(str) {
+    if (!str || typeof str !== "string") return void 0;
+    const m = str.trim().match(/^(\d+)(?::(\d{1,2}))?(?::(\d{1,2}))?$/);
+    if (!m) return void 0;
+    const parts = str.trim().split(":").map((p) => parseInt(p, 10));
+    if (parts.some((p) => Number.isNaN(p))) return void 0;
+    return parts.reduce((acc, p) => acc * 60 + p, 0);
+  }
+  __name(parseDuration, "parseDuration");
+  function isDurationText(str) {
+    return typeof str === "string" && /^\d+(:\d{2}){1,2}$/.test(str.trim());
+  }
+  __name(isDurationText, "isDurationText");
+  function clean(obj) {
+    if (Array.isArray(obj)) return obj.map(clean);
+    if (obj && typeof obj === "object") {
+      const out = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (v === void 0 || v === null || typeof v === "number" && Number.isNaN(v)) continue;
+        out[k] = clean(v);
+      }
+      return out;
+    }
+    return obj;
+  }
+  __name(clean, "clean");
+  function endpointBrowseId(endpoint) {
+    const p = endpoint?.payload;
+    if (!p) return void 0;
+    return p.browseId || p.channelId || void 0;
+  }
+  __name(endpointBrowseId, "endpointBrowseId");
+  function endpointVideoId(endpoint) {
+    const p = endpoint?.payload;
+    if (!p) return void 0;
+    return p.videoId || (Array.isArray(p.videoIds) ? p.videoIds[0] : void 0) || void 0;
+  }
+  __name(endpointVideoId, "endpointVideoId");
+  function isChannelId(id) {
+    return typeof id === "string" && /^UC[\w-]{22}$/.test(id);
+  }
+  __name(isChannelId, "isChannelId");
+  function nodeType(node) {
+    return node && typeof node === "object" ? node.type || node.constructor?.type : void 0;
+  }
+  __name(nodeType, "nodeType");
+  function entityKeyStrings(key) {
+    const out = [];
+    if (!key || typeof key !== "string") return out;
+    let bytes;
+    try {
+      const b64 = decodeURIComponent(key).replace(/-/g, "+").replace(/_/g, "/");
+      const bin = atob(b64.padEnd(b64.length + (4 - b64.length % 4) % 4, "="));
+      bytes = new Uint8Array(bin.length);
+      for (let i3 = 0; i3 < bin.length; i3++) bytes[i3] = bin.charCodeAt(i3);
+    } catch {
+      return out;
+    }
+    let i2 = 0;
+    const readVarint = /* @__PURE__ */ __name(() => {
+      let result = 0;
+      let shift = 0;
+      while (i2 < bytes.length) {
+        const b = bytes[i2++];
+        result += (b & 127) * Math.pow(2, shift);
+        if ((b & 128) === 0) break;
+        shift += 7;
+      }
+      return result;
+    }, "readVarint");
+    while (i2 < bytes.length) {
+      const tag = readVarint();
+      const wire = tag & 7;
+      if (wire === 0) readVarint();
+      else if (wire === 1) i2 += 8;
+      else if (wire === 5) i2 += 4;
+      else if (wire === 2) {
+        const len = readVarint();
+        const slice = bytes.subarray(i2, i2 + len);
+        i2 += len;
+        let s = "";
+        let printable = true;
+        for (const b of slice) {
+          if (b < 32 || b > 126) {
+            printable = false;
+            break;
+          }
+          s += String.fromCharCode(b);
+        }
+        if (printable && s) out.push(s);
+      } else {
+        break;
+      }
+    }
+    return out;
+  }
+  __name(entityKeyStrings, "entityKeyStrings");
+
+  // src/bridge/state.js
+  var DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+  var state = {
+    yt: null,
+    creating: null,
+    options: { client: "TV", poTokenMode: "auto" },
+    feeds: /* @__PURE__ */ new Map(),
+    infos: /* @__PURE__ */ new Map(),
+    subscriptions: /* @__PURE__ */ new Map(),
+    likes: /* @__PURE__ */ new Map(),
+    keySeq: 0,
+    lastAccount: null
+  };
+  var MAX_FEEDS = 40;
+  var MAX_INFOS = 12;
+  function newKey(prefix) {
+    state.keySeq += 1;
+    return `${prefix}:${state.keySeq}`;
+  }
+  __name(newKey, "newKey");
+  function putFeed(key, entry) {
+    state.feeds.delete(key);
+    state.feeds.set(key, entry);
+    while (state.feeds.size > MAX_FEEDS) state.feeds.delete(state.feeds.keys().next().value);
+  }
+  __name(putFeed, "putFeed");
+  function getFeed(key) {
+    const entry = state.feeds.get(key);
+    if (!entry) fail("expired", "This list expired. Pull to refresh.", key);
+    return entry;
+  }
+  __name(getFeed, "getFeed");
+  function putInfo(id, entry) {
+    state.infos.delete(id);
+    state.infos.set(id, { ...entry, at: Date.now() });
+    while (state.infos.size > MAX_INFOS) state.infos.delete(state.infos.keys().next().value);
+  }
+  __name(putInfo, "putInfo");
+  function getInfo(id) {
+    const entry = state.infos.get(id);
+    if (!entry) fail("expired", "Video information expired. Open the video again.", id);
+    return entry;
+  }
+  __name(getInfo, "getInfo");
+  function clientMeta(client) {
+    const key = String(client || "TV").toUpperCase();
+    const c = Constants_exports.CLIENTS[key === "YTKIDS" ? "WEB_KIDS" : key] || Constants_exports.CLIENTS.WEB;
+    return {
+      key,
+      name: c.NAME,
+      version: c.VERSION,
+      userAgent: c.USER_AGENT || DEFAULT_USER_AGENT
+    };
+  }
+  __name(clientMeta, "clientMeta");
+  addJSONResponseHook((url, json) => {
+    const mutations = json && json.frameworkUpdates && json.frameworkUpdates.entityBatchUpdate && json.frameworkUpdates.entityBatchUpdate.mutations;
+    if (!Array.isArray(mutations)) return;
+    for (const mutation of mutations) {
+      const payload = mutation && mutation.payload;
+      if (!payload) continue;
+      if (payload.subscriptionStateEntity) {
+        const strings = entityKeyStrings(payload.subscriptionStateEntity.key || mutation.entityKey);
+        const channelId = strings.find(isChannelId);
+        if (channelId) state.subscriptions.set(channelId, !!payload.subscriptionStateEntity.subscribed);
+      } else if (payload.likeStatusEntity) {
+        const strings = entityKeyStrings(payload.likeStatusEntity.key || mutation.entityKey);
+        const videoId = strings.find((s) => /^[\w-]{11}$/.test(s));
+        if (videoId) state.likes.set(videoId, String(payload.likeStatusEntity.likeStatus || ""));
+      }
+    }
+  });
+  function likeStatusFor(videoId) {
+    const s = state.likes.get(videoId);
+    if (s === "LIKE") return "like";
+    if (s === "DISLIKE") return "dislike";
+    if (s === "INDIFFERENT") return "none";
+    return void 0;
+  }
+  __name(likeStatusFor, "likeStatusFor");
+  var sharedCache = null;
+  function cache() {
+    if (!sharedCache) sharedCache = new NativeCache(true, "youtubei");
+    return sharedCache;
+  }
+  __name(cache, "cache");
+  async function createInnertube(opts, retrievePlayer = true) {
+    loadPlatform();
+    return Innertube.create({
+      cookie: opts.cookie || void 0,
+      retrieve_player: retrievePlayer,
+      cache: cache(),
+      enable_session_cache: true,
+      generate_session_locally: false,
+      visitor_data: opts.visitorData || void 0,
+      user_agent: opts.userAgent || DEFAULT_USER_AGENT,
+      lang: opts.lang || void 0,
+      location: opts.location || void 0,
+      player_id: opts.playerId || void 0,
+      po_token: opts.poToken || void 0,
+      fail_fast: false
+    });
+  }
+  __name(createInnertube, "createInnertube");
+  async function requireSession() {
+    if (state.creating) await state.creating;
+    if (!state.yt) fail("noSession", "Not connected to YouTube yet.");
+    return state.yt;
+  }
+  __name(requireSession, "requireSession");
+  function requireLogin(yt) {
+    if (!yt.session.logged_in) fail("loginRequired", "You need to be signed in (cookies) for this.");
+  }
+  __name(requireLogin, "requireLogin");
+  function parseAccount(info2) {
+    const contents = info2?.contents?.contents || [];
+    let item = contents.find((i2) => nodeType(i2) === "AccountItem" && i2.is_selected) || contents.find((i2) => nodeType(i2) === "AccountItem");
+    if (!item) {
+      const memo = info2?.page?.contents_memo;
+      const candidates = memo ? [...memo.get("AccountItem") || [], ...memo.get("ActiveAccountHeader") || []] : [];
+      item = candidates[0];
+    }
+    if (!item) fail("auth", "YouTube did not return an account for these cookies.");
+    const name = text(item.account_name);
+    if (!name) fail("auth", "YouTube did not return an account name for these cookies.");
+    return {
+      name,
+      handle: text(item.channel_handle),
+      photo: bestThumb(item.account_photo, 176),
+      byline: text(item.account_byline)
+    };
+  }
+  __name(parseAccount, "parseAccount");
+
+  // node_modules/bgutils-js/dist/utils/constants.js
+  var GOOG_BASE_URL = "https://jnn-pa.googleapis.com";
+  var YT_BASE_URL = "https://www.youtube.com";
+  var GOOG_API_KEY = "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw";
+  var USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36(KHTML, like Gecko)";
+
+  // node_modules/bgutils-js/dist/utils/helpers.js
+  var base64urlCharRegex = /[-_.]/g;
+  var base64urlToBase64Map = {
+    "-": "+",
+    _: "/",
+    ".": "="
+  };
+  var _DeferredPromise = class _DeferredPromise {
+    promise;
+    resolve;
+    reject;
+    constructor() {
+      this.promise = new Promise((resolve, reject) => {
+        this.resolve = resolve;
+        this.reject = reject;
+      });
+    }
+  };
+  __name(_DeferredPromise, "DeferredPromise");
+  var DeferredPromise = _DeferredPromise;
+  var _BgError = class _BgError extends TypeError {
+    info;
+    constructor(message, info2) {
+      super(message);
+      this.name = "BgError";
+      if (info2)
+        this.info = info2;
+    }
+  };
+  __name(_BgError, "BgError");
+  var BgError = _BgError;
+  function base64ToU82(base64) {
+    let base64Mod;
+    if (base64urlCharRegex.test(base64)) {
+      base64Mod = base64.replace(base64urlCharRegex, function(match) {
+        return base64urlToBase64Map[match];
+      });
+    } else {
+      base64Mod = base64;
+    }
+    base64Mod = atob(base64Mod);
+    return new Uint8Array([...base64Mod].map((char) => char.charCodeAt(0)));
+  }
+  __name(base64ToU82, "base64ToU8");
+  function u8ToBase642(u82, base64url = false) {
+    const result = btoa(String.fromCharCode(...u82));
+    if (base64url) {
+      return result.replace(/\+/g, "-").replace(/\//g, "_");
+    }
+    return result;
+  }
+  __name(u8ToBase642, "u8ToBase64");
+  function buildURL(endpointName, useYouTubeAPI) {
+    return `${useYouTubeAPI ? YT_BASE_URL : GOOG_BASE_URL}/${useYouTubeAPI ? "api/jnn/v1" : "$rpc/google.internal.waa.v1.Waa"}/${endpointName}`;
+  }
+  __name(buildURL, "buildURL");
+
+  // node_modules/bgutils-js/dist/utils/EventEmitterLike.js
+  var _listeners, _onceWrappers;
+  var _EventEmitterLike2 = class _EventEmitterLike2 {
+    constructor() {
+      __privateAdd(this, _listeners, /* @__PURE__ */ new Map());
+      __privateAdd(this, _onceWrappers, /* @__PURE__ */ new Map());
+    }
+    emit(type, ...args) {
+      const listeners = __privateGet(this, _listeners).get(type);
+      if (!listeners || listeners.size === 0)
+        return;
+      for (const listener of [...listeners]) {
+        listener(...args);
+      }
+    }
+    on(type, listener) {
+      let listeners = __privateGet(this, _listeners).get(type);
+      if (!listeners) {
+        listeners = /* @__PURE__ */ new Set();
+        __privateGet(this, _listeners).set(type, listeners);
+      }
+      listeners.add(listener);
+    }
+    once(type, listener) {
+      const wrapper = /* @__PURE__ */ __name((...args) => {
+        this.off(type, listener);
+        listener(...args);
+      }, "wrapper");
+      let wrappersByType = __privateGet(this, _onceWrappers).get(listener);
+      if (!wrappersByType) {
+        wrappersByType = /* @__PURE__ */ new Map();
+        __privateGet(this, _onceWrappers).set(listener, wrappersByType);
+      }
+      wrappersByType.set(type, wrapper);
+      this.on(type, wrapper);
+    }
+    off(type, listener) {
+      const listeners = __privateGet(this, _listeners).get(type);
+      if (!listeners)
+        return;
+      let target = listener;
+      const wrappersByType = __privateGet(this, _onceWrappers).get(listener);
+      if (wrappersByType) {
+        const onceWrapper = wrappersByType.get(type);
+        if (onceWrapper) {
+          target = onceWrapper;
+          wrappersByType.delete(type);
+          if (wrappersByType.size === 0)
+            __privateGet(this, _onceWrappers).delete(listener);
+        }
+      }
+      listeners.delete(target);
+      if (listeners.size === 0)
+        __privateGet(this, _listeners).delete(type);
+    }
+    removeAllListeners(type) {
+      if (!type) {
+        __privateGet(this, _listeners).clear();
+        __privateGet(this, _onceWrappers).clear();
+        return;
+      }
+      __privateGet(this, _listeners).delete(type);
+      for (const [listener, wrappersByType] of __privateGet(this, _onceWrappers).entries()) {
+        wrappersByType.delete(type);
+        if (wrappersByType.size === 0)
+          __privateGet(this, _onceWrappers).delete(listener);
+      }
+    }
+  };
+  _listeners = new WeakMap();
+  _onceWrappers = new WeakMap();
+  __name(_EventEmitterLike2, "EventEmitterLike");
+  var EventEmitterLike2 = _EventEmitterLike2;
+
+  // node_modules/bgutils-js/dist/core/BotGuardClient.js
+  var _BotGuardClient = class _BotGuardClient extends EventEmitterLike2 {
+    vm;
+    program;
+    userInteractionElement;
+    syncSnapshotFunction;
+    deferredVmFunctions = new DeferredPromise();
+    defaultTimeout = 3e3;
+    on(type, listener) {
+      super.on(type, listener);
+    }
+    off(type, listener) {
+      super.off(type, listener);
+    }
+    constructor(options) {
+      super();
+      if (!options.globalObject || !options.globalName || !options.program) {
+        throw new BgError("Invalid options", { options });
+      }
+      this.userInteractionElement = options.userInteractionElement;
+      this.vm = options.globalObject[options.globalName];
+      this.program = options.program;
+    }
+    /**
+     * Factory method to create and load a BotGuardClient instance.
+     * @param options - Configuration options for the BotGuardClient.
+     * @returns A loaded BotGuardClient instance.
+     */
+    static async create(options) {
+      return await new _BotGuardClient(options).load();
+    }
+    async load() {
+      if (!this.vm)
+        throw new BgError("EGOU: BotGuard unavailable");
+      if (!this.vm.a)
+        throw new BgError("ELIU: BotGuard initialization function unavailable");
+      const vmSetupCallback = /* @__PURE__ */ __name((asyncSnapshotFunction, shutdownFunction, passEventFunction, checkCameraFunction) => {
+        this.deferredVmFunctions.resolve({
+          asyncSnapshotFunction,
+          shutdownFunction,
+          passEventFunction,
+          checkCameraFunction
+        });
+      }, "vmSetupCallback");
+      const logEvent = /* @__PURE__ */ __name((event, elapsedTime) => {
+        this.emit("record-bg-event", { event, elapsedTime });
+      }, "logEvent");
+      const incrementClientErrorCount = /* @__PURE__ */ __name((errorCode) => {
+        this.emit("increment-client-error-count", { errorCode });
+      }, "incrementClientErrorCount");
+      const recordPayloadSize = /* @__PURE__ */ __name((payloadSize) => {
+        this.emit("record-payload-size", { payloadSize });
+      }, "recordPayloadSize");
+      const recordLatency = /* @__PURE__ */ __name((latency, et2) => {
+        this.emit("record-latency", { latency, et: et2 });
+      }, "recordLatency");
+      const incrementEventCount = /* @__PURE__ */ __name((event) => {
+        this.emit("increment-bg-event-count", { event });
+      }, "incrementEventCount");
+      const loggerFunctions = [
+        logEvent,
+        incrementClientErrorCount,
+        recordPayloadSize,
+        recordLatency,
+        incrementEventCount
+      ];
+      const vmTelemetryCallback = /* @__PURE__ */ __name((latency, eventFlag1, eventFlag2) => {
+        let event = "k";
+        if (eventFlag1) {
+          event = "h";
+        } else if (eventFlag2) {
+          event = "u";
+        }
+        incrementEventCount(event);
+        logEvent(event, latency);
+      }, "vmTelemetryCallback");
+      try {
+        this.syncSnapshotFunction = await this.vm.a(this.program, vmSetupCallback, true, this.userInteractionElement, vmTelemetryCallback, [[], []], void 0, false, loggerFunctions)?.[0];
+      } catch (error2) {
+        throw new BgError("Could not load program", { error: error2 });
+      }
+      return this;
+    }
+    /**
+     * Calls a VM function with a timeout.
+     * @param vmFunctionName - The name of the VM function to execute.
+     * @param timeout - The timeout in milliseconds.
+     * @param args - The arguments to pass to the VM function.
+     */
+    async execute(vmFunctionName, timeout, ...args) {
+      return await Promise.race([
+        (async () => {
+          const vmFunctions = await this.deferredVmFunctions.promise;
+          const vmFunction = vmFunctions[vmFunctionName];
+          if (!vmFunction)
+            throw new BgError(`${vmFunctionName} function not found`);
+          return vmFunction(...args);
+        })(),
+        new Promise((_, reject) => setTimeout(() => reject(new BgError("VM operation timed out")), timeout))
+      ]);
+    }
+    /**
+     * Takes a snapshot asynchronously.
+     * @returns The snapshot result.
+     * @example
+     * ```ts
+     * const result = await botguard.snapshot({
+     *   contentBinding: {
+     *     c: "a=6&a2=10&b=SZWDwKVIuixOp7Y4euGTgwckbJA&c=1729143849&d=1&t=7200&c1a=1&c6a=1&c6b=1&hh=HrMb5mRWTyxGJphDr0nW2Oxonh0_wl2BDqWuLHyeKLo",
+     *     e: "ENGAGEMENT_TYPE_VIDEO_LIKE",
+     *     encryptedVideoId: "P-vC09ZJcnM"
+     *    }
+     * });
+     *
+     * console.log(result);
+     * ```
+     */
+    async snapshot(args, timeout = this.defaultTimeout) {
+      return await new Promise(async (resolve, reject) => {
+        await this.execute("asyncSnapshotFunction", timeout, (response) => resolve(response), [
+          args.contentBinding,
+          args.signedTimestamp,
+          args.webPoSignalOutput,
+          args.skipPrivacyBuffer
+        ]).catch(reject);
+      });
+    }
+    /**
+     * Passes an event to the VM.
+     */
+    async passEvent(args, timeout = this.defaultTimeout) {
+      return this.execute("passEventFunction", timeout, args);
+    }
+    /**
+     * Checks the "camera".
+     */
+    async checkCamera(args, timeout = this.defaultTimeout) {
+      return this.execute("checkCameraFunction", timeout, args);
+    }
+    /**
+     * Shuts down the VM. Once called, the VM is no longer usable.
+     */
+    async shutdown(timeout = this.defaultTimeout) {
+      return this.execute("shutdownFunction", timeout);
+    }
+    /**
+     * Takes a snapshot synchronously.
+     * @returns The snapshot result.
+     */
+    async snapshotSynchronous(args) {
+      if (!this.syncSnapshotFunction)
+        throw new BgError("Synchronous snapshot function not found");
+      return this.syncSnapshotFunction([
+        args.contentBinding,
+        args.signedTimestamp,
+        args.webPoSignalOutput,
+        args.skipPrivacyBuffer
+      ]);
+    }
+  };
+  __name(_BotGuardClient, "BotGuardClient");
+  var BotGuardClient = _BotGuardClient;
+
+  // node_modules/bgutils-js/dist/core/WebPoMinter.js
+  var _WebPoMinter = class _WebPoMinter {
+    mintCallback;
+    constructor(mintCallback) {
+      this.mintCallback = mintCallback;
+    }
+    /**
+     * Factory method to create a WebPoMinter instance.
+     * @param integrityTokenResponse - The integrity token response object.
+     * @param webPoSignalOutput - The output array containing the minter function.
+     */
+    static async create(integrityTokenResponse, webPoSignalOutput) {
+      const getMinter = webPoSignalOutput[0];
+      if (!getMinter)
+        throw new BgError("PMD:Undefined");
+      if (!integrityTokenResponse.integrityToken)
+        throw new BgError("No integrity token provided", { integrityTokenResponse });
+      const mintCallback = await getMinter(base64ToU82(integrityTokenResponse.integrityToken));
+      if (!(mintCallback instanceof Function))
+        throw new BgError("APF:Failed");
+      return new _WebPoMinter(mintCallback);
+    }
+    /**
+     * Mints a proof and returns it as a web-safe base64 string.
+     * @param contentBinding - A Visitor ID, Video ID, or Data Sync ID.
+     */
+    async mintAsWebsafeString(contentBinding) {
+      return u8ToBase642(await this.mint(contentBinding), true);
+    }
+    /**
+     * Mints a proof and returns it as a Uint8Array.
+     * @param contentBinding - A Visitor ID, Video ID, or Data Sync ID.
+     */
+    async mint(contentBinding) {
+      const result = await this.mintCallback(new TextEncoder().encode(contentBinding));
+      if (!result)
+        throw new BgError("YNJ:Undefined");
+      if (!(result instanceof Uint8Array))
+        throw new BgError("ODM:Invalid");
+      return result;
+    }
+  };
+  __name(_WebPoMinter, "WebPoMinter");
+  var WebPoMinter = _WebPoMinter;
+
+  // src/bridge/domshim.js
+  var _ShimStorage = class _ShimStorage {
+    constructor() {
+      this._data = /* @__PURE__ */ new Map();
+    }
+    get length() {
+      return this._data.size;
+    }
+    key(i2) {
+      return Array.from(this._data.keys())[i2] ?? null;
+    }
+    getItem(k) {
+      return this._data.has(String(k)) ? this._data.get(String(k)) : null;
+    }
+    setItem(k, v) {
+      this._data.set(String(k), String(v));
+    }
+    removeItem(k) {
+      this._data.delete(String(k));
+    }
+    clear() {
+      this._data.clear();
+    }
+  };
+  __name(_ShimStorage, "ShimStorage");
+  var ShimStorage = _ShimStorage;
+  function installDomShim(userAgent) {
+    const g2 = globalThis;
+    if (g2.__tubeDomShimInstalled) return;
+    g2.__tubeDomShimInstalled = true;
+    const ET = g2.EventTarget;
+    const _Node = class _Node extends ET {
+      constructor(name) {
+        super();
+        this.nodeName = name;
+        this.childNodes = [];
+        this.parentNode = null;
+        this.ownerDocument = null;
+      }
+      appendChild(child) {
+        if (child && child.parentNode) child.parentNode.removeChild(child);
+        this.childNodes.push(child);
+        if (child) child.parentNode = this;
+        if (child && child.tagName === "SCRIPT" && child.textContent && !child.src) {
+          try {
+            new Function(child.textContent)();
+          } catch (e) {
+            console.warn("dom shim: inline script failed", e && e.message);
+          }
+        }
+        return child;
+      }
+      append(...nodes) {
+        nodes.forEach((n) => this.appendChild(typeof n === "string" ? g2.document.createTextNode(n) : n));
+      }
+      prepend(...nodes) {
+        nodes.reverse().forEach((n) => this.insertBefore(n, this.childNodes[0] || null));
+      }
+      insertBefore(child, ref) {
+        const i2 = ref ? this.childNodes.indexOf(ref) : -1;
+        if (i2 < 0) return this.appendChild(child);
+        this.childNodes.splice(i2, 0, child);
+        child.parentNode = this;
+        return child;
+      }
+      removeChild(child) {
+        const i2 = this.childNodes.indexOf(child);
+        if (i2 >= 0) this.childNodes.splice(i2, 1);
+        if (child) child.parentNode = null;
+        return child;
+      }
+      remove() {
+        if (this.parentNode) this.parentNode.removeChild(this);
+      }
+      contains(node) {
+        if (node === this) return true;
+        return this.childNodes.some((c) => c && typeof c.contains === "function" && c.contains(node));
+      }
+      get firstChild() {
+        return this.childNodes[0] || null;
+      }
+      get lastChild() {
+        return this.childNodes[this.childNodes.length - 1] || null;
+      }
+      get children() {
+        return this.childNodes.filter((c) => c instanceof Element2);
+      }
+      cloneNode() {
+        return new this.constructor(this.nodeName);
+      }
+      hasChildNodes() {
+        return this.childNodes.length > 0;
+      }
+    };
+    __name(_Node, "Node");
+    let Node = _Node;
+    const _Element2 = class _Element2 extends Node {
+      constructor(tag) {
+        super(String(tag).toUpperCase());
+        this.tagName = String(tag).toUpperCase();
+        this.localName = String(tag).toLowerCase();
+        this.style = new Proxy({ cssText: "" }, {
+          get: /* @__PURE__ */ __name((t, p) => p in t ? t[p] : typeof p === "string" && p === "getPropertyValue" ? () => "" : "", "get"),
+          set: /* @__PURE__ */ __name((t, p, v) => {
+            t[p] = v;
+            return true;
+          }, "set")
+        });
+        this._attrs = /* @__PURE__ */ new Map();
+        this.dataset = {};
+        this.classList = {
+          _set: /* @__PURE__ */ new Set(),
+          add: /* @__PURE__ */ __name((...c) => c.forEach((x2) => this.classList._set.add(x2)), "add"),
+          remove: /* @__PURE__ */ __name((...c) => c.forEach((x2) => this.classList._set.delete(x2)), "remove"),
+          contains: /* @__PURE__ */ __name((c) => this.classList._set.has(c), "contains"),
+          toggle: /* @__PURE__ */ __name((c) => this.classList._set.has(c) ? (this.classList._set.delete(c), false) : (this.classList._set.add(c), true), "toggle")
+        };
+        this.textContent = "";
+        this.innerHTML = "";
+        this.id = "";
+        this.className = "";
+      }
+      setAttribute(k, v) {
+        this._attrs.set(String(k), String(v));
+        if (k === "id") this.id = String(v);
+      }
+      getAttribute(k) {
+        return this._attrs.has(String(k)) ? this._attrs.get(String(k)) : null;
+      }
+      hasAttribute(k) {
+        return this._attrs.has(String(k));
+      }
+      removeAttribute(k) {
+        this._attrs.delete(String(k));
+      }
+      get attributes() {
+        return Array.from(this._attrs, ([name, value]) => ({ name, value }));
+      }
+      getBoundingClientRect() {
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON() {
+          return this;
+        } };
+      }
+      getClientRects() {
+        return [];
+      }
+      querySelector() {
+        return null;
+      }
+      querySelectorAll() {
+        return [];
+      }
+      getElementsByTagName() {
+        return [];
+      }
+      getElementsByClassName() {
+        return [];
+      }
+      closest() {
+        return null;
+      }
+      matches() {
+        return false;
+      }
+      focus() {
+      }
+      blur() {
+      }
+      click() {
+        this.dispatchEvent(new g2.Event("click"));
+      }
+      get offsetWidth() {
+        return 0;
+      }
+      get offsetHeight() {
+        return 0;
+      }
+      get clientWidth() {
+        return 0;
+      }
+      get clientHeight() {
+        return 0;
+      }
+      attachShadow() {
+        return new _Element2("shadow-root");
+      }
+    };
+    __name(_Element2, "Element");
+    let Element2 = _Element2;
+    const _HTMLElement = class _HTMLElement extends Element2 {
+    };
+    __name(_HTMLElement, "HTMLElement");
+    let HTMLElement = _HTMLElement;
+    const _HTMLDivElement = class _HTMLDivElement extends HTMLElement {
+    };
+    __name(_HTMLDivElement, "HTMLDivElement");
+    let HTMLDivElement = _HTMLDivElement;
+    const _HTMLSpanElement = class _HTMLSpanElement extends HTMLElement {
+    };
+    __name(_HTMLSpanElement, "HTMLSpanElement");
+    let HTMLSpanElement = _HTMLSpanElement;
+    const _HTMLScriptElement = class _HTMLScriptElement extends HTMLElement {
+      constructor(tag) {
+        super(tag);
+        this.src = "";
+        this.type = "";
+        this.async = false;
+      }
+    };
+    __name(_HTMLScriptElement, "HTMLScriptElement");
+    let HTMLScriptElement = _HTMLScriptElement;
+    const _HTMLCanvasElement = class _HTMLCanvasElement extends HTMLElement {
+      constructor(tag) {
+        super(tag);
+        this.width = 300;
+        this.height = 150;
+      }
+      getContext() {
+        return null;
+      }
+      toDataURL() {
+        return "data:,";
+      }
+    };
+    __name(_HTMLCanvasElement, "HTMLCanvasElement");
+    let HTMLCanvasElement = _HTMLCanvasElement;
+    const _HTMLIFrameElement = class _HTMLIFrameElement extends HTMLElement {
+      get contentWindow() {
+        return g2;
+      }
+      get contentDocument() {
+        return g2.document;
+      }
+    };
+    __name(_HTMLIFrameElement, "HTMLIFrameElement");
+    let HTMLIFrameElement = _HTMLIFrameElement;
+    const _HTMLImageElement = class _HTMLImageElement extends HTMLElement {
+      constructor(w, h) {
+        super("img");
+        this.width = w || 0;
+        this.height = h || 0;
+        this.complete = true;
+        this.naturalWidth = 0;
+        this.naturalHeight = 0;
+      }
+    };
+    __name(_HTMLImageElement, "HTMLImageElement");
+    let HTMLImageElement = _HTMLImageElement;
+    const _HTMLVideoElement = class _HTMLVideoElement extends HTMLElement {
+      canPlayType() {
+        return "";
+      }
+    };
+    __name(_HTMLVideoElement, "HTMLVideoElement");
+    let HTMLVideoElement = _HTMLVideoElement;
+    const _Text2 = class _Text2 extends Node {
+      constructor(data) {
+        super("#text");
+        this.data = String(data);
+        this.textContent = this.data;
+      }
+    };
+    __name(_Text2, "Text");
+    let Text3 = _Text2;
+    const TAGS = {
+      div: HTMLDivElement,
+      span: HTMLSpanElement,
+      script: HTMLScriptElement,
+      canvas: HTMLCanvasElement,
+      iframe: HTMLIFrameElement,
+      img: HTMLImageElement,
+      video: HTMLVideoElement
+    };
+    const _Document = class _Document extends Node {
+      constructor() {
+        super("#document");
+        this.documentElement = new HTMLElement("html");
+        this.head = new HTMLElement("head");
+        this.body = new HTMLElement("body");
+        this.documentElement.appendChild(this.head);
+        this.documentElement.appendChild(this.body);
+        this.childNodes.push(this.documentElement);
+        this.cookie = "";
+        this.readyState = "complete";
+        this.visibilityState = "visible";
+        this.hidden = false;
+        this.referrer = "https://www.youtube.com/";
+        this.title = "YouTube";
+        this.characterSet = "UTF-8";
+        this.compatMode = "CSS1Compat";
+        this.contentType = "text/html";
+        this.fonts = { ready: Promise.resolve(), check: /* @__PURE__ */ __name(() => true, "check"), forEach() {
+        } };
+      }
+      get location() {
+        return g2.location;
+      }
+      get URL() {
+        return g2.location.href;
+      }
+      get domain() {
+        return g2.location.hostname;
+      }
+      createElement(tag) {
+        const Cls = TAGS[String(tag).toLowerCase()] || HTMLElement;
+        const el = new Cls(tag);
+        el.ownerDocument = this;
+        return el;
+      }
+      createElementNS(ns, tag) {
+        return this.createElement(tag);
+      }
+      createTextNode(data) {
+        return new Text3(data);
+      }
+      createDocumentFragment() {
+        return new HTMLElement("#fragment");
+      }
+      createEvent() {
+        return new g2.Event("");
+      }
+      getElementById() {
+        return null;
+      }
+      getElementsByTagName(tag) {
+        const t = String(tag).toLowerCase();
+        if (t === "head") return [this.head];
+        if (t === "body") return [this.body];
+        if (t === "html") return [this.documentElement];
+        return [];
+      }
+      getElementsByClassName() {
+        return [];
+      }
+      querySelector(sel) {
+        if (sel === "head") return this.head;
+        if (sel === "body") return this.body;
+        return null;
+      }
+      querySelectorAll() {
+        return [];
+      }
+      hasFocus() {
+        return true;
+      }
+      get activeElement() {
+        return this.body;
+      }
+      get scrollingElement() {
+        return this.documentElement;
+      }
+    };
+    __name(_Document, "Document");
+    let Document = _Document;
+    const _Observer = class _Observer {
+      constructor(callback) {
+        this.callback = callback;
+      }
+      observe() {
+      }
+      unobserve() {
+      }
+      disconnect() {
+      }
+      takeRecords() {
+        return [];
+      }
+    };
+    __name(_Observer, "Observer");
+    let Observer = _Observer;
+    const ua = userAgent || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+    const location = new g2.URL("https://www.youtube.com/");
+    location.assign = () => {
+    };
+    location.replace = () => {
+    };
+    location.reload = () => {
+    };
+    location.ancestorOrigins = [];
+    const navigatorShim = {
+      userAgent: ua,
+      appVersion: ua.replace(/^Mozilla\//, ""),
+      appName: "Netscape",
+      appCodeName: "Mozilla",
+      product: "Gecko",
+      productSub: "20030107",
+      platform: "MacIntel",
+      vendor: "Google Inc.",
+      vendorSub: "",
+      language: "en-US",
+      languages: ["en-US", "en"],
+      hardwareConcurrency: 6,
+      deviceMemory: 4,
+      maxTouchPoints: 0,
+      webdriver: false,
+      cookieEnabled: true,
+      onLine: true,
+      doNotTrack: null,
+      pdfViewerEnabled: true,
+      plugins: [],
+      mimeTypes: [],
+      permissions: { query: /* @__PURE__ */ __name(async () => ({ state: "prompt", onchange: null }), "query") },
+      sendBeacon: /* @__PURE__ */ __name(() => true, "sendBeacon"),
+      javaEnabled: /* @__PURE__ */ __name(() => false, "javaEnabled"),
+      getBattery: /* @__PURE__ */ __name(async () => ({ charging: true, level: 1, chargingTime: 0, dischargingTime: Infinity }), "getBattery")
+    };
+    const document = new Document();
+    const assign = /* @__PURE__ */ __name((name, value) => {
+      if (typeof g2[name] === "undefined") {
+        Object.defineProperty(g2, name, { value, writable: true, configurable: true });
+      }
+    }, "assign");
+    const windowEvents = new ET();
+    assign("addEventListener", windowEvents.addEventListener.bind(windowEvents));
+    assign("removeEventListener", windowEvents.removeEventListener.bind(windowEvents));
+    assign("dispatchEvent", windowEvents.dispatchEvent.bind(windowEvents));
+    assign("window", g2);
+    assign("top", g2);
+    assign("parent", g2);
+    assign("frames", g2);
+    assign("document", document);
+    assign("navigator", navigatorShim);
+    assign("location", location);
+    assign("origin", "https://www.youtube.com");
+    assign("isSecureContext", true);
+    assign("screen", { width: 1920, height: 1080, availWidth: 1920, availHeight: 1050, colorDepth: 24, pixelDepth: 24, orientation: { type: "landscape-primary", angle: 0 } });
+    assign("innerWidth", 1920);
+    assign("innerHeight", 947);
+    assign("outerWidth", 1920);
+    assign("outerHeight", 1050);
+    assign("devicePixelRatio", 1);
+    assign("screenX", 0);
+    assign("screenY", 0);
+    assign("scrollX", 0);
+    assign("scrollY", 0);
+    assign("pageXOffset", 0);
+    assign("pageYOffset", 0);
+    assign("localStorage", new ShimStorage());
+    assign("sessionStorage", new ShimStorage());
+    assign("history", { length: 1, state: null, pushState() {
+    }, replaceState() {
+    }, back() {
+    }, forward() {
+    }, go() {
+    } });
+    assign("getComputedStyle", () => new Proxy({}, { get: /* @__PURE__ */ __name((t, p) => p === "getPropertyValue" ? () => "" : "", "get") }));
+    assign("requestAnimationFrame", (cb) => setTimeout(() => cb(g2.performance.now()), 16));
+    assign("cancelAnimationFrame", (id) => clearTimeout(id));
+    assign("requestIdleCallback", (cb) => setTimeout(() => cb({ didTimeout: false, timeRemaining: /* @__PURE__ */ __name(() => 16, "timeRemaining") }), 1));
+    assign("cancelIdleCallback", (id) => clearTimeout(id));
+    assign("matchMedia", (query) => ({
+      matches: false,
+      media: String(query),
+      onchange: null,
+      addListener() {
+      },
+      removeListener() {
+      },
+      addEventListener() {
+      },
+      removeEventListener() {
+      },
+      dispatchEvent() {
+        return true;
+      }
+    }));
+    assign("Node", Node);
+    assign("Element", Element2);
+    assign("HTMLElement", HTMLElement);
+    assign("HTMLDivElement", HTMLDivElement);
+    assign("HTMLScriptElement", HTMLScriptElement);
+    assign("HTMLCanvasElement", HTMLCanvasElement);
+    assign("HTMLIFrameElement", HTMLIFrameElement);
+    assign("HTMLImageElement", HTMLImageElement);
+    assign("HTMLVideoElement", HTMLVideoElement);
+    assign("Image", HTMLImageElement);
+    assign("Document", Document);
+    assign("Text", Text3);
+    assign("MutationObserver", Observer);
+    assign("IntersectionObserver", Observer);
+    assign("ResizeObserver", Observer);
+    assign("PerformanceObserver", Observer);
+    assign("Storage", ShimStorage);
+    assign("alert", () => {
+    });
+    assign("confirm", () => false);
+    assign("prompt", () => null);
+    assign("open", () => null);
+    assign("close", () => {
+    });
+    assign("focus", () => {
+    });
+    assign("blur", () => {
+    });
+    assign("scrollTo", () => {
+    });
+    assign("scroll", () => {
+    });
+    assign("postMessage", () => {
+    });
+    assign("name", "");
+    assign("closed", false);
+    assign("length", 0);
+  }
+  __name(installDomShim, "installDomShim");
+
+  // src/bridge/potoken.js
+  var REQUEST_KEY = "O43z0dpjhgX20SCx4KAo";
+  var NEEDS_PO_TOKEN = /* @__PURE__ */ new Set(["WEB", "MWEB", "WEB_EMBEDDED", "WEB_CREATOR", "YTKIDS"]);
+  var po = {
+    minter: null,
+    expiresAt: 0,
+    creating: null,
+    lastError: null,
+    sessionToken: null
+  };
+  function clientNeedsPoToken(client) {
+    return NEEDS_PO_TOKEN.has(String(client || "").toUpperCase());
+  }
+  __name(clientNeedsPoToken, "clientNeedsPoToken");
+  async function createMinter() {
+    const yt = state.yt;
+    if (!yt) fail("noSession", "Not connected to YouTube yet.");
+    installDomShim(USER_AGENT);
+    const challenge = await yt.getAttestationChallenge("ENGAGEMENT_TYPE_UNBOUND");
+    const bg = challenge?.bg_challenge;
+    if (!bg) fail("poToken", "YouTube did not send a BotGuard challenge.");
+    const interpreterUrl = bg.interpreter_url?.private_do_not_access_or_else_trusted_resource_url_wrapped_value;
+    if (!interpreterUrl) fail("poToken", "BotGuard interpreter URL missing from the challenge.");
+    const scriptResponse = await fetch(interpreterUrl.startsWith("//") ? `https:${interpreterUrl}` : interpreterUrl);
+    if (!scriptResponse.ok) fail("poToken", `Could not download BotGuard (${scriptResponse.status}).`);
+    const interpreter = await scriptResponse.text();
+    new Function(interpreter)();
+    const client = await BotGuardClient.create({ program: bg.program, globalName: bg.global_name, globalObject: globalThis });
+    const webPoSignalOutput = [];
+    const botguardResponse = await client.snapshot({ webPoSignalOutput }, 2e4);
+    const itResponse = await fetch(buildURL("GenerateIT", true), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json+protobuf",
+        "x-goog-api-key": GOOG_API_KEY,
+        "x-user-agent": "grpc-web-javascript/0.1",
+        "user-agent": USER_AGENT
+      },
+      body: JSON.stringify([REQUEST_KEY, botguardResponse])
+    });
+    if (!itResponse.ok) fail("poToken", `Integrity token request failed (${itResponse.status}).`);
+    const itJson = await itResponse.json();
+    const integrityToken = Array.isArray(itJson) ? itJson[0] : void 0;
+    const ttl = Array.isArray(itJson) && typeof itJson[1] === "number" ? itJson[1] : 3600;
+    if (typeof integrityToken !== "string") fail("poToken", "YouTube did not issue an integrity token (the BotGuard check failed).");
+    po.minter = await WebPoMinter.create({ integrityToken }, webPoSignalOutput);
+    po.expiresAt = Date.now() + Math.max(300, ttl - 120) * 1e3;
+    const visitorData = yt.session.context.client.visitorData;
+    if (visitorData) {
+      po.sessionToken = await po.minter.mintAsWebsafeString(visitorData);
+      yt.session.po_token = po.sessionToken;
+      if (yt.session.player) yt.session.player.po_token = po.sessionToken;
+    }
+    return po.minter;
+  }
+  __name(createMinter, "createMinter");
+  async function minter() {
+    if (po.minter && Date.now() < po.expiresAt) return po.minter;
+    if (!po.creating) {
+      po.creating = createMinter().catch((e) => {
+        po.lastError = e && e.message ? e.message : String(e);
+        throw e;
+      }).finally(() => {
+        po.creating = null;
+      });
+    }
+    return po.creating;
+  }
+  __name(minter, "minter");
+  async function contentPoToken(client, videoId) {
+    if (!clientNeedsPoToken(client) || state.options.poTokenMode === "off") return null;
+    try {
+      const m = await minter();
+      return await m.mintAsWebsafeString(videoId);
+    } catch (e) {
+      fail("poToken", `Could not create a PO token for the ${client} client: ${e && e.message ? e.message : e}. Switch the stream client to TV in Settings.`);
+    }
+  }
+  __name(contentPoToken, "contentPoToken");
+  function resetPoToken() {
+    po.minter = null;
+    po.expiresAt = 0;
+    po.sessionToken = null;
+  }
+  __name(resetPoToken, "resetPoToken");
+  function poTokenState() {
+    return {
+      hasMinter: !!po.minter,
+      expiresInSeconds: po.minter ? Math.max(0, Math.round((po.expiresAt - Date.now()) / 1e3)) : 0,
+      lastError: po.lastError || void 0
+    };
+  }
+  __name(poTokenState, "poTokenState");
+
+  // src/bridge/session.js
+  function sessionSummary(yt, account, accountError) {
+    const ctx = yt.session.context.client;
+    return {
+      loggedIn: !!yt.session.logged_in,
+      account: account || void 0,
+      accountError: accountError || void 0,
+      visitorData: ctx.visitorData,
+      clientName: state.options.client,
+      playerId: yt.session.player?.player_id,
+      signatureTimestamp: yt.session.player?.signature_timestamp,
+      hasDecipher: !!yt.session.player?.data,
+      userAgent: yt.session.user_agent || DEFAULT_USER_AGENT
+    };
+  }
+  __name(sessionSummary, "sessionSummary");
+  async function init(options = {}) {
+    const opts = {
+      cookie: typeof options.cookie === "string" ? options.cookie.trim() : "",
+      client: String(options.client || "TV").toUpperCase(),
+      visitorData: options.visitorData || "",
+      userAgent: options.userAgent || DEFAULT_USER_AGENT,
+      lang: options.lang || "",
+      location: options.location || "",
+      playerId: options.playerId || "",
+      poTokenMode: options.poTokenMode === "off" ? "off" : "auto"
+    };
+    const creating = (async () => {
+      const yt2 = await createInnertube(opts, true);
+      state.yt = yt2;
+      state.options = opts;
+      state.feeds.clear();
+      state.infos.clear();
+      resetPoToken();
+      return yt2;
+    })();
+    state.creating = creating.catch(() => null);
+    let yt;
+    try {
+      yt = await creating;
+    } finally {
+      state.creating = null;
+    }
+    let account = null;
+    let accountError = null;
+    if (opts.cookie) {
+      try {
+        account = parseAccount(await yt.account.getInfo());
+        state.lastAccount = account;
+      } catch (e) {
+        accountError = e && e.message ? e.message : String(e);
+      }
+    }
+    if (!yt.session.player?.data) {
+      console.warn("player script could not be analysed; deciphering will fail");
+    }
+    return sessionSummary(yt, account, accountError);
+  }
+  __name(init, "init");
+  async function validateCookie({ cookie }) {
+    const value = String(cookie || "").trim();
+    if (!value) fail("invalid", "No cookies were provided.");
+    if (!/SAPISID=|__Secure-3PAPISID=/.test(value)) {
+      fail("auth", "These cookies are missing SAPISID. Export them from youtube.com while signed in.");
+    }
+    const yt = await createInnertube({ cookie: value, userAgent: state.options.userAgent || DEFAULT_USER_AGENT, visitorData: state.options.visitorData }, false);
+    let info2;
+    try {
+      info2 = await yt.account.getInfo();
+    } catch (e) {
+      fail("auth", `YouTube rejected these cookies: ${e && e.message ? e.message : e}`);
+    }
+    return parseAccount(info2);
+  }
+  __name(validateCookie, "validateCookie");
+  async function accountInfo() {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const account = parseAccount(await yt.account.getInfo());
+    state.lastAccount = account;
+    return account;
+  }
+  __name(accountInfo, "accountInfo");
+  async function sessionState() {
+    const yt = state.yt;
+    return {
+      connected: !!yt,
+      loggedIn: !!yt?.session.logged_in,
+      clientName: state.options.client,
+      playerId: yt?.session.player?.player_id,
+      hasDecipher: !!yt?.session.player?.data,
+      visitorData: yt?.session.context.client.visitorData,
+      cachedFeeds: state.feeds.size,
+      cachedInfos: state.infos.size,
+      poToken: poTokenState()
+    };
+  }
+  __name(sessionState, "sessionState");
+  async function setClient({ client, poTokenMode }) {
+    if (client) state.options.client = String(client).toUpperCase();
+    if (poTokenMode) state.options.poTokenMode = poTokenMode === "off" ? "off" : "auto";
+    return { clientName: state.options.client };
+  }
+  __name(setClient, "setClient");
+
+  // src/bridge/normalize.js
+  var sectionSeq = 0;
+  var nextSectionId = /* @__PURE__ */ __name(() => `s${++sectionSeq}`, "nextSectionId");
+  function overlaysInfo(overlays) {
+    const info2 = { durationText: void 0, isLive: false, isShort: false, isUpcoming: false, watchedPercent: void 0 };
+    const list = Array.isArray(overlays) ? overlays : [];
+    const visitBadge = /* @__PURE__ */ __name((badgeText, style) => {
+      const t = (badgeText || "").trim();
+      const s = (style || "").toUpperCase();
+      if (isDurationText(t)) info2.durationText = t;
+      if (s.includes("LIVE") || t.toUpperCase() === "LIVE") info2.isLive = true;
+      if (s.includes("SHORTS")) info2.isShort = true;
+      if (s.includes("UPCOMING")) info2.isUpcoming = true;
+    }, "visitBadge");
+    for (const o of list) {
+      const type = nodeType(o);
+      if (type === "ThumbnailOverlayTimeStatus") visitBadge(text(o.text), o.style);
+      else if (type === "ThumbnailOverlayResumePlayback") info2.watchedPercent = Number(o.percent_duration_watched) || void 0;
+      else if (type === "ThumbnailOverlayBadgeView" || type === "ThumbnailBottomOverlayView") {
+        for (const b of o.badges || []) visitBadge(b.text, b.badge_style);
+        const progress = o.progress_bar?.start_percent;
+        if (progress != null) info2.watchedPercent = Number(progress) || void 0;
+      } else if (type === "ThumbnailOverlayProgressBarView") {
+        info2.watchedPercent = Number(o.start_percent) || void 0;
+      }
+    }
+    return info2;
+  }
+  __name(overlaysInfo, "overlaysInfo");
+  function authorInfo(author) {
+    if (!author) return {};
+    const id = isChannelId(author.id) ? author.id : endpointBrowseId(author.endpoint);
+    return {
+      channelName: text(author.name),
+      channelId: isChannelId(id) ? id : void 0,
+      channelAvatar: bestThumb(author.thumbnails, 176)
+    };
+  }
+  __name(authorInfo, "authorInfo");
+  function videoFromLegacy(node) {
+    const id = node.video_id || node.id || endpointVideoId(node.endpoint);
+    if (!id || typeof id !== "string") return null;
+    const overlay = overlaysInfo(node.thumbnail_overlays);
+    const durationText = text(node.length_text) || text(node.duration?.text ? node.duration.text : node.duration) || overlay.durationText;
+    const author = authorInfo(node.author);
+    const badges = (node.badges || []).map((b) => (b.label || b.style || "").toUpperCase());
+    const isLive = overlay.isLive || !!node.is_live || badges.some((b) => b.includes("LIVE"));
+    const upcoming = !!node.upcoming || overlay.isUpcoming;
+    let channelName = author.channelName;
+    if (!channelName) channelName = text(node.short_byline_text) || text(node.long_byline_text);
+    if (!channelName && typeof node.author === "string") channelName = node.author;
+    return {
+      type: "video",
+      id,
+      title: text(node.title) || "",
+      channelName,
+      channelId: author.channelId,
+      channelAvatar: author.channelAvatar,
+      thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
+      durationText,
+      durationSeconds: node.duration?.seconds || parseDuration(durationText),
+      viewCountText: text(node.short_view_count) || text(node.view_count) || text(node.views),
+      publishedText: text(node.published),
+      isLive,
+      isShort: overlay.isShort,
+      isUpcoming: upcoming,
+      watchedPercent: overlay.watchedPercent,
+      setVideoId: typeof node.set_video_id === "string" ? node.set_video_id : void 0
+    };
+  }
+  __name(videoFromLegacy, "videoFromLegacy");
+  function lockupMetadataParts(lockup) {
+    const rows = lockup.metadata?.metadata?.metadata_rows || [];
+    return rows.map((row) => (row.metadata_parts || []).map((part) => ({ text: text(part.text), endpoint: part.text?.endpoint })));
+  }
+  __name(lockupMetadataParts, "lockupMetadataParts");
+  function lockupChannel(lockup, parts) {
+    const image = lockup.metadata?.image;
+    let channelId = endpointBrowseId(image?.renderer_context?.command_context?.on_tap);
+    let channelAvatar = bestThumb(image?.avatar?.image, 176);
+    for (const row of parts) {
+      for (const part of row) {
+        const id = endpointBrowseId(part.endpoint);
+        if (!channelId && isChannelId(id)) channelId = id;
+      }
+    }
+    const channelName = parts[0]?.[0]?.text;
+    return { channelName, channelId: isChannelId(channelId) ? channelId : void 0, channelAvatar };
+  }
+  __name(lockupChannel, "lockupChannel");
+  function lockupImage(lockup) {
+    const image = lockup.content_image;
+    if (!image) return { thumbs: void 0, overlays: [] };
+    if (nodeType(image) === "CollectionThumbnailView") {
+      return { thumbs: image.primary_thumbnail?.image, overlays: image.primary_thumbnail?.overlays || [] };
+    }
+    return { thumbs: image.image, overlays: image.overlays || [] };
+  }
+  __name(lockupImage, "lockupImage");
+  function fromLockup(lockup) {
+    const id = lockup.content_id;
+    if (!id) return null;
+    const parts = lockupMetadataParts(lockup);
+    const title = text(lockup.metadata?.title) || "";
+    const { thumbs, overlays } = lockupImage(lockup);
+    const overlay = overlaysInfo(overlays);
+    const type = lockup.content_type;
+    if (type === "CHANNEL") {
+      return {
+        type: "channel",
+        id,
+        name: title,
+        avatar: bestThumb(thumbs, 240) || lockupChannel(lockup, parts).channelAvatar,
+        subscriberCountText: parts.flat().map((p) => p.text).find((t) => t && /subscriber/i.test(t))
+      };
+    }
+    if (type === "PLAYLIST" || type === "ALBUM" || type === "PODCAST" || type === "SHOW") {
+      const countBadge = overlays.flatMap((o) => o.badges || []).map((b) => b.text).find((t) => t && /\d/.test(t));
+      return {
+        type: "playlist",
+        id,
+        title,
+        thumbnail: bestThumb(thumbs),
+        videoCountText: countBadge,
+        channelName: parts[0]?.[0]?.text
+      };
+    }
+    if (type !== "VIDEO" && type !== "SHORT" && type !== "MOVIE" && type !== "CLIP") return null;
+    const channel2 = lockupChannel(lockup, parts);
+    const secondRow = parts[1] || [];
+    const flat = parts.flat().map((p) => p.text).filter(Boolean);
+    const viewCountText = secondRow[0]?.text || flat.find((t) => /view|watching/i.test(t));
+    const publishedText = secondRow[1]?.text || flat.find((t) => /ago|streamed|premiere/i.test(t));
+    return {
+      type: "video",
+      id,
+      title,
+      channelName: channel2.channelName,
+      channelId: channel2.channelId,
+      channelAvatar: channel2.channelAvatar,
+      thumbnail: bestThumb(thumbs) || videoThumb(id),
+      durationText: overlay.durationText,
+      durationSeconds: parseDuration(overlay.durationText),
+      viewCountText,
+      publishedText,
+      isLive: overlay.isLive || flat.some((t) => /watching/i.test(t)),
+      isShort: type === "SHORT" || overlay.isShort,
+      isUpcoming: overlay.isUpcoming,
+      watchedPercent: overlay.watchedPercent
+    };
+  }
+  __name(fromLockup, "fromLockup");
+  function fromShortsLockup(node) {
+    const id = endpointVideoId(node.on_tap_endpoint) || (typeof node.entity_id === "string" ? node.entity_id.replace(/^shorts-shelf-item-/, "") : void 0);
+    if (!id) return null;
+    return {
+      type: "video",
+      id,
+      title: text(node.overlay_metadata?.primary_text) || text(node.accessibility_text) || "",
+      thumbnail: bestThumb(node.thumbnail) || `https://i.ytimg.com/vi/${id}/oar2.jpg`,
+      viewCountText: text(node.overlay_metadata?.secondary_text),
+      isLive: false,
+      isShort: true,
+      isUpcoming: false
+    };
+  }
+  __name(fromShortsLockup, "fromShortsLockup");
+  function fromReelItem(node) {
+    const id = node.id || endpointVideoId(node.endpoint);
+    if (!id) return null;
+    return {
+      type: "video",
+      id,
+      title: text(node.title) || "",
+      thumbnail: bestThumb(node.thumbnails) || `https://i.ytimg.com/vi/${id}/oar2.jpg`,
+      viewCountText: text(node.views),
+      isLive: false,
+      isShort: true,
+      isUpcoming: false
+    };
+  }
+  __name(fromReelItem, "fromReelItem");
+  function fromChannel(node) {
+    const id = node.id || node.author?.id || endpointBrowseId(node.endpoint);
+    if (!id) return null;
+    const subscribed = node.subscribe_button?.subscribed;
+    let subscriberCountText = text(node.subscriber_count) || text(node.subscribers);
+    let handle;
+    if (subscriberCountText && subscriberCountText.startsWith("@")) {
+      handle = subscriberCountText;
+      subscriberCountText = text(node.video_count);
+    }
+    return {
+      type: "channel",
+      id,
+      name: text(node.author?.name) || text(node.title) || "",
+      avatar: bestThumb(node.author?.thumbnails || node.thumbnails, 240),
+      handle,
+      subscriberCountText,
+      isSubscribed: typeof subscribed === "boolean" ? subscribed : void 0
+    };
+  }
+  __name(fromChannel, "fromChannel");
+  function fromPlaylist(node) {
+    const id = node.id || node.endpoint?.payload?.playlistId;
+    if (!id) return null;
+    const thumbs = node.thumbnails?.length ? node.thumbnails : node.thumbnail_renderer?.thumbnail || node.thumbnail_renderer?.thumbnails;
+    return {
+      type: "playlist",
+      id,
+      title: text(node.title) || "",
+      thumbnail: bestThumb(thumbs),
+      videoCountText: text(node.video_count_short) || text(node.video_count),
+      channelName: text(node.author?.name) || text(node.author)
+    };
+  }
+  __name(fromPlaylist, "fromPlaylist");
+  function toItem(node) {
+    if (!node || typeof node !== "object") return null;
+    try {
+      switch (nodeType(node)) {
+        case "RichItem":
+          return toItem(node.content);
+        case "Video":
+        case "GridVideo":
+        case "CompactVideo":
+        case "PlaylistVideo":
+        case "PlaylistPanelVideo":
+        case "VideoCard":
+        case "GridMovie":
+        case "Movie":
+          return videoFromLegacy(node);
+        case "LockupView":
+          return fromLockup(node);
+        case "ShortsLockupView":
+          return fromShortsLockup(node);
+        case "ReelItem":
+          return fromReelItem(node);
+        case "Channel":
+        case "GridChannel":
+          return fromChannel(node);
+        case "Playlist":
+        case "GridPlaylist":
+        case "CompactPlaylist":
+        case "CompactMix":
+        case "GridShow":
+          return fromPlaylist(node);
+        default:
+          return null;
+      }
+    } catch (e) {
+      console.warn("normalize: failed item", nodeType(node), e && e.message);
+      return null;
+    }
+  }
+  __name(toItem, "toItem");
+  var CONTAINER_KEYS = ["contents", "items", "content", "cards"];
+  function shelfStyle(items) {
+    return items.length > 0 && items.every((i2) => i2.type === "video" && i2.isShort) ? "shorts" : "row";
+  }
+  __name(shelfStyle, "shelfStyle");
+  function collectItems(node, out, depth = 0) {
+    if (!node || depth > 6) return;
+    if (Array.isArray(node)) {
+      for (const child of node) collectItems(child, out, depth + 1);
+      return;
+    }
+    const item = toItem(node);
+    if (item) {
+      out.push(item);
+      return;
+    }
+    for (const key of CONTAINER_KEYS) {
+      const child = node[key];
+      if (child && typeof child === "object") collectItems(child, out, depth + 1);
+    }
+  }
+  __name(collectItems, "collectItems");
+  function shelfSection(title, content, forceStyle) {
+    const items = [];
+    collectItems(content, items);
+    if (!items.length) return null;
+    return { id: nextSectionId(), title, style: forceStyle || shelfStyle(items), items };
+  }
+  __name(shelfSection, "shelfSection");
+  function sectionsFromNodes(nodes, options = {}) {
+    const sections = [];
+    let grid = null;
+    const flushGrid = /* @__PURE__ */ __name(() => {
+      if (grid && grid.items.length) sections.push(grid);
+      grid = null;
+    }, "flushGrid");
+    const pushItem = /* @__PURE__ */ __name((item) => {
+      if (!grid) grid = { id: nextSectionId(), title: void 0, style: "grid", items: [] };
+      grid.items.push(item);
+    }, "pushItem");
+    const visit = /* @__PURE__ */ __name((node, depth) => {
+      if (!node || depth > 8) return;
+      if (Array.isArray(node)) {
+        for (const child of node) visit(child, depth + 1);
+        return;
+      }
+      const type = nodeType(node);
+      switch (type) {
+        case "ContinuationItem":
+        case "ContinuationItemView":
+        case "FeedFilterChipBar":
+        case "ChipCloud":
+        case "HorizontalCardList":
+        case "SearchRefinementCard":
+        case "Message":
+        case "BackgroundPromo":
+        case "PromotedSparklesWeb":
+        case "AdSlot":
+        case "InFeedAdLayout":
+        case "StatementBanner":
+        case "BrandVideoShelf":
+        case "BrandVideoSingleton":
+        case "MerchandiseShelf":
+        case "TicketShelf":
+        case "EmergencyOnebox":
+        case "ClarificationRenderer":
+        case "PostRenderer":
+        case "BackstagePost":
+        case "Post":
+        case "SharedPost":
+          return;
+        case "RichSection":
+          visit(node.content, depth + 1);
+          return;
+        case "RichShelf": {
+          flushGrid();
+          const s = shelfSection(text(node.title), node.contents);
+          if (s) sections.push(s);
+          return;
+        }
+        case "ReelShelf": {
+          flushGrid();
+          const s = shelfSection(text(node.title) || "Shorts", node.items, "shorts");
+          if (s) sections.push(s);
+          return;
+        }
+        case "GridShelfView": {
+          flushGrid();
+          const s = shelfSection(text(node.header?.title) || text(node.header?.text) || "Shorts", node.contents);
+          if (s) sections.push(s);
+          return;
+        }
+        case "Shelf": {
+          flushGrid();
+          const s = shelfSection(text(node.title), node.content);
+          if (s) sections.push(s);
+          return;
+        }
+        case "ItemSection": {
+          const title = text(node.header?.title);
+          if (title && options.titledItemSections) {
+            flushGrid();
+            const items = [];
+            const shelves = [];
+            for (const child of node.contents || []) {
+              const ct = nodeType(child);
+              if (ct === "ReelShelf" || ct === "RichShelf" || ct === "Shelf" || ct === "GridShelfView") shelves.push(child);
+              else collectItems(child, items);
+            }
+            if (items.length) sections.push({ id: nextSectionId(), title, style: "grid", items });
+            for (const shelf of shelves) visit(shelf, depth + 1);
+            return;
+          }
+          visit(node.contents, depth + 1);
+          return;
+        }
+        default: {
+          const item = toItem(node);
+          if (item) {
+            if (options.skipShortsInGrid && item.type === "video" && item.isShort) return;
+            pushItem(item);
+            return;
+          }
+          for (const key of CONTAINER_KEYS) {
+            const child = node[key];
+            if (child && typeof child === "object") visit(child, depth + 1);
+          }
+        }
+      }
+    }, "visit");
+    visit(nodes, 0);
+    flushGrid();
+    return sections;
+  }
+  __name(sectionsFromNodes, "sectionsFromNodes");
+  function page(sections, continuationKey) {
+    return { sections, continuation: continuationKey || void 0 };
+  }
+  __name(page, "page");
+  function toComment(thread) {
+    const c = thread?.comment || thread;
+    if (!c || !c.comment_id) return null;
+    return {
+      id: c.comment_id,
+      author: text(c.author?.name) || "",
+      authorAvatar: fixUrl(c.author?.thumbnails?.[0]?.url) || fixUrl(c.author?.avatar_thumbnail_url),
+      text: text(c.content) || "",
+      publishedText: text(c.published_time),
+      likeCountText: text(c.like_count),
+      replyCountText: text(c.reply_count),
+      isPinned: !!c.is_pinned,
+      isCreator: !!c.author_is_channel_owner,
+      isHearted: !!c.is_hearted
+    };
+  }
+  __name(toComment, "toComment");
+
+  // src/bridge/feeds.js
+  function pageNodes(feed) {
+    if (!feed) return [];
+    if (feed.contents && Array.isArray(feed.contents.contents)) return feed.contents.contents;
+    const pc = feed.page_contents;
+    if (pc && Array.isArray(pc.contents)) return pc.contents;
+    if (pc && pc.content && Array.isArray(pc.content.contents)) return pc.content.contents;
+    return [];
+  }
+  __name(pageNodes, "pageNodes");
+  function hasMore(feed) {
+    try {
+      return !!feed.has_continuation;
+    } catch {
+      return false;
+    }
+  }
+  __name(hasMore, "hasMore");
+  function register(prefix, kind, feed, extra = {}) {
+    const key = newKey(prefix);
+    putFeed(key, { kind, feed, ...extra });
+    return key;
+  }
+  __name(register, "register");
+  function toPage(key, feed, sections) {
+    return page(sections, hasMore(feed) ? key : void 0);
+  }
+  __name(toPage, "toPage");
+  async function home() {
+    const yt = await requireSession();
+    const feed = await yt.getHomeFeed();
+    const key = register("home", "home", feed);
+    return toPage(key, feed, sectionsFromNodes(pageNodes(feed)));
+  }
+  __name(home, "home");
+  async function subscriptions() {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const feed = await yt.getSubscriptionsFeed();
+    const key = register("subs", "feed", feed);
+    return toPage(key, feed, sectionsFromNodes(pageNodes(feed)));
+  }
+  __name(subscriptions, "subscriptions");
+  async function subscribedChannels() {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const feed = await yt.getChannelsFeed();
+    const key = register("channels", "feed", feed, { channelsOnly: true });
+    let sections = sectionsFromNodes(pageNodes(feed));
+    sections = onlyChannels(sections, feed);
+    return toPage(key, feed, sections);
+  }
+  __name(subscribedChannels, "subscribedChannels");
+  function onlyChannels(sections, feed) {
+    const channels = sections.flatMap((s) => s.items).filter((i2) => i2.type === "channel");
+    if (channels.length) return [{ id: sections[0]?.id || "channels", style: "grid", items: channels }];
+    const fallback = (feed.channels || []).map(toItem).filter(Boolean);
+    return fallback.length ? [{ id: "channels", style: "grid", items: fallback }] : [];
+  }
+  __name(onlyChannels, "onlyChannels");
+  async function searchSuggestions({ query }) {
+    const yt = await requireSession();
+    const q = String(query || "").trim();
+    if (!q) return [];
+    const list = await yt.getSearchSuggestions(q);
+    return Array.isArray(list) ? list.filter((s) => typeof s === "string").slice(0, 12) : [];
+  }
+  __name(searchSuggestions, "searchSuggestions");
+  var FILTER_VALUES = {
+    upload_date: ["all", "today", "week", "month", "year"],
+    type: ["all", "video", "shorts", "channel", "playlist", "movie"],
+    duration: ["all", "over_twenty_mins", "under_three_mins", "three_to_twenty_mins"],
+    prioritize: ["relevance", "popularity"]
+  };
+  async function search({ query, filters = {} }) {
+    const yt = await requireSession();
+    const q = String(query || "").trim();
+    if (!q) fail("invalid", "Type something to search for.");
+    const f = {};
+    for (const [name, allowed] of Object.entries(FILTER_VALUES)) {
+      const v = filters[name];
+      if (v && allowed.includes(v) && v !== "all") f[name] = v;
+    }
+    if (Array.isArray(filters.features) && filters.features.length) f.features = filters.features;
+    const result = await yt.search(q, f);
+    const key = register("search", "search", result);
+    return toPage(key, result, sectionsFromNodes(result.results || []));
+  }
+  __name(search, "search");
+  function channelHeader(channel2, id) {
+    const h = channel2.header;
+    const meta = channel2.metadata || {};
+    const out = {
+      id: meta.external_id || id,
+      name: meta.title,
+      avatar: bestThumb(meta.avatar || meta.thumbnail, 240),
+      description: meta.description,
+      banner: void 0,
+      handle: void 0,
+      subscriberCountText: void 0,
+      videoCountText: void 0
+    };
+    const type = nodeType(h);
+    if (type === "PageHeader") {
+      const v = h.content;
+      out.name = out.name || text(v?.title?.text) || text(h.page_title);
+      const image = v?.image;
+      out.avatar = out.avatar || bestThumb(image?.avatar?.image || image?.image, 240);
+      out.banner = bestThumb(v?.banner?.image, 2560);
+      const parts = (v?.metadata?.metadata_rows || []).flatMap((row) => (row.metadata_parts || []).map((p) => text(p.text))).filter(Boolean);
+      out.handle = parts.find((p) => p.startsWith("@"));
+      out.subscriberCountText = parts.find((p) => /subscriber/i.test(p));
+      out.videoCountText = parts.find((p) => /video/i.test(p));
+      if (!out.description) out.description = text(v?.description?.description);
+    } else if (type === "C4TabbedHeader") {
+      out.name = out.name || text(h.author?.name);
+      out.avatar = out.avatar || bestThumb(h.author?.thumbnails, 240);
+      out.banner = bestThumb(h.tv_banner || h.banner, 2560);
+      out.handle = text(h.channel_handle);
+      out.subscriberCountText = text(h.subscribers);
+      out.videoCountText = text(h.videos_count);
+    } else if (h) {
+      out.name = out.name || text(h.author?.name) || text(h.title);
+    }
+    let subscribed = channel2.subscribe_button?.subscribed;
+    if (typeof subscribed !== "boolean") subscribed = state.subscriptions.get(out.id);
+    out.isSubscribed = typeof subscribed === "boolean" ? subscribed : void 0;
+    return out;
+  }
+  __name(channelHeader, "channelHeader");
+  async function channel({ id }) {
+    const yt = await requireSession();
+    if (!id) fail("invalid", "Missing channel id.");
+    const ch = await yt.getChannel(id);
+    const header = channelHeader(ch, id);
+    const key = register("channel", "channelBase", ch, { channelId: header.id });
+    const tabs = [];
+    const safe = /* @__PURE__ */ __name((fn) => {
+      try {
+        return fn();
+      } catch {
+        return false;
+      }
+    }, "safe");
+    if (safe(() => ch.has_videos)) tabs.push("videos");
+    if (safe(() => ch.has_shorts)) tabs.push("shorts");
+    if (safe(() => ch.has_live_streams)) tabs.push("live");
+    if (safe(() => ch.has_playlists)) tabs.push("playlists");
+    return { channel: header, tabs, key };
+  }
+  __name(channel, "channel");
+  async function channelTab({ key, id, tab }) {
+    let base = key ? state.feeds.get(key) : null;
+    if (!base || base.kind !== "channelBase") {
+      const yt = await requireSession();
+      const ch2 = await yt.getChannel(id);
+      base = { kind: "channelBase", feed: ch2 };
+    }
+    const ch = base.feed;
+    let tabFeed;
+    switch (tab) {
+      case "videos":
+        tabFeed = await ch.getVideos();
+        break;
+      case "shorts":
+        tabFeed = await ch.getShorts();
+        break;
+      case "live":
+        tabFeed = await ch.getLiveStreams();
+        break;
+      case "playlists":
+        tabFeed = await ch.getPlaylists();
+        break;
+      default:
+        fail("invalid", `Unknown channel tab ${tab}`);
+    }
+    const tabKey = register("channelTab", "channelTab", tabFeed);
+    const nodes = tabFeed.current_tab?.content?.contents || pageNodes(tabFeed);
+    let sections = sectionsFromNodes(nodes);
+    if (tab === "shorts") {
+      sections = sections.map((s) => ({ ...s, items: s.items.map((i2) => i2.type === "video" ? { ...i2, isShort: true } : i2) }));
+    }
+    return toPage(tabKey, tabFeed, mergeGrids(sections));
+  }
+  __name(channelTab, "channelTab");
+  async function playlist({ id }) {
+    const yt = await requireSession();
+    if (!id) fail("invalid", "Missing playlist id.");
+    const pl = await yt.getPlaylist(id);
+    const key = register("playlist", "playlist", pl);
+    const items = (pl.items || []).map(toItem).filter(Boolean);
+    const info2 = pl.info || {};
+    return {
+      info: {
+        id,
+        title: text(info2.title) || (id === "WL" ? "Watch later" : id === "LL" ? "Liked videos" : ""),
+        channelName: text(info2.author?.name),
+        videoCountText: text(info2.total_items),
+        thumbnail: bestThumb(info2.thumbnails),
+        isEditable: !!info2.is_editable
+      },
+      page: toPage(key, pl, items.length ? [{ id: `pl-${key}`, style: "grid", items }] : [])
+    };
+  }
+  __name(playlist, "playlist");
+  async function history() {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const h = await yt.getHistory();
+    const key = register("history", "history", h);
+    return toPage(key, h, sectionsFromNodes(h.sections || pageNodes(h), { titledItemSections: true }));
+  }
+  __name(history, "history");
+  async function playlists() {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const feed = await yt.getPlaylists();
+    const key = register("playlists", "feed", feed);
+    let sections = sectionsFromNodes(pageNodes(feed));
+    const lists = sections.flatMap((s) => s.items).filter((i2) => i2.type === "playlist");
+    if (!lists.length) {
+      const fallback = (feed.playlists || []).map(toItem).filter((i2) => i2 && i2.type === "playlist");
+      sections = fallback.length ? [{ id: `pls-${key}`, style: "grid", items: fallback }] : [];
+    } else {
+      sections = [{ id: `pls-${key}`, style: "grid", items: lists }];
+    }
+    return toPage(key, feed, sections);
+  }
+  __name(playlists, "playlists");
+  function mergeGrids(sections) {
+    const out = [];
+    for (const s of sections) {
+      const last = out[out.length - 1];
+      if (last && last.style === "grid" && s.style === "grid" && !s.title) last.items.push(...s.items);
+      else out.push({ ...s, items: s.items.slice() });
+    }
+    return out;
+  }
+  __name(mergeGrids, "mergeGrids");
+  async function more({ key }) {
+    const entry = getFeed(key);
+    const current = entry.feed;
+    if (!hasMore(current)) return page([], void 0);
+    const next = await current.getContinuation();
+    entry.feed = next;
+    let sections;
+    switch (entry.kind) {
+      case "search":
+        sections = sectionsFromNodes(next.results || []);
+        break;
+      case "playlist": {
+        const items = (next.items || []).map(toItem).filter(Boolean);
+        sections = items.length ? [{ id: `pl-${key}-${Date.now()}`, style: "grid", items }] : [];
+        break;
+      }
+      case "history":
+        sections = sectionsFromNodes(next.sections || pageNodes(next), { titledItemSections: true });
+        break;
+      case "channelTab":
+        sections = mergeGrids(sectionsFromNodes(next.contents?.contents || pageNodes(next)));
+        break;
+      default:
+        sections = sectionsFromNodes(pageNodes(next));
+        if (entry.channelsOnly) sections = onlyChannels(sections, next);
+    }
+    return page(sections, hasMore(next) ? key : void 0);
+  }
+  __name(more, "more");
+
+  // src/bridge/watch.js
+  var HDR_TRANSFER = /2084|B67|HLG|PQ/i;
+  function codecsOf(mime) {
+    const m = /codecs="([^"]+)"/.exec(mime || "");
+    return m ? m[1] : "";
+  }
+  __name(codecsOf, "codecsOf");
+  function formatsOf(info2) {
+    const sd = info2.streaming_data;
+    if (!sd || !Array.isArray(sd.adaptive_formats)) return [];
+    return sd.adaptive_formats.map((f, index) => {
+      const transfer = f.color_info?.transfer_characteristics || "";
+      return clean({
+        index,
+        itag: f.itag,
+        mimeType: f.mime_type,
+        codecs: codecsOf(f.mime_type),
+        hasVideo: !!f.has_video,
+        hasAudio: !!f.has_audio,
+        width: f.width,
+        height: f.height,
+        fps: f.fps,
+        bitrate: f.bitrate,
+        averageBitrate: f.average_bitrate,
+        contentLength: f.content_length,
+        qualityLabel: f.quality_label,
+        audioQuality: f.audio_quality,
+        audioSampleRate: f.audio_sample_rate,
+        audioChannels: f.audio_channels,
+        loudnessDb: f.loudness_db,
+        isDrc: !!f.is_drc,
+        isHdr: HDR_TRANSFER.test(transfer) || /HDR/i.test(f.quality_label || ""),
+        isOtf: !!f.is_type_otf,
+        isSuperResolution: !!f.is_sr,
+        audioTrackId: f.audio_track?.id,
+        audioTrackName: f.audio_track?.display_name,
+        isDefaultAudio: f.audio_track ? !!f.audio_track.audio_is_default : void 0,
+        isOriginal: f.is_original,
+        isDubbed: f.is_dubbed,
+        isAutoDubbed: f.is_auto_dubbed,
+        isDescriptive: f.is_descriptive,
+        isSecondary: f.is_secondary,
+        language: f.language || void 0,
+        hasUrl: !!(f.url || f.signature_cipher || f.cipher),
+        isDrm: Array.isArray(f.drm_families) && f.drm_families.length > 0,
+        approxDurationMs: f.approx_duration_ms
+      });
+    });
+  }
+  __name(formatsOf, "formatsOf");
+  function vttUrl(baseUrl) {
+    const url = new URL(fixUrl(baseUrl));
+    url.searchParams.set("fmt", "vtt");
+    return url.toString();
+  }
+  __name(vttUrl, "vttUrl");
+  function captionsOf(info2) {
+    const tracks = info2.captions?.caption_tracks || [];
+    return tracks.map((t) => {
+      try {
+        return {
+          languageCode: t.language_code,
+          name: text(t.name) || t.language_code,
+          url: vttUrl(t.base_url),
+          isAuto: t.kind === "asr",
+          vssId: t.vss_id
+        };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+  }
+  __name(captionsOf, "captionsOf");
+  function chaptersOf(info2) {
+    const markers = info2.player_overlays?.decorated_player_bar?.player_bar?.markers_map || [];
+    for (const marker of markers) {
+      const chapters = marker?.value?.chapters;
+      if (chapters && chapters.length) {
+        return chapters.map((c) => ({
+          title: text(c.title) || "",
+          startSeconds: (Number(c.time_range_start_millis) || 0) / 1e3,
+          thumbnail: bestThumb(c.thumbnail, 320)
+        }));
+      }
+    }
+    const memo = info2.page?.[1]?.contents_memo;
+    const items = memo ? memo.get("MacroMarkersListItem") || [] : [];
+    const out = [];
+    for (const item of items) {
+      const seconds = item.on_tap_endpoint?.payload?.startTimeSeconds;
+      if (typeof seconds !== "number") continue;
+      if (out.some((c) => c.startSeconds === seconds)) continue;
+      out.push({ title: text(item.title) || "", startSeconds: seconds, thumbnail: bestThumb(item.thumbnail, 320) });
+    }
+    return out.sort((a, b) => a.startSeconds - b.startSeconds);
+  }
+  __name(chaptersOf, "chaptersOf");
+  function upNextOf(info2) {
+    const feed = info2.watch_next_feed || [];
+    const items = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const node of feed) {
+      const item = toItem(node);
+      if (item && item.type === "video" && !item.isShort && !item.isLive && !seen.has(item.id)) {
+        seen.add(item.id);
+        items.push(item);
+      }
+    }
+    return items.slice(0, 30);
+  }
+  __name(upNextOf, "upNextOf");
+  function subscribedFor(channelId, secondary) {
+    const legacy = secondary?.subscribe_button;
+    if (legacy && typeof legacy.subscribed === "boolean") return legacy.subscribed;
+    const owner = secondary?.owner?.subscription_button;
+    if (owner && typeof owner.subscribed === "boolean") return owner.subscribed;
+    const captured = state.subscriptions.get(channelId);
+    return typeof captured === "boolean" ? captured : void 0;
+  }
+  __name(subscribedFor, "subscribedFor");
+  function playabilityOf(info2) {
+    const p = info2.playability_status || {};
+    return { status: p.status || "UNKNOWN", reason: text(p.reason) || text(p.error_screen?.reason) || void 0 };
+  }
+  __name(playabilityOf, "playabilityOf");
+  function checkPlayable(info2) {
+    const { status, reason } = playabilityOf(info2);
+    if (status === "OK") return;
+    const message = reason || `YouTube says this video can't be played (${status}).`;
+    if (/not a bot|confirm you/i.test(message)) fail("botCheck", message, status);
+    if (status === "LOGIN_REQUIRED") fail("loginRequired", message, status);
+    if (status === "LIVE_STREAM_OFFLINE") fail("upcoming", message, status);
+    fail("unavailable", message, status);
+  }
+  __name(checkPlayable, "checkPlayable");
+  function formatCount(n) {
+    if (typeof n !== "number" || !Number.isFinite(n)) return void 0;
+    if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\.0$/, "")}B`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, "")}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, "")}K`;
+    return String(n);
+  }
+  __name(formatCount, "formatCount");
+  function detailsOf(info2, client) {
+    const basic = info2.basic_info || {};
+    const primary = info2.primary_info;
+    const secondary = info2.secondary_info;
+    const owner = secondary?.owner;
+    const channelId = basic.channel_id || owner?.author?.id;
+    const meta = clientMeta(client);
+    const upNext = upNextOf(info2);
+    let likeStatus = basic.is_liked ? "like" : basic.is_disliked ? "dislike" : void 0;
+    if (!likeStatus) likeStatus = likeStatusFor(basic.id) || "none";
+    const viewCount = typeof basic.view_count === "number" ? basic.view_count : parseInt(basic.view_count, 10);
+    return {
+      id: basic.id,
+      title: text(primary?.title) || basic.title || "",
+      description: text(secondary?.description) || basic.short_description || "",
+      channel: {
+        id: channelId,
+        name: text(owner?.author?.name) || basic.author || basic.channel?.name || "",
+        avatar: bestThumb(owner?.author?.thumbnails, 176),
+        subscriberCountText: text(owner?.subscriber_count),
+        isSubscribed: subscribedFor(channelId, secondary)
+      },
+      viewCountText: text(primary?.view_count?.view_count) || text(primary?.view_count?.short_view_count) || (Number.isFinite(viewCount) ? `${viewCount.toLocaleString("en-US")} views` : void 0),
+      publishedText: text(primary?.relative_date) || text(primary?.published),
+      likeCountText: formatCount(basic.like_count),
+      likeStatus,
+      isLive: !!basic.is_live,
+      isUpcoming: !!basic.is_upcoming,
+      isPostLiveDvr: !!basic.is_post_live_dvr,
+      durationSeconds: basic.duration,
+      thumbnail: bestThumb(basic.thumbnail) || videoThumb(basic.id),
+      chapters: chaptersOf(info2),
+      captions: captionsOf(info2),
+      formats: formatsOf(info2),
+      upNext,
+      autoplayNextId: info2.autoplay_video_endpoint?.payload?.videoId || upNext[0]?.id,
+      commentsCountText: text(info2.comments_entry_point_header?.comment_count),
+      playerClient: meta.key,
+      userAgent: meta.userAgent,
+      trackingAvailable: !!info2.page?.[0]?.playback_tracking,
+      playability: playabilityOf(info2)
+    };
+  }
+  __name(detailsOf, "detailsOf");
+  async function videoInfo({ id, client }) {
+    const yt = await requireSession();
+    if (!id) fail("invalid", "Missing video id.");
+    const c = String(client || state.options.client || "TV").toUpperCase();
+    const poToken = await contentPoToken(c, id);
+    const info2 = await yt.getInfo(id, { client: c, po_token: poToken || void 0 });
+    checkPlayable(info2);
+    putInfo(id, { info: info2, client: c });
+    return detailsOf(info2, c);
+  }
+  __name(videoInfo, "videoInfo");
+  async function resolveFormats({ id, indices }) {
+    const yt = await requireSession();
+    const entry = getInfo(id);
+    const formats = entry.info.streaming_data?.adaptive_formats || [];
+    const urls = {};
+    for (const index of indices || []) {
+      const format = formats[index];
+      if (!format) fail("extraction", `Format ${index} is not available any more.`);
+      const url = await format.decipher(yt.session.player);
+      if (!url || typeof url !== "string" || !/^https?:/.test(url)) fail("extraction", `Could not get a stream URL for format ${format.itag}.`);
+      if (/[?&]sabr=1/.test(url)) fail("extraction", `Format ${format.itag} is only available through SABR streaming. Choose another stream client in Settings.`);
+      urls[String(index)] = url;
+    }
+    const meta = clientMeta(entry.client);
+    return {
+      urls,
+      userAgent: meta.userAgent,
+      headers: { Origin: "https://www.youtube.com", Referer: "https://www.youtube.com/" }
+    };
+  }
+  __name(resolveFormats, "resolveFormats");
+  var MediaInfoProto = Object.getPrototypeOf(youtube_exports.VideoInfo.prototype);
+  async function markWatched({ id }) {
+    const entry = getInfo(id);
+    const meta = clientMeta(entry.client);
+    const info2 = entry.info;
+    if (!info2.page?.[0]?.playback_tracking) fail("unavailable", "YouTube did not provide playback tracking for this video.");
+    let response;
+    try {
+      if (meta.key === "WEB" || typeof MediaInfoProto?.addToWatchHistory !== "function") {
+        response = await info2.addToWatchHistory();
+      } else {
+        response = await MediaInfoProto.addToWatchHistory.call(info2, meta.name, meta.version);
+      }
+    } catch (e) {
+      fail("history", `Could not add the video to your YouTube history: ${e && e.message ? e.message : e}`);
+    }
+    entry.watchStarted = Date.now();
+    return { ok: !!response?.ok, status: response?.status || 0, cpn: info2.cpn };
+  }
+  __name(markWatched, "markWatched");
+  async function watchtime({ id, segments, cmt, playing, final, len, lact, rt, volume, muted, fmt, afmt }) {
+    const yt = await requireSession();
+    const entry = getInfo(id);
+    const tracking = entry.info.page?.[0]?.playback_tracking;
+    const base = tracking?.videostats_watchtime_url;
+    if (!base) fail("unavailable", "YouTube did not provide a watch-time URL for this video.");
+    const meta = clientMeta(entry.client);
+    const segs = Array.isArray(segments) && segments.length ? segments : [[cmt || 0, cmt || 0]];
+    const params = {
+      cpn: entry.info.cpn,
+      st: segs.map((s) => Number(s[0] || 0).toFixed(3)).join(","),
+      et: segs.map((s) => Number(s[1] || 0).toFixed(3)).join(","),
+      cmt: Number(cmt || 0).toFixed(3),
+      state: playing ? "playing" : "paused",
+      rt: Number(rt || 0).toFixed(3),
+      rtn: Math.round(Number(rt || 0)).toString(),
+      lact: String(Math.max(0, Math.round(Number(lact) || 0))),
+      volume: String(Math.round(Number(volume ?? 100))),
+      muted: muted ? "1" : "0",
+      fs: "1"
+    };
+    if (len) params.len = Number(len).toFixed(3);
+    if (fmt) params.fmt = String(fmt);
+    if (afmt) params.afmt = String(afmt);
+    if (final) params.final = "1";
+    const url = base.replace("https://s.", "https://www.");
+    try {
+      const response = await yt.actions.stats(url, { client_name: meta.name, client_version: meta.version }, params);
+      return { ok: !!response.ok, status: response.status };
+    } catch (e) {
+      fail("history", `Watch-time ping failed: ${e && e.message ? e.message : e}`);
+    }
+  }
+  __name(watchtime, "watchtime");
+
+  // src/bridge/shorts.js
+  function sequenceIds(info2) {
+    const ids = [];
+    for (const endpoint of info2.watch_next_feed || []) {
+      const id = endpointVideoId(endpoint);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  }
+  __name(sequenceIds, "sequenceIds");
+  async function seedFromHome(yt) {
+    const feed = await yt.getHomeFeed();
+    const nodes = feed.contents?.contents || [];
+    const sections = sectionsFromNodes(nodes);
+    for (const section of sections) {
+      const short = section.items.find((i2) => i2.type === "video" && i2.isShort);
+      if (short) return short.id;
+    }
+    fail("notFound", "Your Home feed has no Shorts shelf right now, so there is nothing to start the Shorts feed from.");
+  }
+  __name(seedFromHome, "seedFromHome");
+  async function shortsFeed({ seedId } = {}) {
+    const yt = await requireSession();
+    const seed = seedId || await seedFromHome(yt);
+    const info2 = await yt.getShortsVideoInfo(seed);
+    const key = newKey("shorts");
+    putFeed(key, { kind: "shorts", feed: info2 });
+    const ids = [seed, ...sequenceIds(info2).filter((id) => id !== seed)];
+    return { ids, continuation: info2.wn_has_continuation ? key : void 0 };
+  }
+  __name(shortsFeed, "shortsFeed");
+  async function shortsMore({ key }) {
+    const entry = getFeed(key);
+    if (!entry.feed.wn_has_continuation) return { ids: [], continuation: void 0 };
+    const info2 = await entry.feed.getWatchNextContinuation();
+    entry.feed = info2;
+    return { ids: sequenceIds(info2), continuation: info2.wn_has_continuation ? key : void 0 };
+  }
+  __name(shortsMore, "shortsMore");
+  async function shortInfo({ id, client }) {
+    const yt = await requireSession();
+    if (!id) fail("invalid", "Missing short id.");
+    const c = String(client || state.options.client || "TV").toUpperCase();
+    const [reel, playerInfo] = await Promise.all([
+      yt.getShortsVideoInfo(id).catch((e) => {
+        console.warn("getShortsVideoInfo failed", e && e.message);
+        return null;
+      }),
+      contentPoToken(c, id).then((po2) => yt.getBasicInfo(id, { client: c, po_token: po2 || void 0 }))
+    ]);
+    checkPlayable(playerInfo);
+    putInfo(id, { info: playerInfo, client: c, reel });
+    const basic = reel && reel.basic_info && reel.basic_info.title ? reel.basic_info : playerInfo.basic_info;
+    const channelId = basic.channel_id || playerInfo.basic_info.channel_id;
+    const subscribed = state.subscriptions.get(channelId);
+    const meta = clientMeta(c);
+    const views = typeof basic.view_count === "number" ? basic.view_count : parseInt(basic.view_count, 10);
+    return {
+      id,
+      title: text(basic.title) || "",
+      channel: {
+        id: channelId,
+        name: text(basic.author) || "",
+        isSubscribed: typeof subscribed === "boolean" ? subscribed : void 0
+      },
+      viewCountText: Number.isFinite(views) ? `${views.toLocaleString("en-US")} views` : void 0,
+      likeStatus: likeStatusFor(id) || "none",
+      thumbnail: bestThumb(playerInfo.basic_info.thumbnail) || `https://i.ytimg.com/vi/${id}/oar2.jpg`,
+      durationSeconds: playerInfo.basic_info.duration,
+      formats: formatsOf(playerInfo),
+      captions: captionsOf(playerInfo),
+      playerClient: meta.key,
+      userAgent: meta.userAgent,
+      trackingAvailable: !!playerInfo.page?.[0]?.playback_tracking
+    };
+  }
+  __name(shortInfo, "shortInfo");
+
+  // src/bridge/actions.js
+  function ensureOk(result, what) {
+    if (result && result.success === false) fail("action", `${what} failed (HTTP ${result.status_code || "?"}).`);
+    return result;
+  }
+  __name(ensureOk, "ensureOk");
+  async function rate({ id, rating }) {
+    const yt = await requireSession();
+    requireLogin(yt);
+    if (!id) fail("invalid", "Missing video id.");
+    const info2 = state.infos.get(id)?.info;
+    const viaInfo = info2 && typeof info2.like === "function" && info2.primary_info;
+    try {
+      if (viaInfo) {
+        if (rating === "like") await info2.like();
+        else if (rating === "dislike") await info2.dislike();
+        else await info2.removeRating();
+      } else {
+        throw new Error("no watch-page buttons");
+      }
+    } catch (e) {
+      if (rating === "like") ensureOk(await yt.interact.like(id), "Like");
+      else if (rating === "dislike") ensureOk(await yt.interact.dislike(id), "Dislike");
+      else ensureOk(await yt.interact.removeRating(id), "Remove rating");
+    }
+    state.likes.set(id, rating === "like" ? "LIKE" : rating === "dislike" ? "DISLIKE" : "INDIFFERENT");
+    return { likeStatus: rating === "like" || rating === "dislike" ? rating : "none" };
+  }
+  __name(rate, "rate");
+  async function subscribe({ channelId, subscribe: subscribe2 }) {
+    const yt = await requireSession();
+    requireLogin(yt);
+    if (!channelId) fail("invalid", "Missing channel id.");
+    if (subscribe2) ensureOk(await yt.interact.subscribe(channelId), "Subscribe");
+    else ensureOk(await yt.interact.unsubscribe(channelId), "Unsubscribe");
+    state.subscriptions.set(channelId, !!subscribe2);
+    return { isSubscribed: !!subscribe2 };
+  }
+  __name(subscribe, "subscribe");
+  async function watchLater({ id, add }) {
+    const yt = await requireSession();
+    requireLogin(yt);
+    if (!id) fail("invalid", "Missing video id.");
+    if (add) await yt.playlist.addVideos("WL", [id]);
+    else await yt.playlist.removeVideos("WL", [id]);
+    return { inWatchLater: !!add };
+  }
+  __name(watchLater, "watchLater");
+  async function watchLaterStatus({ id }) {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const response = await yt.actions.execute("/playlist/get_add_to_playlist", { videoIds: [id], excludeWatchLater: false });
+    const raw = response?.data;
+    const found = [];
+    const walk = /* @__PURE__ */ __name((node, depth) => {
+      if (!node || typeof node !== "object" || depth > 12) return;
+      if (Array.isArray(node)) {
+        node.forEach((n) => walk(n, depth + 1));
+        return;
+      }
+      const option = node.playlistAddToOptionRenderer;
+      if (option && option.playlistId) {
+        found.push({ id: option.playlistId, contains: option.containsSelectedVideos === "ALL" });
+        return;
+      }
+      for (const value of Object.values(node)) {
+        if (value && typeof value === "object") walk(value, depth + 1);
+      }
+    }, "walk");
+    walk(raw, 0);
+    const wl = found.find((p) => p.id === "WL");
+    return { inWatchLater: wl ? wl.contains : void 0 };
+  }
+  __name(watchLaterStatus, "watchLaterStatus");
+  function commentsPage(key, comments2) {
+    const items = (comments2.contents || []).map(toComment).filter(Boolean);
+    return {
+      countText: text(comments2.header?.count) || text(comments2.header?.comments_count),
+      items,
+      continuation: comments2.has_continuation ? key : void 0
+    };
+  }
+  __name(commentsPage, "commentsPage");
+  async function comments({ videoId, sort }) {
+    const yt = await requireSession();
+    if (!videoId) fail("invalid", "Missing video id.");
+    const result = await yt.getComments(videoId, sort === "newest" ? "NEWEST_FIRST" : "TOP_COMMENTS");
+    const key = newKey("comments");
+    putFeed(key, { kind: "comments", feed: result, videoId });
+    return commentsPage(key, result);
+  }
+  __name(comments, "comments");
+  async function commentsMore({ key }) {
+    const entry = getFeed(key);
+    if (!entry.feed.has_continuation) return { items: [], continuation: void 0 };
+    const next = await entry.feed.getContinuation();
+    entry.feed = next;
+    return commentsPage(key, next);
+  }
+  __name(commentsMore, "commentsMore");
+  async function postComment({ videoId, text: body }) {
+    const yt = await requireSession();
+    requireLogin(yt);
+    const message = String(body || "").trim();
+    if (!videoId || !message) fail("invalid", "Write something first.");
+    const result = await yt.interact.comment(videoId, message);
+    ensureOk(result, "Posting the comment");
+    return { posted: true };
+  }
+  __name(postComment, "postComment");
+
+  // src/bridge/index.js
+  var bundleInfo = {
+    bundleVersion: "1.0.0+yt18.1.0",
+    youtubeiVersion: "18.1.0",
+    bgutilsVersion: "4.0.3",
+    protocol: 1
+  };
+  var methods = {
+    init,
+    validateCookie,
+    accountInfo,
+    sessionState,
+    setClient,
+    home,
+    subscriptions,
+    subscribedChannels,
+    search,
+    searchSuggestions,
+    channel,
+    channelTab,
+    playlist,
+    history,
+    playlists,
+    more,
+    videoInfo,
+    resolveFormats,
+    markWatched,
+    watchtime,
+    shortsFeed,
+    shortsMore,
+    shortInfo,
+    rate,
+    subscribe,
+    watchLater,
+    watchLaterStatus,
+    comments,
+    commentsMore,
+    postComment,
+    bundleInfo: /* @__PURE__ */ __name(async () => bundleInfo, "bundleInfo"),
+    ping: /* @__PURE__ */ __name(async () => ({ pong: true }), "ping")
+  };
+  function reply(id, error2, result) {
+    const send = nativeFn("reply");
+    if (!send) return;
+    if (error2) {
+      send(id, JSON.stringify(clean(error2)), null);
+    } else {
+      let json;
+      try {
+        json = JSON.stringify(clean(result === void 0 ? null : result));
+      } catch (e) {
+        send(id, JSON.stringify(clean(classify(e))), null);
+        return;
+      }
+      send(id, null, json);
+    }
+  }
+  __name(reply, "reply");
+  var TubeBridge = {
+    bundleInfo,
+    methods: Object.keys(methods),
+    // Synchronous helpers for tests and the debug screen.
+    debug: { sha1Hex },
+    call(id, method, argsJSON) {
+      let args;
+      try {
+        args = argsJSON ? JSON.parse(argsJSON) : {};
+      } catch (e) {
+        reply(id, { kind: "invalid", message: `Bad arguments for ${method}: ${e.message}` });
+        return;
+      }
+      const fn = methods[method];
+      if (!fn) {
+        reply(id, { kind: "invalid", message: `Unknown bridge method: ${method}` });
+        return;
+      }
+      Promise.resolve().then(() => fn(args || {})).then((result) => reply(id, null, result), (error2) => {
+        const classified = classify(error2);
+        console.warn(`bridge ${method} failed: [${classified.kind}] ${classified.message}`);
+        reply(id, classified);
+      });
+    }
+  };
+
+  // src/index.js
+  loadPlatform();
+  globalThis.TubeBridge = TubeBridge;
 })();

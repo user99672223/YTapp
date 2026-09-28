@@ -1,0 +1,53 @@
+{
+  "sections": [
+    {
+      "id": "s1",
+      "style": "grid",
+      "items": [
+        {
+          "type": "channel",
+          "id": "UCbbbbbbbbbbbbbbbbbbbbbb",
+          "name": "Channel Two",
+          "avatar": "https://yt3.ggpht.com/two",
+          "handle": "@channeltwo",
+          "subscriberCountText": "2.1M subscribers",
+          "isSubscribed": false
+        },
+        {
+          "type": "video",
+          "id": "SEARCHVID01",
+          "title": "Search hit",
+          "channelName": "Channel One",
+          "channelId": "UCaaaaaaaaaaaaaaaaaaaaaa",
+          "channelAvatar": "https://yt3.ggpht.com/avatar-one",
+          "thumbnail": "https://i.ytimg.com/vi/SEARCHVID01/hq720.jpg",
+          "durationText": "10:05",
+          "durationSeconds": 605,
+          "viewCountText": "12K views",
+          "publishedText": "3 days ago",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false,
+          "watchedPercent": 40
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "title": "Shorts",
+      "style": "shorts",
+      "items": [
+        {
+          "type": "video",
+          "id": "SHORTID0003",
+          "title": "Search short",
+          "thumbnail": "https://i.ytimg.com/vi/SHORTID0003/oar2.jpg",
+          "viewCountText": "1.2M views",
+          "isLive": false,
+          "isShort": true,
+          "isUpcoming": false
+        }
+      ]
+    }
+  ]
+}

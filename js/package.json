@@ -6,7 +6,7 @@
   "description": "YouTube.js bundled for JavaScriptCore inside the Tube tvOS app",
   "scripts": {
     "bundle": "node build.mjs",
-    "test": "node --test --test-reporter=spec test/smoke.test.mjs"
+    "test": "node --test --test-reporter=spec test/smoke.test.mjs test/polyfills.test.mjs test/bridge.test.mjs"
   },
   "dependencies": {
     "bgutils-js": "4.0.3",
