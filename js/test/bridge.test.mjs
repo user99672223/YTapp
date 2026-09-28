@@ -170,6 +170,10 @@ test('search, suggestions and channel items', async () => {
   assert.equal(premiere.isUpcoming, true);
   assert.equal(premiere.durationText, undefined);
   assert.equal(premiere.durationSeconds, undefined);
+  // Grid shelves keep their own headline.
+  const grid = results.sections.find((s) => s.items.some((i) => i.id === 'SHORTID0005'));
+  assert.equal(grid.title, 'Latest Shorts from Channel One');
+  assert.equal(grid.style, 'shorts');
 });
 
 test('Subscriptions, subscribed channels and Library playlists load past the first page', async () => {

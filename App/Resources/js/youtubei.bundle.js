@@ -44182,7 +44182,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         }
         case "GridShelfView": {
           flushGrid();
-          const s = shelfSection(text(node.header?.title) || text(node.header?.text) || "Shorts", node.contents);
+          const s = shelfSection(text(node.header?.headline) || text(node.header?.title) || text(node.header?.text) || "Shorts", node.contents);
           if (s) sections.push(s);
           return;
         }

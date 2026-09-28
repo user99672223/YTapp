@@ -430,7 +430,13 @@ function searchResponse() {
                     thumb: 'https://i.ytimg.com/vi/VIDEOID0001/hqdefault.jpg',
                     rows: [[{ text: 'Channel Two', browseId: CH2 }, 'Playlist'], ['View full playlist']],
                     onTap: { watchEndpoint: { videoId: 'VIDEOID0001', playlistId: 'PLsearchlist01' } }
-                  })
+                  }),
+                  {
+                    gridShelfViewModel: {
+                      header: { sectionHeaderViewModel: { headline: { content: 'Latest Shorts from Channel One' } } },
+                      contents: [shortLockup('SHORTID0005', 'Grid short')]
+                    }
+                  }
                 ]
               }
             }]

@@ -85,6 +85,23 @@
           "channelName": "Channel Two"
         }
       ]
+    },
+    {
+      "id": "s4",
+      "title": "Latest Shorts from Channel One",
+      "style": "shorts",
+      "items": [
+        {
+          "type": "video",
+          "id": "SHORTID0005",
+          "title": "Grid short",
+          "thumbnail": "https://i.ytimg.com/vi/SHORTID0005/oar2.jpg",
+          "viewCountText": "1.2M views",
+          "isLive": false,
+          "isShort": true,
+          "isUpcoming": false
+        }
+      ]
     }
   ]
 }

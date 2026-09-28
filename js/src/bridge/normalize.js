@@ -427,7 +427,8 @@ export function sectionsFromNodes(nodes, options = {}) {
       }
       case 'GridShelfView': {
         flushGrid();
-        const s = shelfSection(text(node.header?.title) || text(node.header?.text) || 'Shorts', node.contents);
+        // The header is a SectionHeaderView, whose title is its `headline`.
+        const s = shelfSection(text(node.header?.headline) || text(node.header?.title) || text(node.header?.text) || 'Shorts', node.contents);
         if (s) sections.push(s);
         return;
       }
