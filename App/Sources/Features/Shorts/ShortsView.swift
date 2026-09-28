@@ -224,6 +224,8 @@ private struct ShortsContent: View {
                         vm.toggleSubscription()
                     } label: {
                         Text(vm.isSubscribed == true ? "Subscribed" : "Subscribe")
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                     .tint(vm.isSubscribed == true ? .gray : .red)
                     .onMoveCommand(perform: move)

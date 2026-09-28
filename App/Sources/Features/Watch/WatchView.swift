@@ -140,7 +140,8 @@ private struct WatchContent: View {
                 .padding(.top, 60)
             }
 
-            if model.settings.showStatsOverlay {
+            // Not over a side panel, which it would cover.
+            if model.settings.showStatsOverlay, panel == nil {
                 VStack {
                     HStack {
                         Spacer()
