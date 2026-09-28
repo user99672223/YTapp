@@ -164,7 +164,7 @@ private struct WatchContent: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the app (TV button) pauses, like the YouTube app.
-            if phase == .background { vm.player.setPaused(true) }
+            vm.setInBackground(phase == .background)
         }
         .onAppear {
             focus = .playPause

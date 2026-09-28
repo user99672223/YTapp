@@ -45,6 +45,9 @@ final class WatchViewModel: ObservableObject {
     private var startedPlayback = false
     private var lastSavedPosition: Double = 0
     private var waitingForDisplay = false
+    /// Bumped for every file handed to mpv, so a `fileLoaded` task of an older one stops.
+    private var playbackToken = 0
+    private var inBackground = false
     /// Automatic reconnects after the stream broke off, per video (see `streamEndedEarly`).
     private var earlyEnds = 0
     /// Captions were set up for this video (from Settings or by the viewer); later files of the
@@ -193,6 +196,7 @@ final class WatchViewModel: ObservableObject {
         reporter?.stop()
         reporter = PlaybackReporter(videoId: details.id, model: model)
         playingDetails = details
+        playbackToken += 1
         startedPlayback = false
         lastSavedPosition = start ?? 0
         waitingForDisplay = true
@@ -215,16 +219,21 @@ final class WatchViewModel: ObservableObject {
     private func fileLoaded() {
         guard waitingForDisplay else { return }
         waitingForDisplay = false
+        let token = playbackToken
         Task {
             // Give mpv a moment to report the container frame rate.
             var fps = player.state.stats.containerFps
             for _ in 0..<10 where fps <= 0 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
+                if closed || token != playbackToken { return }
                 fps = player.state.stats.containerFps
             }
             if fps <= 0 { fps = selection?.video.fps ?? 0 }
             let width = selection?.video.width ?? 1920
             let height = selection?.video.height ?? 1080
+            // Closing the page resets the display; a switch requested after that would leave the
+            // whole app at the video's refresh rate.
+            guard !closed, token == playbackToken else { return }
             appliedRefreshRate = fps > 0 ? DisplayCriteriaController.apply(fps: fps, width: width, height: height) : nil
             if appliedRefreshRate != nil {
                 try? await Task.sleep(nanoseconds: 300_000_000)
@@ -234,9 +243,11 @@ final class WatchViewModel: ObservableObject {
                     waited += 1
                 }
             }
-            guard !closed else { return }
-            player.setPaused(false)
+            guard !closed, token == playbackToken else { return }
             applyCaptions()
+            // If the TV button was pressed while the video opened, it stays paused (as after
+            // leaving during playback) instead of playing on in the background.
+            if !inBackground { player.setPaused(false) }
         }
     }
 
@@ -304,7 +315,7 @@ final class WatchViewModel: ObservableObject {
         reporter?.stop()
         model.store.saveResume(videoId: playingDetails.id, position: playingDetails.durationSeconds ?? player.state.duration,
                                duration: playingDetails.durationSeconds ?? 0)
-        guard model.settings.autoplay, nextVideo != nil else { return }
+        guard model.settings.autoplay, !inBackground, nextVideo != nil else { return }
         startCountdown()
     }
 
@@ -363,6 +374,16 @@ final class WatchViewModel: ObservableObject {
     }
 
     // MARK: - Transport
+
+    /// Leaving the app (TV button) pauses, like the YouTube app, and cancels autoplay; a video
+    /// that is still opening stays paused too.
+    func setInBackground(_ background: Bool) {
+        guard background != inBackground else { return }
+        inBackground = background
+        guard background else { return }
+        player.setPaused(true)
+        cancelCountdown()
+    }
 
     func togglePlay() {
         reporter?.userActivity()
