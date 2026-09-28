@@ -220,12 +220,13 @@ function preferenceOf(preferred) {
   return String(preferred || state.options.client || 'AUTO').toUpperCase();
 }
 
-export function clientChain(preferred) {
+export function clientChain(preferred, skip) {
   const p = preferenceOf(preferred);
   const good = FALLBACK_CLIENTS.includes(state.goodClient) ? state.goodClient : null;
   const first = p === 'AUTO' ? (good || FALLBACK_CLIENTS[0]) : p;
   const chain = [first, ...FALLBACK_CLIENTS.filter((c) => c !== first)];
-  return [...chain.filter((c) => !state.badClients.has(c)), ...chain.filter((c) => state.badClients.has(c))];
+  const usable = chain.filter((c) => !(skip && skip.has(c)));
+  return [...usable.filter((c) => !state.badClients.has(c)), ...usable.filter((c) => state.badClients.has(c))];
 }
 
 // Why this player response can't be streamed directly, or null when it can.
@@ -270,7 +271,7 @@ function withPlayabilityReason(e) {
 export async function playerWithFallback(yt, id, preferred, load) {
   const p = preferenceOf(preferred);
   const failures = [];
-  for (const c of clientChain(p)) {
+  for (const c of clientChain(p, state.refusedClients.get(id))) {
     try {
       const poToken = await contentPoToken(c, id);
       // Without its PO token a web client's streams are refused (403) later, in the player, where
@@ -301,6 +302,7 @@ export async function playerWithFallback(yt, id, preferred, load) {
       if (cls.kind === 'unavailable' && VIDEO_GONE.test(cls.message)) break;
     }
   }
+  if (!failures.length) fail('extraction', 'YouTube refused the streams of every client for this video (HTTP 403).');
   const summary = failures.map((f) => `${f.client}: [${f.kind}${f.status ? ` ${f.status}` : ''}] ${f.message}`).join('\n');
   const telling = failures.find((f) => !['extraction', 'unknown', 'parse', 'poToken'].includes(f.kind));
   if (telling) throw new BridgeError(telling.kind, telling.message, summary);
@@ -320,43 +322,92 @@ export async function videoInfo({ id, client }) {
 // player keeps using them after they are resolved, so they are refreshed well before that.
 const EXPIRY_MARGIN_MS = 30 * 60 * 1000;
 
+// googlevideo sometimes refuses one client's stream URLs for a video (HTTP 403) although the
+// player request for it worked (seen on the Apple TV in September 2026 with TV 5.x, signed in).
+// mpv would only find out after opening the stream, so the chosen video stream is tested with a
+// one-byte request first, and a refused client is replaced by the next one for this video.
+async function streamRefused(url, meta) {
+  try {
+    const response = await fetch(url, {
+      headers: { Range: 'bytes=0-0', 'User-Agent': meta.userAgent, Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
+    });
+    return response.status === 403;
+  } catch {
+    return false; // network trouble is the player's to report
+  }
+}
+
+function sameFormat(a, b) {
+  return a.itag === b.itag && (a.audio_track?.id || '') === (b.audio_track?.id || '');
+}
+
 // Deciphers the chosen formats (by index into streaming_data.adaptive_formats). `itags` (same
 // order as `indices`) are the formats Swift chose: when this video was loaded again since (with
 // another client, or as a Short), an index can point at another format, and Swift has to fetch
 // the details again ('expired') instead of playing the wrong stream.
 export async function resolveFormats({ id, indices, itags }) {
   const yt = await requireSession();
-  const entry = getInfo(id);
+  let entry = getInfo(id);
   const expires = entry.info.streaming_data?.expires;
   if (expires && typeof expires.getTime === 'function' && expires.getTime() - Date.now() < EXPIRY_MARGIN_MS) {
     state.infos.delete(id);
     fail('expired', 'The stream links for this video expired. Open the video again.', id);
   }
+  const chosen = [];
   const formats = entry.info.streaming_data?.adaptive_formats || [];
-  const urls = {};
   for (const [i, index] of (indices || []).entries()) {
     const format = formats[index];
     const itag = Array.isArray(itags) && itags[i] != null ? Number(itags[i]) : undefined;
     if (!format || (itag !== undefined && format.itag !== itag)) {
       fail('expired', 'The streams of this video changed since it was opened. Open the video again.', id);
     }
-    let url = await format.decipher(yt.session.player);
-    // Web clients need the (video-bound) PO token on googlevideo requests too.
-    if (entry.poToken && url && /^https?:/.test(url)) {
-      const u = new URL(url);
-      u.searchParams.set('pot', entry.poToken);
-      url = u.toString();
-    }
-    if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
-    if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
-    urls[String(index)] = url;
+    chosen.push({ index, format });
   }
-  const meta = clientMeta(entry.client);
-  return {
-    urls,
-    userAgent: meta.userAgent,
-    headers: { Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
-  };
+  for (let attempt = 0; ; attempt++) {
+    const urls = {};
+    for (const { index, format } of chosen) {
+      let url = await format.decipher(yt.session.player);
+      // Web clients need the (video-bound) PO token on googlevideo requests too.
+      if (entry.poToken && url && /^https?:/.test(url)) {
+        const u = new URL(url);
+        u.searchParams.set('pot', entry.poToken);
+        url = u.toString();
+      }
+      if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
+      if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
+      urls[String(index)] = url;
+    }
+    const meta = clientMeta(entry.client);
+    const first = chosen.length ? urls[String(chosen[0].index)] : undefined;
+    const refusedNow = !!first && await streamRefused(first, meta);
+    if (refusedNow && attempt >= FALLBACK_CLIENTS.length - 1) {
+      fail('extraction', `YouTube refused the video stream of every client it was tried with (HTTP 403).`);
+    }
+    if (!refusedNow) {
+      console.info(`video ${id}: streams ${chosen.map((c) => c.format.itag).join(' + ')} from ${entry.client}`);
+      return {
+        urls,
+        userAgent: meta.userAgent,
+        headers: { Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
+      };
+    }
+    console.warn(`video ${id}: googlevideo refused the ${entry.client} stream (itag ${chosen[0].format.itag}, HTTP 403); trying the next client | ${first}`);
+    const refused = state.refusedClients.get(id) || new Set();
+    refused.add(entry.client);
+    state.refusedClients.set(id, refused);
+    const next = await playerWithFallback(yt, id, undefined, (name, token) => yt.getBasicInfo(id, { client: name, po_token: token }));
+    const nextFormats = next.info.streaming_data?.adaptive_formats || [];
+    for (const item of chosen) {
+      const match = nextFormats.find((f) => sameFormat(f, item.format));
+      if (!match) {
+        putInfo(id, { info: next.info, client: next.client, poToken: next.poToken, reel: entry.reel });
+        fail('expired', `The ${next.client} client offers other streams for this video. Open the video again.`, id);
+      }
+      item.format = match;
+    }
+    entry = { ...entry, info: next.info, client: next.client, poToken: next.poToken };
+    putInfo(id, entry);
+  }
 }
 
 // ---------------------------------------------------------------- history sync

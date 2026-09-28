@@ -17,6 +17,8 @@ export const state = {
   // are not specific to one video (rejected request, SABR-only, no longer supported).
   goodClient: null,
   badClients: new Map(),
+  // Per video: clients whose stream URLs googlevideo refused (403) although the player request worked.
+  refusedClients: new Map(),
   feeds: new Map(),
   infos: new Map(),
   subscriptions: new Map(),

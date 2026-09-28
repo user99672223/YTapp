@@ -264,6 +264,32 @@ test('"The page needs to be reloaded" switches the TV client to the Samsung iden
   assert.equal(watched.ok, true);
 });
 
+test('a stream googlevideo refuses (403) moves this video to the next client', async () => {
+  const yt = createFakeYouTube({ refuseStreams: ['TVHTML5'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  assert.equal(details.playerClient, 'TV');
+  const idx = (itag) => details.formats.find((f) => f.itag === itag).index;
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
+  const video = new URL(resolved.urls[String(idx(401))]);
+  const audio = new URL(resolved.urls[String(idx(251))]);
+  // TV and TV as a Samsung set are both TVHTML5 and refused; Web embedded is used for this video.
+  assert.equal(video.searchParams.get('fakeclient'), 'WEB_EMBEDDED_PLAYER');
+  assert.equal(audio.searchParams.get('fakeclient'), 'WEB_EMBEDDED_PLAYER');
+  assert.equal(video.searchParams.get('itag'), '401');
+  assert.ok(bundle.logs.some((l) => /googlevideo refused the TV stream \(itag 401, HTTP 403\)/.test(l.message)));
+  const probes = yt.hits.filter((h) => h.path === '/videoplayback');
+  assert.equal(probes.length, 3, 'one one-byte probe per client tried');
+  assert.equal(probes[0].headers.range, 'bytes=0-0');
+  // History uses the client that now provides the stream.
+  const watched = await bundle.call('markWatched', { id: 'VIDEOID0001' });
+  assert.equal(watched.ok, true);
+  // Opening the video again doesn't go back to the refused clients.
+  const again = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  assert.equal(again.playerClient, 'WEB_EMBEDDED');
+});
+
 test('errors are classified for Swift', async () => {
   const { call } = await connected();
   await assert.rejects(call('resolveFormats', { id: 'NOTLOADED01', indices: [0] }), (e) => e.kind === 'expired');
