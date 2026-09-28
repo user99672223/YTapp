@@ -29,6 +29,7 @@ final class YouTubeServiceTests: XCTestCase {
         let selection = try QualitySelector.select(details.formats)
         let streams = try await service.resolveFormats(videoId: details.id, formats: [selection.video, selection.audio!])
         XCTAssertEqual(transport.calls[1].args["indices"] as? [Int], [selection.video.index, selection.audio!.index])
+        XCTAssertEqual(transport.calls[1].args["itags"] as? [Int], [selection.video.itag, selection.audio!.itag])
         XCTAssertEqual(streams.url(for: selection.video)?.absoluteString, "https://rr1.googlevideo.com/videoplayback?itag=401")
         XCTAssertEqual(streams.userAgent, "UA")
     }

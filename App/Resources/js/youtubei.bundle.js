@@ -44802,7 +44802,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(videoInfo, "videoInfo");
   var EXPIRY_MARGIN_MS = 30 * 60 * 1e3;
-  async function resolveFormats({ id, indices }) {
+  async function resolveFormats({ id, indices, itags }) {
     const yt = await requireSession();
     const entry = getInfo(id);
     const expires = entry.info.streaming_data?.expires;
@@ -44812,9 +44812,12 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     }
     const formats = entry.info.streaming_data?.adaptive_formats || [];
     const urls = {};
-    for (const index of indices || []) {
+    for (const [i2, index] of (indices || []).entries()) {
       const format = formats[index];
-      if (!format) fail("extraction", `Format ${index} is not available any more.`);
+      const itag = Array.isArray(itags) && itags[i2] != null ? Number(itags[i2]) : void 0;
+      if (!format || itag !== void 0 && format.itag !== itag) {
+        fail("expired", "The streams of this video changed since it was opened. Open the video again.", id);
+      }
       let url = await format.decipher(yt.session.player);
       if (entry.poToken && url && /^https?:/.test(url)) {
         const u = new URL(url);

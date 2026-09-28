@@ -218,20 +218,22 @@ function livePlayerResponse(id) {
 
 function playerResponse(id, options = {}) {
   if (id.startsWith('LIVE')) return livePlayerResponse(id);
+  const formats = [
+    { itag: 399, signatureCipher: cipher(399), mimeType: 'video/mp4; codecs="av01.0.08M.08"', bitrate: 2500000, width: 1920, height: 1080, fps: 30, qualityLabel: '1080p', quality: 'hd1080', contentLength: '100000000', approxDurationMs: '605000', averageBitrate: 2000000 },
+    { itag: 401, signatureCipher: cipher(401), mimeType: 'video/mp4; codecs="av01.0.12M.08"', bitrate: 12000000, width: 3840, height: 2160, fps: 30, qualityLabel: '2160p', quality: 'hd2160', contentLength: '600000000', approxDurationMs: '605000' },
+    { itag: 313, signatureCipher: cipher(313), mimeType: 'video/webm; codecs="vp9"', bitrate: 16000000, width: 3840, height: 2160, fps: 30, qualityLabel: '2160p', quality: 'hd2160', contentLength: '700000000', approxDurationMs: '605000' },
+    { itag: 337, signatureCipher: cipher(337), mimeType: 'video/webm; codecs="vp09.02.51.10.01.09.16.09.00"', bitrate: 20000000, width: 3840, height: 2160, fps: 60, qualityLabel: '2160p60 HDR', quality: 'hd2160', colorInfo: { primaries: 'COLOR_PRIMARIES_BT2020', transferCharacteristics: 'COLOR_TRANSFER_CHARACTERISTICS_SMPTEST2084', matrixCoefficients: 'COLOR_MATRIX_COEFFICIENTS_BT2020_NCL' }, approxDurationMs: '605000' },
+    { itag: 137, signatureCipher: cipher(137), mimeType: 'video/mp4; codecs="avc1.640028"', bitrate: 4000000, width: 1920, height: 1080, fps: 30, qualityLabel: '1080p', quality: 'hd1080', approxDurationMs: '605000' },
+    { itag: 251, signatureCipher: cipher(251), mimeType: 'audio/webm; codecs="opus"', bitrate: 160000, averageBitrate: 130000, audioQuality: 'AUDIO_QUALITY_MEDIUM', audioSampleRate: '48000', audioChannels: 2, approxDurationMs: '605000', loudnessDb: -2.1 },
+    { itag: 140, signatureCipher: cipher(140), mimeType: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 130000, audioQuality: 'AUDIO_QUALITY_MEDIUM', audioSampleRate: '44100', audioChannels: 2, approxDurationMs: '605000' }
+  ];
   return {
     responseContext: {},
     playabilityStatus: { status: 'OK', playableInEmbed: true },
     streamingData: {
       expiresInSeconds: options.expiresInSeconds || '21540',
-      adaptiveFormats: [
-        { itag: 399, signatureCipher: cipher(399), mimeType: 'video/mp4; codecs="av01.0.08M.08"', bitrate: 2500000, width: 1920, height: 1080, fps: 30, qualityLabel: '1080p', quality: 'hd1080', contentLength: '100000000', approxDurationMs: '605000', averageBitrate: 2000000 },
-        { itag: 401, signatureCipher: cipher(401), mimeType: 'video/mp4; codecs="av01.0.12M.08"', bitrate: 12000000, width: 3840, height: 2160, fps: 30, qualityLabel: '2160p', quality: 'hd2160', contentLength: '600000000', approxDurationMs: '605000' },
-        { itag: 313, signatureCipher: cipher(313), mimeType: 'video/webm; codecs="vp9"', bitrate: 16000000, width: 3840, height: 2160, fps: 30, qualityLabel: '2160p', quality: 'hd2160', contentLength: '700000000', approxDurationMs: '605000' },
-        { itag: 337, signatureCipher: cipher(337), mimeType: 'video/webm; codecs="vp09.02.51.10.01.09.16.09.00"', bitrate: 20000000, width: 3840, height: 2160, fps: 60, qualityLabel: '2160p60 HDR', quality: 'hd2160', colorInfo: { primaries: 'COLOR_PRIMARIES_BT2020', transferCharacteristics: 'COLOR_TRANSFER_CHARACTERISTICS_SMPTEST2084', matrixCoefficients: 'COLOR_MATRIX_COEFFICIENTS_BT2020_NCL' }, approxDurationMs: '605000' },
-        { itag: 137, signatureCipher: cipher(137), mimeType: 'video/mp4; codecs="avc1.640028"', bitrate: 4000000, width: 1920, height: 1080, fps: 30, qualityLabel: '1080p', quality: 'hd1080', approxDurationMs: '605000' },
-        { itag: 251, signatureCipher: cipher(251), mimeType: 'audio/webm; codecs="opus"', bitrate: 160000, averageBitrate: 130000, audioQuality: 'AUDIO_QUALITY_MEDIUM', audioSampleRate: '48000', audioChannels: 2, approxDurationMs: '605000', loudnessDb: -2.1 },
-        { itag: 140, signatureCipher: cipher(140), mimeType: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 130000, audioQuality: 'AUDIO_QUALITY_MEDIUM', audioSampleRate: '44100', audioChannels: 2, approxDurationMs: '605000' }
-      ]
+      // options.reversed: this client lists the same formats in another order.
+      adaptiveFormats: options.reversed ? formats.reverse() : formats
     },
     playbackTracking: {
       videostatsPlaybackUrl: { baseUrl: `https://s.youtube.com/api/stats/playback?cl=1&docid=${id}&ei=EI&ns=yt&plid=PLID&el=leanback&len=605&of=OF&vm=VM` },
@@ -538,8 +540,15 @@ export function createFakeYouTube(options = {}) {
         return { status: 400, body: { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT' } } };
       }
       if (NOT_PLAYABLE[body.videoId]) return { status: 200, body: { responseContext: {}, playabilityStatus: NOT_PLAYABLE[body.videoId] } };
-      // options.expiresInSeconds: lifetime of the stream URLs.
-      return { status: 200, body: playerResponse(body.videoId, { expiresInSeconds: options.expiresInSeconds }) };
+      // options.expiresInSeconds: lifetime of the stream URLs; options.reorderClients: client names
+      // that list the formats in another order.
+      return {
+        status: 200,
+        body: playerResponse(body.videoId, {
+          expiresInSeconds: options.expiresInSeconds,
+          reversed: (options.reorderClients || []).includes(clientName)
+        })
+      };
     }
     if (path === '/youtubei/v1/next') return { status: 200, body: nextResponse(body.videoId) };
     if (path === '/youtubei/v1/search') return { status: 200, body: searchResponse() };

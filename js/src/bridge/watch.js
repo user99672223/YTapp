@@ -320,8 +320,11 @@ export async function videoInfo({ id, client }) {
 // player keeps using them after they are resolved, so they are refreshed well before that.
 const EXPIRY_MARGIN_MS = 30 * 60 * 1000;
 
-// Deciphers the chosen formats (by index into streaming_data.adaptive_formats).
-export async function resolveFormats({ id, indices }) {
+// Deciphers the chosen formats (by index into streaming_data.adaptive_formats). `itags` (same
+// order as `indices`) are the formats Swift chose: when this video was loaded again since (with
+// another client, or as a Short), an index can point at another format, and Swift has to fetch
+// the details again ('expired') instead of playing the wrong stream.
+export async function resolveFormats({ id, indices, itags }) {
   const yt = await requireSession();
   const entry = getInfo(id);
   const expires = entry.info.streaming_data?.expires;
@@ -331,9 +334,12 @@ export async function resolveFormats({ id, indices }) {
   }
   const formats = entry.info.streaming_data?.adaptive_formats || [];
   const urls = {};
-  for (const index of indices || []) {
+  for (const [i, index] of (indices || []).entries()) {
     const format = formats[index];
-    if (!format) fail('extraction', `Format ${index} is not available any more.`);
+    const itag = Array.isArray(itags) && itags[i] != null ? Number(itags[i]) : undefined;
+    if (!format || (itag !== undefined && format.itag !== itag)) {
+      fail('expired', 'The streams of this video changed since it was opened. Open the video again.', id);
+    }
     let url = await format.decipher(yt.session.player);
     // Web clients need the (video-bound) PO token on googlevideo requests too.
     if (entry.poToken && url && /^https?:/.test(url)) {

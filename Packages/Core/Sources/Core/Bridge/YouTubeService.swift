@@ -106,8 +106,10 @@ public final class YouTubeService: @unchecked Sendable {
         try await call("videoInfo", ["id": id, "client": client])
     }
 
+    /// The itags let the bridge check that each index still points at the format chosen here; if
+    /// the video was loaded again since, it answers `.expired` and the caller fetches the details again.
     public func resolveFormats(videoId: String, formats: [StreamFormat]) async throws -> ResolvedStreams {
-        try await call("resolveFormats", ["id": videoId, "indices": formats.map(\.index)])
+        try await call("resolveFormats", ["id": videoId, "indices": formats.map(\.index), "itags": formats.map(\.itag)])
     }
 
     public func markWatched(videoId: String) async throws -> PingResult {

@@ -103,7 +103,7 @@ test('video info, deciphering, history and watch-time pings', async () => {
   assert.equal(playerHit.body.playbackContext.contentPlaybackContext.signatureTimestamp, 20314);
 
   const idx = (itag) => details.formats.find((f) => f.itag === itag).index;
-  const resolved = await call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)] });
+  const resolved = await call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
   const videoUrl = new URL(resolved.urls[String(idx(401))]);
   assert.equal(videoUrl.hostname, 'rr1---sn-fake.googlevideo.com');
   assert.equal(videoUrl.searchParams.get('sig'), 'ZYXGIS');
@@ -337,6 +337,23 @@ test('stream links close to their expiry are not handed to the player', async ()
   await bundle.call('init', { cookie: COOKIE, client: 'TV' });
   const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });
   const audio = details.formats.find((f) => f.itag === 251);
-  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [audio.index] }), (e) => e.kind === 'expired');
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [audio.index], itags: [251] }), (e) => e.kind === 'expired');
   assert.equal((await bundle.call('sessionState')).cachedInfos, 0, 'the stale player data is dropped');
+});
+
+test('format indices from an earlier load of the video are refused as expired', async () => {
+  const yt = createFakeYouTube({ reorderClients: ['WEB_EMBEDDED_PLAYER'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const tv = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'AUTO' });
+  await bundle.call('setClient', { client: 'WEB_EMBEDDED' });
+  const embedded = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'WEB_EMBEDDED' });
+  const uhd = (d) => d.formats.find((f) => f.itag === 401);
+  assert.notEqual(uhd(tv).index, uhd(embedded).index);
+  // Back on Automatic, Swift still holds the TV details (cached for 5 minutes).
+  await bundle.call('setClient', { client: 'AUTO' });
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [uhd(tv).index], itags: [401] }), (e) => e.kind === 'expired');
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [uhd(embedded).index], itags: [401] });
+  assert.equal(new URL(resolved.urls[String(uhd(embedded).index)]).searchParams.get('itag'), '401');
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [99] }), (e) => e.kind === 'expired');
 });
