@@ -28,6 +28,8 @@ YouTube.js inside JavaScriptCore for InnerTube access, libmpv (MPVKit) for playb
 - Core tests: `cd Packages/Core && swift test`
 - JS: `cd js && npm ci && npm run bundle && npm test` (then commit `App/Resources/js/youtubei.bundle.js`)
 - App: only builds on macOS: `xcodegen generate` then the `xcodebuild` line in `.github/workflows/ci.yml`.
+- Release: push a `v*` tag, or run the CI workflow manually with input `release_tag` (e.g. `v1.0.1`);
+  the build job creates the tag + GitHub Release and attaches `App-unsigned.ipa`.
 
 ## Contracts
 - JS → Swift DTO shapes live in `js/src/bridge/normalize.js` and `Packages/Core/Sources/Core/Models`.
