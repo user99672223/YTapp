@@ -90,7 +90,9 @@ final class AppModel: ObservableObject {
         service = nil
         session = nil
         guard let url = bundles.activeURL else {
-            throw BridgeError(kind: .bridge, message: "The YouTube bundle is missing from the app.")
+            let error = BridgeError(kind: .bridge, message: "The YouTube bundle is missing from the app.")
+            logs.append(.error, "Bridge failed to start: \(error.message)")
+            throw error
         }
         let runtime = JSRuntime(bundleURL: url, http: http, cache: fileCache, logs: logs)
         do {
@@ -101,6 +103,8 @@ final class AppModel: ObservableObject {
                 bundles.removeDownloadedBundle()
                 return try await loadRuntime()
             }
+            let wrapped = BridgeError.wrap(error)
+            logs.append(.error, "Bridge failed to start: \(wrapped.message)\(wrapped.detail.map { " | \($0)" } ?? "")")
             throw error
         }
         self.runtime = runtime
@@ -294,7 +298,13 @@ final class AppModel: ObservableObject {
     }
 
     func updateBundle() async throws -> BundleInfo {
-        let info = try await bundles.download(from: settings.bundleURL)
+        let info: BundleInfo
+        do {
+            info = try await bundles.download(from: settings.bundleURL)
+        } catch {
+            logs.append(.error, "Bundle update failed: \(BridgeError.wrap(error).message)")
+            throw error
+        }
         try await loadRuntime()
         await connect(showProgress: true)
         return info
