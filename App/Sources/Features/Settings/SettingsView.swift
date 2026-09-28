@@ -17,6 +17,19 @@ struct SettingsView: View {
         ("hi", "Hindi"), ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese")
     ]
 
+    private var qualityOptions: [ChoiceOption<Int>] {
+        qualities.map { ChoiceOption(value: $0, label: label(forHeight: $0)) }
+    }
+    private var streamClientOptions: [ChoiceOption<String>] {
+        AppSettings.streamClients.map { ChoiceOption(value: $0.id, label: $0.label) }
+    }
+    private var poTokenOptions: [ChoiceOption<String>] {
+        [ChoiceOption(value: "auto", label: "Automatic"), ChoiceOption(value: "off", label: "Off")]
+    }
+    private var captionLanguageOptions: [ChoiceOption<String>] {
+        captionLanguages.map { ChoiceOption(value: $0.0, label: $0.1) }
+    }
+
     var body: some View {
         Form {
             Section("Account") {
@@ -40,9 +53,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Maximum quality", selection: $model.settings.maxHeight) {
-                    ForEach(qualities, id: \.self) { Text(label(forHeight: $0)).tag($0) }
-                }
+                ChoiceRow("Maximum quality", selection: $model.settings.maxHeight, options: qualityOptions)
                 LabeledContent("Codec order", value: "AV1 → VP9 → H.264")
                 LabeledContent("Audio", value: "Opus (highest bitrate), else AAC")
                 Toggle("Hardware decoding for H.264", isOn: $model.settings.hardwareDecodeH264)
@@ -53,15 +64,8 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Stream client", selection: $model.settings.streamClient) {
-                    ForEach(AppSettings.streamClients, id: \.id) { client in
-                        Text(client.label).tag(client.id)
-                    }
-                }
-                Picker("PO tokens (web clients)", selection: $model.settings.poTokenMode) {
-                    Text("Automatic").tag("auto")
-                    Text("Off").tag("off")
-                }
+                ChoiceRow("Stream client", selection: $model.settings.streamClient, options: streamClientOptions)
+                ChoiceRow("PO tokens (web clients)", selection: $model.settings.poTokenMode, options: poTokenOptions)
             } header: {
                 Text("YouTube stream client")
             } footer: {
@@ -71,9 +75,7 @@ struct SettingsView: View {
             Section("Playback") {
                 Toggle("Autoplay next video", isOn: $model.settings.autoplay)
                 Toggle("Captions on by default", isOn: $model.settings.captionsEnabled)
-                Picker("Caption language", selection: $model.settings.captionsLanguage) {
-                    ForEach(captionLanguages, id: \.0) { code, name in Text(name).tag(code) }
-                }
+                ChoiceRow("Caption language", selection: $model.settings.captionsLanguage, options: captionLanguageOptions)
                 Toggle("Show stats while playing", isOn: $model.settings.showStatsOverlay)
             }
 
