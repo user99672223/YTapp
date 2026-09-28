@@ -100,6 +100,14 @@ final class MPVPlayer: @unchecked Sendable {
     /// mpv queue: FILE_LOADED arrived for that file. Until then time-pos and eof-reached can
     /// still come from the file it replaces.
     private var fileIsLoaded = false
+    /// mpv queue: playlist entry id of the latest `loadfile` (nil if unknown), and the one of the
+    /// last START_FILE. The FILE_LOADED/END_FILE of a file that a newer `loadfile` replaced can
+    /// still be waiting in mpv's event queue (e.g. it finished opening while the next load was
+    /// being set up); only the entry ids tell them apart from the new file's.
+    private var expectedEntry: Int64?
+    private var startedEntry: Int64?
+    /// mpv queue: the current file's failure was already shown (its END_FILE error isn't again).
+    private var failureReported = false
     /// mpv queue: reply ids of `sub-add` (run asynchronously), the one still downloading, and
     /// whether captions were switched off since.
     private var subtitleRequest: UInt64 = 0
@@ -226,6 +234,8 @@ final class MPVPlayer: @unchecked Sendable {
     private func performLoad(_ source: Source, generation: Int) {
         loadGeneration = generation
         fileIsLoaded = false
+        failureReported = false
+        startedEntry = nil
         expectAudio = source.audioURL != nil
         lastErrorLog = nil
         lastHttpError = nil
@@ -252,7 +262,17 @@ final class MPVPlayer: @unchecked Sendable {
         if let audio = source.audioURL {
             command(["change-list", "audio-files", "append", audio.absoluteString])
         }
-        command(["loadfile", source.videoURL.absoluteString, "replace"])
+        let status = command(["loadfile", source.videoURL.absoluteString, "replace"])
+        guard status >= 0 else {
+            expectedEntry = nil
+            failureReported = true
+            report(error: "Couldn't open the stream: \(String(cString: mpv_error_string(status))).", generation: generation)
+            command(["stop"])
+            return
+        }
+        // `replace` leaves this file as the only playlist entry.
+        expectedEntry = int64Property("playlist/0/id")
+        if expectedEntry == nil { log(.warn, "mpv playlist/0/id unavailable; can't tell a replaced file's events apart") }
     }
 
     func setPaused(_ paused: Bool) {
@@ -401,13 +421,22 @@ final class MPVPlayer: @unchecked Sendable {
                 if let data = event.pointee.data {
                     handleProperty(data.assumingMemoryBound(to: mpv_event_property.self).pointee)
                 }
+            case MPV_EVENT_START_FILE:
+                if let data = event.pointee.data {
+                    startedEntry = data.assumingMemoryBound(to: mpv_event_start_file.self).pointee.playlist_entry_id
+                }
             case MPV_EVENT_FILE_LOADED:
-                fileIsLoaded = true
-                if let problem = missingTrackError() {
+                if !isCurrentEntry(startedEntry) {
+                    // Opened just before a newer `loadfile` replaced it: not the current file,
+                    // and checking its tracks now would look at the next one's (still loading).
+                    log(.debug, "mpv file-loaded of a replaced file ignored")
+                } else if let problem = missingTrackError() {
+                    failureReported = true
                     report(error: problem, generation: loadGeneration)
                     // Don't play on without sound (or with sound over black) behind the error.
                     command(["stop"])
                 } else {
+                    fileIsLoaded = true
                     // `paused-for-cache` only reports changes; seed the buffering flag with its
                     // current value so a stream that never stalls doesn't look stuck.
                     let buffering = stats.pausedForCache
@@ -456,11 +485,19 @@ final class MPVPlayer: @unchecked Sendable {
 
     /// Every end of a file is logged with its reason and where playback was.
     private func handleEndFile(_ end: mpv_event_end_file) {
+        guard isCurrentEntry(end.playlist_entry_id) else {
+            // The file a newer `loadfile` replaced: its end says nothing about the current one.
+            log(.debug, "mpv end-file of a replaced file: \(String(cString: mpv_error_string(end.error)))")
+            return
+        }
         let at = "at \(Formatters.duration(position)) of \(Formatters.duration(duration))"
         if end.reason == MPV_END_FILE_REASON_ERROR {
             let reason = String(cString: mpv_error_string(end.error))
             let detail = problemDetail().map { " (\($0))" } ?? ""
             log(.error, "mpv end-file: error \(at): \(reason)\(detail)")
+            // Already shown with a better reason (e.g. the missing track at FILE_LOADED).
+            if failureReported { return }
+            failureReported = true
             report(error: "Playback failed: \(reason)\(detail).", generation: loadGeneration)
         } else if end.reason == MPV_END_FILE_REASON_EOF {
             log(.info, "mpv end-file: eof \(at)")
@@ -495,10 +532,28 @@ final class MPVPlayer: @unchecked Sendable {
         return nil
     }
 
+    /// Only mpv's "property unavailable" means no track is selected. Any other failure of the
+    /// query itself is logged and counts as present, so this check can never block playback.
     private func hasTrack(_ type: String) -> Bool {
         guard let handle else { return false }
         var id: Int64 = 0
-        return mpv_get_property(handle, "current-tracks/\(type)/id", MPV_FORMAT_INT64, &id) >= 0
+        let status = mpv_get_property(handle, "current-tracks/\(type)/id", MPV_FORMAT_INT64, &id)
+        if status >= 0 { return true }
+        if Int(status) == Int(MPV_ERROR_PROPERTY_UNAVAILABLE.rawValue) { return false }
+        log(.warn, "mpv current-tracks/\(type)/id failed: \(String(cString: mpv_error_string(status)))")
+        return true
+    }
+
+    private func int64Property(_ name: String) -> Int64? {
+        guard let handle else { return nil }
+        var value: Int64 = 0
+        return mpv_get_property(handle, name, MPV_FORMAT_INT64, &value) >= 0 ? value : nil
+    }
+
+    /// Whether an event with this playlist entry id is about the file of the latest `load`.
+    private func isCurrentEntry(_ entry: Int64?) -> Bool {
+        guard let expectedEntry else { return true }
+        return entry == expectedEntry
     }
 
     /// The file played to its end (END_FILE eof, or eof-reached with keep-open), or its stream

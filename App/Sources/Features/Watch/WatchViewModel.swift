@@ -93,6 +93,10 @@ final class WatchViewModel: ObservableObject {
         // The previous video would keep playing behind the loading screen until the next
         // one's file reaches mpv.
         player.setPaused(true)
+        // Its `fileLoaded` task (frame-rate switch, captions, unpause) may still be waiting, or
+        // its FILE_LOADED still on the way: neither may unpause it or pick captions now.
+        playbackToken += 1
+        waitingForDisplay = false
         self.videoId = videoId
         countdownTask?.cancel()
         countdown = nil
@@ -255,7 +259,7 @@ final class WatchViewModel: ObservableObject {
     /// Settings; after a restart of the same video (quality change, Retry, reconnect) the
     /// viewer's choice comes back, and nothing if they switched captions off.
     private func applyCaptions() {
-        guard let details else { return }
+        guard let details = playingDetails else { return }
         if captionsApplied {
             // Retry fetched the video again, with fresh caption URLs.
             if let current = activeCaption { setCaption(details.captions.first { $0.id == current.id } ?? current) }
@@ -443,6 +447,8 @@ final class WatchViewModel: ObservableObject {
                 try await startPlayback(details, at: position)
             } catch {
                 guard !closed, videoId == details.id else { return }
+                // The current file is still loaded; don't let it play on behind the error.
+                player.setPaused(true)
                 phase = .failed(Self.describe(error))
             }
         }
