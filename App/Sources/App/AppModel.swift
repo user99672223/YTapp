@@ -88,6 +88,7 @@ final class AppModel: ObservableObject {
         runtime?.shutdown()
         runtime = nil
         service = nil
+        session = nil
         guard let url = bundles.activeURL else {
             throw BridgeError(kind: .bridge, message: "The YouTube bundle is missing from the app.")
         }
@@ -233,6 +234,7 @@ final class AppModel: ObservableObject {
         sessionEpoch += 1
         let saved = cookies.replace(with: header)
         account = info
+        session = nil
         authProblem = nil
         // Feeds, video info (like/subscribe state) and the visitor id belong to the previous
         // sign-in, possibly another account; the cached feeds would otherwise show for 15 min.
@@ -269,8 +271,16 @@ final class AppModel: ObservableObject {
 
     func cancelCookieReentry() {
         guard cookies.hasCookies else { return }
-        phase = service == nil ? .launching : .ready
-        if service == nil { Task { await start() } }
+        if service == nil {
+            phase = .launching
+            Task { await self.start() }
+        } else if session == nil {
+            // Opened from the failure screen: there is no session behind the main screens, so
+            // connect again (showing the progress, or the real error with its Retry button).
+            Task { await self.connect(showProgress: true) }
+        } else {
+            phase = .ready
+        }
     }
 
     // MARK: - Maintenance
