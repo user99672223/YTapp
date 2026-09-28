@@ -38,6 +38,17 @@ final class MPVPlayer: @unchecked Sendable {
         var demuxerCacheBytes: Int = 0
     }
 
+    /// Where a file ended. mpv also reports a stream that broke off for good (expired links,
+    /// HTTP 403, a connection that stayed down) as end of file; the position tells them apart.
+    struct EndOfFile {
+        /// The exact position (not throttled like `State.position`).
+        var position: Double
+        /// The file's duration, 0 if unknown.
+        var duration: Double
+        /// The last mpv warning or error since the file was loaded.
+        var problem: String?
+    }
+
     /// Published player state (main thread).
     final class State: ObservableObject {
         @Published var position: Double = 0
@@ -56,7 +67,7 @@ final class MPVPlayer: @unchecked Sendable {
     let state = State()
     // Callbacks run on the main thread, only for the file of the latest `load`.
     var onFileLoaded: (@MainActor () -> Void)?
-    var onEndOfFile: (@MainActor () -> Void)?
+    var onEndOfFile: (@MainActor (EndOfFile) -> Void)?
     var onError: (@MainActor (String) -> Void)?
     var onTick: (@MainActor (Double, Bool) -> Void)?
     /// Paused or resumed (time-pos doesn't change while paused, so `onTick` never says so).
@@ -71,6 +82,8 @@ final class MPVPlayer: @unchecked Sendable {
     private var lastErrorLog: String?
     /// ffmpeg logs HTTP failures ('HTTP error 403 Forbidden') as warnings, below `lastErrorLog`.
     private var lastHttpError: String?
+    /// A dropped connection shows up as warnings only ('error reading packet', 'Will reconnect').
+    private var lastWarnLog: String?
     /// The current file came with a separate audio URL.
     private var expectAudio = false
     private var stats = Stats()
@@ -209,6 +222,7 @@ final class MPVPlayer: @unchecked Sendable {
         expectAudio = source.audioURL != nil
         lastErrorLog = nil
         lastHttpError = nil
+        lastWarnLog = nil
         position = source.startTime ?? 0
         duration = 0
         DispatchQueue.main.async { [state] in
@@ -368,6 +382,7 @@ final class MPVPlayer: @unchecked Sendable {
                     let level = message.level.map { String(cString: $0) } ?? ""
                     let text = message.text.map { String(cString: $0) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     if level == "error" || level == "fatal" { lastErrorLog = "\(prefix): \(text)" }
+                    if level == "warn" { lastWarnLog = "\(prefix): \(text)" }
                     if text.contains("HTTP error") { lastHttpError = "\(prefix): \(text)" }
                     log(Self.logLevel(mpv: level), "[mpv \(level)] \(prefix): \(text)")
                 }
@@ -426,13 +441,15 @@ final class MPVPlayer: @unchecked Sendable {
         return mpv_get_property(handle, "current-tracks/\(type)/id", MPV_FORMAT_INT64, &id) >= 0
     }
 
-    /// The file played to its end (END_FILE eof, or eof-reached with keep-open).
+    /// The file played to its end (END_FILE eof, or eof-reached with keep-open), or its stream
+    /// broke off: see `EndOfFile`.
     private func reachedEnd() {
+        let end = EndOfFile(position: position, duration: duration, problem: problemDetail() ?? lastWarnLog)
         let generation = loadGeneration
         DispatchQueue.main.async { [self] in
             guard generation == generationOnMain, !state.isEOF else { return }
             state.isEOF = true
-            MainActor.assumeIsolated { onEndOfFile?() }
+            MainActor.assumeIsolated { onEndOfFile?(end) }
         }
     }
 

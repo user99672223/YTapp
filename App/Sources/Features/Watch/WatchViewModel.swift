@@ -45,6 +45,8 @@ final class WatchViewModel: ObservableObject {
     private var startedPlayback = false
     private var lastSavedPosition: Double = 0
     private var waitingForDisplay = false
+    /// Automatic reconnects after the stream broke off, per video (see `streamEndedEarly`).
+    private var earlyEnds = 0
     private var closed = false
     private var toastTask: Task<Void, Never>?
 
@@ -55,7 +57,7 @@ final class WatchViewModel: ObservableObject {
         let logs = model.logs
         player.logSink = { level, line in logs.append(level, line) }
         player.onFileLoaded = { [weak self] in self?.fileLoaded() }
-        player.onEndOfFile = { [weak self] in self?.endOfFile() }
+        player.onEndOfFile = { [weak self] end in self?.endOfFile(end) }
         player.onError = { [weak self] message in self?.playerFailed(message) }
         player.onTick = { [weak self] position, playing in self?.tick(position: position, playing: playing) }
         player.onPauseChanged = { [weak self] paused in self?.pauseChanged(paused) }
@@ -91,6 +93,7 @@ final class WatchViewModel: ObservableObject {
         overrideVideo = nil
         overrideAudio = nil
         activeCaption = nil
+        earlyEnds = 0
         inWatchLater = nil
         historyStatus = ""
         phase = .loading("Loading video…")
@@ -140,13 +143,20 @@ final class WatchViewModel: ObservableObject {
 
     /// Re-fetches (stream URLs may have expired) and continues at the current position.
     func retry() {
+        earlyEnds = 0
+        reload("Retrying…")
+    }
+
+    /// Fetches the video again (fresh stream URLs) and continues at `explicit`, else where this
+    /// video's file was.
+    private func reload(_ message: String, at explicit: Double? = nil) {
         let id = videoId
         // Only this video's own position: if its load failed before the file reached mpv, the
         // player still holds the previous video's position, and the resume rule decides.
         let current = playingDetails?.id == id ? player.state.position : 0
-        let position: Double? = current > 1 ? current : nil
+        let position: Double? = explicit ?? (current > 1 ? current : nil)
         Task {
-            phase = .loading("Retrying…")
+            phase = .loading(message)
             do {
                 let fetched = try await fetchDetails(id, client: model.settings.streamClient)
                 guard !closed, videoId == id else { return }
@@ -262,13 +272,36 @@ final class WatchViewModel: ObservableObject {
                                duration: playingDetails.durationSeconds ?? player.state.duration)
     }
 
-    private func endOfFile() {
-        guard let playingDetails else { return }
+    private func endOfFile(_ end: MPVPlayer.EndOfFile) {
+        guard !closed, let playingDetails else { return }
+        // A natural end is at the duration (mpv's time-pos at keep-open EOF is the last frame).
+        let duration = end.duration > 0 ? end.duration : (playingDetails.durationSeconds ?? 0)
+        if duration > 0, end.position < duration - max(5, duration * 0.01) {
+            streamEndedEarly(end, duration: duration)
+            return
+        }
         reporter?.stop()
         model.store.saveResume(videoId: playingDetails.id, position: playingDetails.durationSeconds ?? player.state.duration,
                                duration: playingDetails.durationSeconds ?? 0)
         guard model.settings.autoplay, nextVideo != nil else { return }
         startCountdown()
+    }
+
+    /// The stream broke off before the end (expired links, HTTP 403, a connection that stayed
+    /// down); mpv reports that as an ordinary end of file. Don't mark the video finished or
+    /// autoplay the next one: fetch fresh stream links and continue where it stopped, twice per
+    /// video, then show the error with Retry.
+    private func streamEndedEarly(_ end: MPVPlayer.EndOfFile, duration: Double) {
+        let at = "\(Formatters.duration(end.position)) of \(Formatters.duration(duration))"
+        let reason = end.problem.map { " (\($0))" } ?? ""
+        model.logs.append(.error, "The stream of \(videoId) ended early at \(at)\(reason)")
+        saveResume(end.position)
+        if earlyEnds < 2 {
+            earlyEnds += 1
+            reload("Reconnecting…", at: end.position)
+        } else {
+            phase = .failed(Self.playbackError("The video stream stopped at \(at)\(reason).", stream: selection?.summary))
+        }
     }
 
     private func playerFailed(_ message: String) {
