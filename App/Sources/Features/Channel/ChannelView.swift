@@ -5,6 +5,7 @@ import Core
 final class ChannelModel: ObservableObject {
     @Published var page: ChannelPage?
     @Published var error: BridgeError?
+    @Published private(set) var isLoading = false
     @Published var isSubscribed: Bool?
     @Published var busy = false
     @Published var tab: ChannelTab = .videos
@@ -18,6 +19,7 @@ final class ChannelModel: ObservableObject {
 
     func load(_ model: AppModel, force: Bool = false) async {
         if !force, let loadedAt, RefreshPolicy.isFresh(fetchedAt: loadedAt, category: .channel), page != nil { return }
+        if isLoading { return }
         if !force, page == nil, let cached = model.store.cachedPage("channel:\(channelId)", as: ChannelPage.self),
            RefreshPolicy.isFresh(fetchedAt: cached.fetchedAt, category: .channel) {
             // The key names a feed in the JS session that stored it; after a relaunch it's gone
@@ -28,6 +30,8 @@ final class ChannelModel: ObservableObject {
             page = restored
             isSubscribed = restored.channel.isSubscribed
         }
+        isLoading = true
+        defer { isLoading = false }
         do {
             let fresh = try await model.api { [channelId] in try await $0.channel(channelId) }
             page = fresh
@@ -93,7 +97,9 @@ struct ChannelView: View {
                     header(page)
                 }
             } else if let error = channel.error {
-                ErrorStateView(error: error) { Task { await channel.load(model, force: true) } }
+                ErrorStateView(error: error, isRetrying: channel.isLoading) {
+                    Task { await channel.load(model, force: true) }
+                }
             } else {
                 LoadingView()
             }

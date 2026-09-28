@@ -14,17 +14,21 @@ enum Layout {
 struct ErrorStateView: View {
     let title: String
     let message: String
+    /// The retry is running: the button shows progress (and stays, keeping focus).
+    let isRetrying: Bool
     let retry: (() -> Void)?
 
-    init(error: BridgeError, retry: (() -> Void)?) {
+    init(error: BridgeError, isRetrying: Bool = false, retry: (() -> Void)?) {
         title = error.title
         message = error.userMessage
+        self.isRetrying = isRetrying
         self.retry = retry
     }
 
-    init(title: String, message: String, retry: (() -> Void)?) {
+    init(title: String, message: String, isRetrying: Bool = false, retry: (() -> Void)?) {
         self.title = title
         self.message = message
+        self.isRetrying = isRetrying
         self.retry = retry
     }
 
@@ -40,8 +44,17 @@ struct ErrorStateView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 1100)
             if let retry {
-                Button(action: retry) {
-                    Label("Retry", systemImage: "arrow.clockwise")
+                Button {
+                    if !isRetrying { retry() }
+                } label: {
+                    if isRetrying {
+                        HStack(spacing: 16) {
+                            ProgressView()
+                            Text("Retrying…")
+                        }
+                    } else {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
                 }
             }
         }

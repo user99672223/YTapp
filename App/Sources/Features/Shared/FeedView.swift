@@ -15,6 +15,8 @@ final class FeedModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var moreError: BridgeError?
+    /// A refresh the user asked for failed while a list was on screen (shown in the footer).
+    @Published private(set) var refreshError: BridgeError?
     /// The page came from the cache (or its key expired with the JS session), so its
     /// continuation can't be used; the next page starts again from the first one.
     @Published private(set) var hasStaleContinuation = false
@@ -62,23 +64,29 @@ final class FeedModel: ObservableObject {
         await refresh(model, keepPlace: keepPlace)
     }
 
-    func refresh(_ model: AppModel, keepPlace: Bool = false) async {
+    /// `userInitiated`: the Retry / Refresh buttons. Their failures are always shown; a timer
+    /// refresh that fails while a list is on screen only logs.
+    func refresh(_ model: AppModel, userInitiated: Bool = false, keepPlace: Bool = false) async {
         if isLoading { return }
         isLoading = true
+        if userInitiated { refreshError = nil }
         defer { isLoading = false }
         do {
             let fresh = try await model.api(loader)
-            if keepPlace, let page, !page.isEmpty {
+            if keepPlace, !userInitiated, let page, !page.isEmpty {
                 pendingPage = fresh
             } else {
                 show(fresh)
             }
             error = nil
+            refreshError = nil
             fetchedAt = Date()
             if let key = cacheKey { model.store.storePage(key, fresh) }
         } catch {
             if page == nil || !(page?.isEmpty == false) {
                 self.error = BridgeError.wrap(error)
+            } else if userInitiated {
+                refreshError = BridgeError.wrap(error)
             } else {
                 model.logs.append(.warn, "Background refresh failed: \(BridgeError.wrap(error).message)")
             }
@@ -94,6 +102,7 @@ final class FeedModel: ObservableObject {
     private func show(_ fresh: FeedPage) {
         page = fresh
         pendingPage = nil
+        refreshError = nil
         moreError = nil
         lastMoreFailure = nil
         hasStaleContinuation = false
@@ -162,6 +171,7 @@ final class FeedModel: ObservableObject {
         page = nil
         pendingPage = nil
         error = nil
+        refreshError = nil
         moreError = nil
         hasStaleContinuation = false
         fetchedAt = nil
@@ -193,7 +203,7 @@ struct FeedView<Header: View>: View {
                 if let page = feed.page {
                     content(page)
                 } else if let error = feed.error {
-                    ErrorStateView(error: error) { Task { await feed.refresh(model) } }
+                    errorView(error)
                 } else {
                     LoadingView().frame(height: 500)
                 }
@@ -224,7 +234,12 @@ struct FeedView<Header: View>: View {
             }
         }
         if page.isEmpty {
-            EmptyStateView(systemImage: "tray", text: emptyText)
+            // An empty list whose refresh failed shows the failure, not "nothing here".
+            if let error = feed.error {
+                errorView(error)
+            } else {
+                EmptyStateView(systemImage: "tray", text: emptyText)
+            }
         }
         // Keyed by position, not by the section ids (the bridge numbers sections anew on every
         // fetch), so a new page doesn't tear down every section and the focused card with it.
@@ -233,21 +248,29 @@ struct FeedView<Header: View>: View {
                 Task { await feed.loadMore(model, automatic: true) }
             }
         }
-        footer(page)
+        if !page.isEmpty || feed.error == nil {
+            footer(page)
+        }
+    }
+
+    private func errorView(_ error: BridgeError) -> some View {
+        ErrorStateView(error: error, isRetrying: feed.isLoading) {
+            Task { await feed.refresh(model, userInitiated: true) }
+        }
     }
 
     /// One button whose label follows the state: replacing it with a spinner while loading would
     /// remove the focused view and send focus back to the top.
     private func footer(_ page: FeedPage) -> some View {
         VStack(spacing: 16) {
-            if let error = feed.moreError {
+            if let error = feed.moreError ?? feed.refreshError {
                 Text(error.userMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             Button {
                 if feed.canLoadMore {
                     Task { await feed.loadMore(model) }
                 } else {
-                    Task { await feed.refresh(model) }
+                    Task { await feed.refresh(model, userInitiated: true) }
                 }
             } label: {
                 footerLabel
@@ -275,8 +298,10 @@ struct FeedView<Header: View>: View {
             } else {
                 Text("Load more")
             }
+        } else if feed.isLoading {
+            Label("Refreshing…", systemImage: "arrow.clockwise")
         } else {
-            Label(feed.isLoading ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
+            Label(feed.refreshError != nil ? "Retry" : "Refresh", systemImage: "arrow.clockwise")
         }
     }
 }
