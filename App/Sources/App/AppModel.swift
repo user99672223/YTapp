@@ -43,6 +43,9 @@ final class AppModel: ObservableObject {
     private(set) var service: YouTubeService?
     private var authFailures = 0
     private var recreating: Task<Void, Never>?
+    /// Bumped when the stored cookies are replaced or removed. YouTube work started before that
+    /// belongs to the previous account and is dropped when it finishes.
+    private var sessionEpoch = 0
 
     init() {
         let logs = LogBuffer()
@@ -157,8 +160,15 @@ final class AppModel: ObservableObject {
     /// Runs a YouTube call. Repeated 401/403 answers recreate the session and retry once; if it
     /// still fails the user is told to re-enter cookies.
     func api<T>(_ operation: @escaping (YouTubeService) async throws -> T) async throws -> T {
+        let epoch = sessionEpoch
         do {
-            return try await apiWithRecovery(operation)
+            let value = try await apiWithRecovery(operation)
+            // An answer for an account that was signed out or replaced meanwhile must not reach
+            // the screens or the caches (feed cache, video info) of the next one.
+            guard epoch == sessionEpoch else {
+                throw BridgeError(kind: .noSession, message: "The signed-in account changed while this was loading.")
+            }
+            return value
         } catch {
             let e = BridgeError.wrap(error)
             logs.append(.error, "api failed [\(e.kind.rawValue)\(e.status.map { " \($0)" } ?? "")]: \(e.message)\(e.detail.map { " | \($0.prefix(1500))" } ?? "")")
@@ -205,9 +215,15 @@ final class AppModel: ObservableObject {
         }
         guard let service else { throw BridgeError(kind: .bridge, message: "The YouTube bundle isn't running.") }
         let info = try await service.validateCookie(header)
+        sessionEpoch += 1
         let saved = cookies.replace(with: header)
         account = info
         authProblem = nil
+        // Feeds, video info (like/subscribe state) and the visitor id belong to the previous
+        // sign-in, possibly another account; the cached feeds would otherwise show for 15 min.
+        store.clearFeedCache()
+        videoInfoCache.removeAll()
+        settings.visitorData = ""
         fileCache.remove("innertube_session_data")
         // Answer the phone/computer right away; the session is created in the background.
         Task {
@@ -221,10 +237,12 @@ final class AppModel: ObservableObject {
     }
 
     func signOut() {
+        sessionEpoch += 1
         cookies.clear()
         account = nil
         session = nil
         store.clearFeedCache()
+        videoInfoCache.removeAll()
         fileCache.remove("innertube_session_data")
         phase = .needsSetup
     }
