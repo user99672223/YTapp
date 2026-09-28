@@ -98,7 +98,7 @@ struct PanelView: View {
 
     private var speedList: some View {
         ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
-            PanelChoice(title: speed == 1 ? "Normal" : String(format: "%.2g×", speed), selected: abs(player.speed - speed) < 0.01) {
+            PanelChoice(title: speed == 1 ? "Normal" : String(format: "%g×", speed), selected: abs(player.speed - speed) < 0.01) {
                 vm.setSpeed(speed)
                 close()
             }

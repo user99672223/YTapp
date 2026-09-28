@@ -345,7 +345,7 @@ private struct ControlsOverlay: View {
                     ControlButton(systemImage: "list.bullet.rectangle", title: "Chapters") { onPanel(.chapters) }
                 }
                 ControlButton(systemImage: vm.activeCaption == nil ? "captions.bubble" : "captions.bubble.fill", title: "Captions") { onPanel(.captions) }
-                ControlButton(systemImage: "speedometer", title: String(format: "%.2g×", player.speed)) { onPanel(.speed) }
+                ControlButton(systemImage: "speedometer", title: String(format: "%g×", player.speed)) { onPanel(.speed) }
                 ControlButton(systemImage: "slider.horizontal.3", title: vm.selection.map { "\($0.video.height ?? 0)p" } ?? "Quality") { onPanel(.quality) }
                 ControlButton(systemImage: "info.circle", title: "Info") { onPanel(.info) }
                 ControlButton(systemImage: "text.bubble", title: "Comments") { onPanel(.comments) }
