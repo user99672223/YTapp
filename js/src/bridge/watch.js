@@ -1,11 +1,11 @@
 // Watch page: video info, stream formats (deciphered on demand), captions, chapters, up next,
 // watch-history + watch-time pings.
 import { YT } from 'youtubei.js/web';
-import { state, requireSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
+import { state, requireSession, anonSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
 import { toItem } from './normalize.js';
 import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
-import { fail, classify, BridgeError } from './errors.js';
-import { contentPoToken } from './potoken.js';
+import { fail, classify, BridgeError, BOT_CHECK } from './errors.js';
+import { contentPoToken, clientNeedsPoToken } from './potoken.js';
 import { tvIdentity } from './platform.js';
 
 const HDR_TRANSFER = /2084|B67|HLG|PQ/i;
@@ -40,7 +40,8 @@ export function formatsOf(info) {
       loudnessDb: f.loudness_db,
       isDrc: !!f.is_drc,
       isHdr: HDR_TRANSFER.test(transfer) || /HDR/i.test(f.quality_label || ''),
-      isOtf: !!f.is_type_otf,
+      // Segmented: OTF, or live / post-live DVR segments (they carry a target segment duration).
+      isOtf: !!f.is_type_otf || f.target_duration_sec != null || f.max_dvr_duration_sec != null,
       isSuperResolution: !!f.is_sr,
       audioTrackId: f.audio_track?.id,
       audioTrackName: f.audio_track?.display_name,
@@ -133,11 +134,15 @@ function playabilityOf(info) {
   return { status: p.status || 'UNKNOWN', reason: text(p.reason) || text(p.error_screen?.reason) || undefined };
 }
 
+// Age gates ("Sign in to confirm your age"): shown with YouTube's reason, not as a bot check.
+const AGE_GATE = /confirm your age|age[- ]restricted|inappropriate for some users/i;
+
 export function checkPlayable(info) {
   const { status, reason } = playabilityOf(info);
   if (status === 'OK') return;
   const message = reason || `YouTube says this video can't be played (${status}).`;
-  if (/not a bot|confirm you/i.test(message)) fail('botCheck', message, status);
+  if (AGE_GATE.test(message) || /^AGE_/.test(status)) fail('loginRequired', message, status);
+  if (BOT_CHECK.test(message)) fail('botCheck', message, status);
   if (status === 'LOGIN_REQUIRED') fail('loginRequired', message, status);
   if (status === 'LIVE_STREAM_OFFLINE') fail('upcoming', message, status);
   fail('unavailable', message, status);
@@ -207,15 +212,21 @@ export function detailsOf(info, client) {
 export const FALLBACK_CLIENTS = ['TV', 'TV_TIZEN', 'WEB_EMBEDDED', 'MWEB'];
 
 // Reasons that mean the video itself can't be played, so other clients won't help.
-const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
+const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn['’]t available any ?more|no longer available|copyright|account associated/i;
 // Failures that are about the client, not the video: skip that client for the rest of the session.
 const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
 
-export function clientChain(preferred) {
-  const p = String(preferred || state.options.client || 'AUTO').toUpperCase();
-  const first = p === 'AUTO' ? (state.goodClient || FALLBACK_CLIENTS[0]) : p;
+function preferenceOf(preferred) {
+  return String(preferred || state.options.client || 'AUTO').toUpperCase();
+}
+
+export function clientChain(preferred, skip) {
+  const p = preferenceOf(preferred);
+  const good = FALLBACK_CLIENTS.includes(state.goodClient) ? state.goodClient : null;
+  const first = p === 'AUTO' ? (good || FALLBACK_CLIENTS[0]) : p;
   const chain = [first, ...FALLBACK_CLIENTS.filter((c) => c !== first)];
-  return [...chain.filter((c) => !state.badClients.has(c)), ...chain.filter((c) => state.badClients.has(c))];
+  const usable = chain.filter((c) => !(skip && skip.has(c)));
+  return [...usable.filter((c) => !state.badClients.has(c)), ...usable.filter((c) => state.badClients.has(c))];
 }
 
 // Why this player response can't be streamed directly, or null when it can.
@@ -235,26 +246,55 @@ async function streamProblem(yt, info, client) {
   return null;
 }
 
+// Live streams (and post-live DVR) are only offered as segments, whichever the client. They are
+// returned as they are, so the watch page can say so (their formats are marked isOtf), without
+// trying every client or judging this client by them.
+function isLiveInfo(info) {
+  const basic = info.basic_info || {};
+  return !!(basic.is_live || basic.is_post_live_dvr);
+}
+
+// YouTube.js throws a generic "This video is unavailable" for playability status ERROR (deleted,
+// removed or terminated videos); YouTube's own reason is only on the error's `info`.
+function withPlayabilityReason(e) {
+  const p = e && !(e instanceof BridgeError) ? e.info : null;
+  if (!p || typeof p !== 'object' || p.status !== 'ERROR') return e;
+  const reason = text(p.reason) || text(p.error_screen?.reason);
+  const sub = text(p.error_screen?.subreason);
+  let message = reason;
+  if (sub && sub !== reason) message = reason ? `${reason.replace(/[.\s]+$/, '')}. ${sub}` : sub;
+  return message ? new BridgeError('unavailable', message, e.message) : e;
+}
+
 // Loads the player response through the first client that gives directly playable streams.
 // `load(client, poToken)` performs the request (getInfo or getBasicInfo).
 export async function playerWithFallback(yt, id, preferred, load) {
+  const p = preferenceOf(preferred);
   const failures = [];
-  for (const c of clientChain(preferred)) {
+  for (const c of clientChain(p, state.refusedClients.get(id))) {
     try {
       const poToken = await contentPoToken(c, id);
+      // Without its PO token a web client's streams are refused (403) later, in the player, where
+      // this fallback can't see it. Only a client the user picked is tried that way.
+      if (!poToken && clientNeedsPoToken(c) && c !== p) {
+        fail('poToken', `${c} needs a PO token for its streams, and PO tokens are turned off in Settings.`);
+      }
       // TV_TIZEN is YouTube.js' TV client with another device identity (platform.js).
       const ytClient = c === 'TV_TIZEN' ? 'TV' : c;
       if (ytClient === 'TV') tvIdentity.current = c === 'TV_TIZEN' ? 'tizen' : 'cobalt';
       const info = await load(ytClient, poToken || undefined);
       checkPlayable(info);
+      if (isLiveInfo(info)) return { info, client: c, poToken: poToken || undefined };
       const problem = await streamProblem(yt, info, c);
       if (problem) fail('extraction', problem);
-      state.goodClient = c;
+      // Remembered for the automatic choice only (a manual choice is always tried first), so a
+      // manually picked client doesn't stay first after switching back to Automatic.
+      if (p === 'AUTO') state.goodClient = c;
       state.badClients.delete(c);
       if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(', ')} failed)`);
       return { info, client: c, poToken: poToken || undefined };
     } catch (e) {
-      const cls = classify(e);
+      const cls = classify(withPlayabilityReason(e));
       failures.push({ client: c, ...cls });
       console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ''}] ${cls.message}`);
       if (cls.status === 400 || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
@@ -262,6 +302,7 @@ export async function playerWithFallback(yt, id, preferred, load) {
       if (cls.kind === 'unavailable' && VIDEO_GONE.test(cls.message)) break;
     }
   }
+  if (!failures.length) fail('extraction', 'YouTube refused the streams of every client for this video (HTTP 403).');
   const summary = failures.map((f) => `${f.client}: [${f.kind}${f.status ? ` ${f.status}` : ''}] ${f.message}`).join('\n');
   const telling = failures.find((f) => !['extraction', 'unknown', 'parse', 'poToken'].includes(f.kind));
   if (telling) throw new BridgeError(telling.kind, telling.message, summary);
@@ -277,32 +318,143 @@ export async function videoInfo({ id, client }) {
   return detailsOf(info, c);
 }
 
-// Deciphers the chosen formats (by index into streaming_data.adaptive_formats).
-export async function resolveFormats({ id, indices }) {
-  const yt = await requireSession();
-  const entry = getInfo(id);
-  const formats = entry.info.streaming_data?.adaptive_formats || [];
-  const urls = {};
-  for (const index of indices || []) {
-    const format = formats[index];
-    if (!format) fail('extraction', `Format ${index} is not available any more.`);
-    let url = await format.decipher(yt.session.player);
-    // Web clients need the (video-bound) PO token on googlevideo requests too.
-    if (entry.poToken && url && /^https?:/.test(url)) {
-      const u = new URL(url);
-      u.searchParams.set('pot', entry.poToken);
-      url = u.toString();
-    }
-    if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
-    if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
-    urls[String(index)] = url;
+// Stream URLs stop working at streaming_data.expires (about 6 h after the player request). The
+// player keeps using them after they are resolved, so they are refreshed well before that.
+const EXPIRY_MARGIN_MS = 30 * 60 * 1000;
+
+// googlevideo sometimes refuses one client's stream URLs for a video (HTTP 403) although the
+// player request for it worked (seen on the Apple TV in September 2026 with TV 5.x, signed in).
+// mpv would only find out after opening the stream, so the chosen video stream is tested with a
+// one-byte request first, and a refused client is replaced by the next one for this video.
+async function streamRefused(url, meta) {
+  try {
+    const response = await fetch(url, {
+      headers: { Range: 'bytes=0-0', 'User-Agent': meta.userAgent, Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
+    });
+    return response.status === 403;
+  } catch {
+    return false; // network trouble is the player's to report
   }
-  const meta = clientMeta(entry.client);
-  return {
-    urls,
-    userAgent: meta.userAgent,
-    headers: { Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
-  };
+}
+
+function sameFormat(a, b) {
+  return a.itag === b.itag && (a.audio_track?.id || '') === (b.audio_track?.id || '');
+}
+
+// Clients that give direct streams without the account (September 2026): VISIONOS (no n/sig
+// deciphering at all), TV_SIMPLY, IOS, ANDROID_VR. They answer signed-in requests with 400.
+export const SIGNED_OUT_STREAM_CLIENTS = ['VISIONOS', 'TV_SIMPLY', 'IOS', 'ANDROID_VR'];
+
+// The same streams (itag and audio track) from a client asked without the account, or null.
+// Only the stream URLs are used: the signed-in answer stays in charge of history, likes and
+// up next. Videos that need the account (age-restricted, members-only, private) fail here.
+async function signedOutStreams(id, chosen, refused) {
+  let anon;
+  try {
+    anon = await anonSession();
+  } catch (e) {
+    console.warn(`video ${id}: couldn't start a signed-out session: ${e && e.message ? e.message : e}`);
+    return null;
+  }
+  for (const c of SIGNED_OUT_STREAM_CLIENTS) {
+    if (refused.has(c)) continue;
+    try {
+      const info = await anon.getBasicInfo(id, { client: c });
+      checkPlayable(info);
+      const problem = await streamProblem(anon, info, c);
+      if (problem) fail('extraction', problem);
+      const available = info.streaming_data?.adaptive_formats || [];
+      const formats = chosen.map((item) => available.find((f) => sameFormat(f, item.format)));
+      if (formats.some((f) => !f)) fail('extraction', `${c} doesn't offer the chosen streams`);
+      return { info, client: c, yt: anon, formats };
+    } catch (e) {
+      const cls = classify(e);
+      console.warn(`video ${id}: signed-out stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ''}] ${cls.message}`);
+      refused.add(c);
+    }
+  }
+  return null;
+}
+
+// Deciphers the chosen formats (by index into streaming_data.adaptive_formats). `itags` (same
+// order as `indices`) are the formats Swift chose: when this video was loaded again since (with
+// another client, or as a Short), an index can point at another format, and Swift has to fetch
+// the details again ('expired') instead of playing the wrong stream.
+export async function resolveFormats({ id, indices, itags }) {
+  const yt = await requireSession();
+  let entry = getInfo(id);
+  const expires = entry.info.streaming_data?.expires;
+  if (expires && typeof expires.getTime === 'function' && expires.getTime() - Date.now() < EXPIRY_MARGIN_MS) {
+    state.infos.delete(id);
+    fail('expired', 'The stream links for this video expired. Open the video again.', id);
+  }
+  const chosen = [];
+  const formats = entry.info.streaming_data?.adaptive_formats || [];
+  for (const [i, index] of (indices || []).entries()) {
+    const format = formats[index];
+    const itag = Array.isArray(itags) && itags[i] != null ? Number(itags[i]) : undefined;
+    if (!format || (itag !== undefined && format.itag !== itag)) {
+      fail('expired', 'The streams of this video changed since it was opened. Open the video again.', id);
+    }
+    chosen.push({ index, format });
+  }
+  // Where the stream URLs come from: the entry's own answer, or (after a refusal) a signed-out one.
+  let source = { client: entry.client, yt, poToken: entry.poToken };
+  const refused = state.refusedClients.get(id) || new Set();
+  state.refusedClients.delete(id);
+  state.refusedClients.set(id, refused);
+  while (state.refusedClients.size > 50) state.refusedClients.delete(state.refusedClients.keys().next().value);
+  for (let attempt = 0; ; attempt++) {
+    const urls = {};
+    for (const { index, format } of chosen) {
+      let url = await format.decipher(source.yt.session.player);
+      // Web clients need the (video-bound) PO token on googlevideo requests too.
+      if (source.poToken && url && /^https?:/.test(url)) {
+        const u = new URL(url);
+        u.searchParams.set('pot', source.poToken);
+        url = u.toString();
+      }
+      if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
+      if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${source.client}).`);
+      urls[String(index)] = url;
+    }
+    const meta = clientMeta(source.client);
+    const first = chosen.length ? urls[String(chosen[0].index)] : undefined;
+    if (!first || !(await streamRefused(first, meta))) {
+      console.info(`video ${id}: streams ${chosen.map((c) => c.format.itag).join(' + ')} from ${source.client}${source.client !== entry.client ? ` (signed out; history through ${entry.client})` : ''}`);
+      return {
+        urls,
+        userAgent: meta.userAgent,
+        headers: { Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
+      };
+    }
+    console.warn(`video ${id}: googlevideo refused the ${source.client} stream (itag ${chosen[0].format.itag}, HTTP 403) | ${first}`);
+    refused.add(source.client);
+    if (attempt >= FALLBACK_CLIENTS.length + SIGNED_OUT_STREAM_CLIENTS.length) {
+      fail('extraction', 'YouTube refused the video stream of every client it was tried with (HTTP 403).');
+    }
+    // First the same streams without the account (the signed-in answer keeps history and likes
+    // working); if that fails, the next signed-in client.
+    const signedOut = await signedOutStreams(id, chosen, refused);
+    if (signedOut) {
+      signedOut.formats.forEach((f, i) => { chosen[i].format = f; });
+      source = { client: signedOut.client, yt: signedOut.yt, poToken: undefined };
+      continue;
+    }
+    const next = await playerWithFallback(yt, id, undefined, (name, token) => yt.getBasicInfo(id, { client: name, po_token: token }));
+    const nextFormats = next.info.streaming_data?.adaptive_formats || [];
+    for (const item of chosen) {
+      const match = nextFormats.find((f) => sameFormat(f, item.format));
+      if (!match) {
+        putInfo(id, { info: next.info, client: next.client, poToken: next.poToken, reel: entry.reel });
+        fail('expired', `The ${next.client} client offers other streams for this video. Open the video again.`, id);
+      }
+      item.format = match;
+    }
+    entry = { ...entry, info: next.info, client: next.client, poToken: next.poToken };
+    putInfo(id, entry);
+    source = { client: entry.client, yt, poToken: entry.poToken };
+  }
 }
 
 // ---------------------------------------------------------------- history sync

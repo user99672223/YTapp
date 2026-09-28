@@ -8,7 +8,8 @@ export const bundlePath = new URL('../../App/Resources/js/youtubei.bundle.js', i
 const bundleCode = readFileSync(bundlePath, 'utf8');
 const bundleScript = new vm.Script(bundleCode, { filename: 'youtubei.bundle.js' });
 
-export function loadBundle({ natives = true, router = null } = {}) {
+// `overrides` replaces single native functions (e.g. a clock that counts from device boot).
+export function loadBundle({ natives = true, router = null, overrides = {} } = {}) {
   const context = vm.createContext({});
   const U8 = vm.runInContext('Uint8Array', context);
   const toCtxBytes = (buf) => {
@@ -91,6 +92,7 @@ export function loadBundle({ natives = true, router = null } = {}) {
         else pending.resolve(resultJSON == null ? null : JSON.parse(resultJSON));
       }
     };
+    Object.assign(context.__native, overrides);
   }
 
   bundleScript.runInContext(context);

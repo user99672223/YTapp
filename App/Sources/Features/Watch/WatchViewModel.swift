@@ -423,6 +423,14 @@ final class WatchViewModel: ObservableObject {
         if let quality = error as? QualityError {
             return BridgeError(kind: .unavailable, message: quality.errorDescription ?? "No playable stream.")
         }
+        if let bridge = error as? BridgeError, bridge.kind == .expired {
+            // resolveFormats: the stream links are about to expire, or the video was loaded again
+            // since (another client, or as a Short). BridgeError's own text is about lists, and
+            // Retry here loads the video's details again.
+            return BridgeError(kind: .unknown,
+                               message: "The stream links for this video are out of date. Press Retry to load them again.",
+                               detail: bridge.message)
+        }
         return BridgeError.wrap(error)
     }
 }
