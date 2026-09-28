@@ -65,7 +65,16 @@ struct AppSettings: Equatable {
     var showStatsOverlay: Bool = false
     var hardwareDecodeH264: Bool = true
 
-    var quality: QualityPreferences { QualityPreferences(maxHeight: maxHeight) }
+    /// Apple TV 4K (A15) measurements, September 2026: AV1/VP9 are decoded in software (no
+    /// VideoToolbox support for either); 2160p30 AV1 plays with ~270% CPU and no drops, 2160p60
+    /// drops 10-40% of its frames. So software formats go up to 2160p30 (1440p60 for 60 fps).
+    static let softwareDecodeLimit = 3840.0 * 2160.0 * 30.0
+
+    var quality: QualityPreferences {
+        QualityPreferences(maxHeight: maxHeight,
+                           decodeBudget: DecodeBudget(softwarePixelsPerSecond: Self.softwareDecodeLimit,
+                                                      hardware: hardwareDecodeH264 ? [.avc] : []))
+    }
 
     /// Clients that accept the account cookies and return direct stream URLs (September 2026).
     /// TV_SIMPLY, ANDROID_VR, IOS, VISIONOS and TV_EMBEDDED no longer work signed in; WEB is SABR-only.

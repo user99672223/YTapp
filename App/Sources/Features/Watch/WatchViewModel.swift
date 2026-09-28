@@ -185,7 +185,13 @@ final class WatchViewModel: ObservableObject {
     }
 
     private func startPlayback(_ details: VideoDetails, at position: Double?) async throws {
-        var chosen = try QualitySelector.select(details.formats, preferences: model.settings.quality)
+        let preferences = model.settings.quality
+        var chosen = try QualitySelector.select(details.formats, preferences: preferences)
+        var unlimited = preferences
+        unlimited.decodeBudget = nil
+        if let best = QualitySelector.selectVideo(details.formats, preferences: unlimited), best.itag != chosen.video.itag {
+            model.logs.append(.info, "quality: \(best.displayName) is more than this Apple TV decodes smoothly; playing \(chosen.video.displayName)")
+        }
         if let overrideVideo { chosen.video = overrideVideo }
         if let overrideAudio { chosen.audio = overrideAudio }
         selection = chosen

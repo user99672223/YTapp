@@ -87,6 +87,26 @@ final class QualitySelectorTests: XCTestCase {
         XCTAssertEqual(video(0, itag: 137, codecs: "avc1.640028", height: 1080).shortSide, 1080)
     }
 
+    func testDecodeBudgetSkipsFormatsTooHeavyForSoftwareDecoding() {
+        let prefs = QualityPreferences(decodeBudget: DecodeBudget(softwarePixelsPerSecond: 3840 * 2160 * 30, hardware: [.avc]))
+        let sixty = [
+            video(0, itag: 401, codecs: "av01.0.13M.08", height: 2160, fps: 60),
+            video(1, itag: 315, codecs: "vp9", height: 2160, fps: 60),
+            video(2, itag: 400, codecs: "av01.0.12M.08", height: 1440, fps: 60),
+            video(3, itag: 299, codecs: "avc1.64002a", height: 1080, fps: 60)
+        ]
+        XCTAssertEqual(QualitySelector.selectVideo(sixty, preferences: prefs)?.itag, 400, "2160p60 is over the budget; 1440p60 AV1 is the best within it")
+        XCTAssertEqual(QualitySelector.selectVideo(sixty)?.itag, 401, "without a budget the rule is unchanged")
+        let thirty = [
+            video(0, itag: 401, codecs: "av01.0.12M.08", height: 2160, fps: 30),
+            video(1, itag: 400, codecs: "av01.0.12M.08", height: 1440, fps: 30)
+        ]
+        XCTAssertEqual(QualitySelector.selectVideo(thirty, preferences: prefs)?.itag, 401, "2160p30 fits the budget")
+        let onlyHeavy = [video(0, itag: 401, codecs: "av01.0.13M.08", height: 2160, fps: 60)]
+        XCTAssertEqual(QualitySelector.selectVideo(onlyHeavy, preferences: prefs)?.itag, 401, "with nothing lighter, the rule's own pick is kept")
+        XCTAssertTrue(DecodeBudget(softwarePixelsPerSecond: 1, hardware: [.avc]).allows(sixty[3]), "hardware codecs are always allowed")
+    }
+
     func testSuperResolutionAvoidedWhenNativeExists() {
         let formats = [
             video(0, itag: 1401, codecs: "av01.0.12M.08", height: 2160, sr: true),

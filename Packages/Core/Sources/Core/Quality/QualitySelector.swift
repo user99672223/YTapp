@@ -1,16 +1,38 @@
 import Foundation
 
+/// What the device decodes smoothly: formats of a `hardware` codec always, all others (decoded
+/// in software) only up to `softwarePixelsPerSecond` (width × height × frame rate).
+public struct DecodeBudget: Codable, Hashable, Sendable {
+    public var softwarePixelsPerSecond: Double
+    public var hardware: [CodecFamily]
+
+    public init(softwarePixelsPerSecond: Double, hardware: [CodecFamily] = [.avc]) {
+        self.softwarePixelsPerSecond = softwarePixelsPerSecond
+        self.hardware = hardware
+    }
+
+    public func allows(_ format: StreamFormat) -> Bool {
+        if hardware.contains(format.codecFamily) { return true }
+        let pixels = Double(format.width ?? 0) * Double(format.height ?? 0)
+        return pixels * max(format.fps ?? 30, 1) <= softwarePixelsPerSecond
+    }
+}
+
 /// The user's quality rule. Default: AV1 > VP9 > H.264, highest resolution up to 2160p,
-/// Opus audio (highest bitrate, itag 251) else AAC. No adaptive switching.
+/// Opus audio (highest bitrate, itag 251) else AAC. No adaptive switching. With a
+/// `decodeBudget`, formats the device can't decode in time are skipped (when anything else is left).
 public struct QualityPreferences: Codable, Hashable, Sendable {
     public var maxHeight: Int
     public var codecOrder: [CodecFamily]
     public var allowSuperResolution: Bool
+    public var decodeBudget: DecodeBudget?
 
-    public init(maxHeight: Int = 2160, codecOrder: [CodecFamily] = [.av1, .vp9, .avc], allowSuperResolution: Bool = false) {
+    public init(maxHeight: Int = 2160, codecOrder: [CodecFamily] = [.av1, .vp9, .avc], allowSuperResolution: Bool = false,
+                decodeBudget: DecodeBudget? = nil) {
         self.maxHeight = maxHeight
         self.codecOrder = codecOrder
         self.allowSuperResolution = allowSuperResolution
+        self.decodeBudget = decodeBudget
     }
 
     public static let `default` = QualityPreferences()
@@ -79,6 +101,10 @@ public enum QualitySelector {
         if !preferences.allowSuperResolution {
             let native = candidates.filter { !$0.isSuperResolution }
             if !native.isEmpty { candidates = native }
+        }
+        if let budget = preferences.decodeBudget {
+            let smooth = candidates.filter { budget.allows($0) }
+            if !smooth.isEmpty { candidates = smooth }
         }
         func rank(_ family: CodecFamily) -> Int { preferences.codecOrder.firstIndex(of: family) ?? Int.max }
         return candidates.sorted { a, b in
