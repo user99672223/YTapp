@@ -1,7 +1,7 @@
 // Watch page: video info, stream formats (deciphered on demand), captions, chapters, up next,
 // watch-history + watch-time pings.
 import { YT } from 'youtubei.js/web';
-import { state, requireSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
+import { state, requireSession, anonSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
 import { toItem } from './normalize.js';
 import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
 import { fail, classify, BridgeError, BOT_CHECK } from './errors.js';
@@ -341,6 +341,41 @@ function sameFormat(a, b) {
   return a.itag === b.itag && (a.audio_track?.id || '') === (b.audio_track?.id || '');
 }
 
+// Clients that give direct streams without the account (September 2026): VISIONOS (no n/sig
+// deciphering at all), TV_SIMPLY, IOS, ANDROID_VR. They answer signed-in requests with 400.
+export const SIGNED_OUT_STREAM_CLIENTS = ['VISIONOS', 'TV_SIMPLY', 'IOS', 'ANDROID_VR'];
+
+// The same streams (itag and audio track) from a client asked without the account, or null.
+// Only the stream URLs are used: the signed-in answer stays in charge of history, likes and
+// up next. Videos that need the account (age-restricted, members-only, private) fail here.
+async function signedOutStreams(id, chosen, refused) {
+  let anon;
+  try {
+    anon = await anonSession();
+  } catch (e) {
+    console.warn(`video ${id}: couldn't start a signed-out session: ${e && e.message ? e.message : e}`);
+    return null;
+  }
+  for (const c of SIGNED_OUT_STREAM_CLIENTS) {
+    if (refused.has(c)) continue;
+    try {
+      const info = await anon.getBasicInfo(id, { client: c });
+      checkPlayable(info);
+      const problem = await streamProblem(anon, info, c);
+      if (problem) fail('extraction', problem);
+      const available = info.streaming_data?.adaptive_formats || [];
+      const formats = chosen.map((item) => available.find((f) => sameFormat(f, item.format)));
+      if (formats.some((f) => !f)) fail('extraction', `${c} doesn't offer the chosen streams`);
+      return { info, client: c, yt: anon, formats };
+    } catch (e) {
+      const cls = classify(e);
+      console.warn(`video ${id}: signed-out stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ''}] ${cls.message}`);
+      refused.add(c);
+    }
+  }
+  return null;
+}
+
 // Deciphers the chosen formats (by index into streaming_data.adaptive_formats). `itags` (same
 // order as `indices`) are the formats Swift chose: when this video was loaded again since (with
 // another client, or as a Short), an index can point at another format, and Swift has to fetch
@@ -363,38 +398,49 @@ export async function resolveFormats({ id, indices, itags }) {
     }
     chosen.push({ index, format });
   }
+  // Where the stream URLs come from: the entry's own answer, or (after a refusal) a signed-out one.
+  let source = { client: entry.client, yt, poToken: entry.poToken };
+  const refused = state.refusedClients.get(id) || new Set();
+  state.refusedClients.delete(id);
+  state.refusedClients.set(id, refused);
+  while (state.refusedClients.size > 50) state.refusedClients.delete(state.refusedClients.keys().next().value);
   for (let attempt = 0; ; attempt++) {
     const urls = {};
     for (const { index, format } of chosen) {
-      let url = await format.decipher(yt.session.player);
+      let url = await format.decipher(source.yt.session.player);
       // Web clients need the (video-bound) PO token on googlevideo requests too.
-      if (entry.poToken && url && /^https?:/.test(url)) {
+      if (source.poToken && url && /^https?:/.test(url)) {
         const u = new URL(url);
-        u.searchParams.set('pot', entry.poToken);
+        u.searchParams.set('pot', source.poToken);
         url = u.toString();
       }
       if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
-      if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
+      if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${source.client}).`);
       urls[String(index)] = url;
     }
-    const meta = clientMeta(entry.client);
+    const meta = clientMeta(source.client);
     const first = chosen.length ? urls[String(chosen[0].index)] : undefined;
-    const refusedNow = !!first && await streamRefused(first, meta);
-    if (refusedNow && attempt >= FALLBACK_CLIENTS.length - 1) {
-      fail('extraction', `YouTube refused the video stream of every client it was tried with (HTTP 403).`);
-    }
-    if (!refusedNow) {
-      console.info(`video ${id}: streams ${chosen.map((c) => c.format.itag).join(' + ')} from ${entry.client}`);
+    if (!first || !(await streamRefused(first, meta))) {
+      console.info(`video ${id}: streams ${chosen.map((c) => c.format.itag).join(' + ')} from ${source.client}${source.client !== entry.client ? ` (signed out; history through ${entry.client})` : ''}`);
       return {
         urls,
         userAgent: meta.userAgent,
         headers: { Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
       };
     }
-    console.warn(`video ${id}: googlevideo refused the ${entry.client} stream (itag ${chosen[0].format.itag}, HTTP 403); trying the next client | ${first}`);
-    const refused = state.refusedClients.get(id) || new Set();
-    refused.add(entry.client);
-    state.refusedClients.set(id, refused);
+    console.warn(`video ${id}: googlevideo refused the ${source.client} stream (itag ${chosen[0].format.itag}, HTTP 403) | ${first}`);
+    refused.add(source.client);
+    if (attempt >= FALLBACK_CLIENTS.length + SIGNED_OUT_STREAM_CLIENTS.length) {
+      fail('extraction', 'YouTube refused the video stream of every client it was tried with (HTTP 403).');
+    }
+    // First the same streams without the account (the signed-in answer keeps history and likes
+    // working); if that fails, the next signed-in client.
+    const signedOut = await signedOutStreams(id, chosen, refused);
+    if (signedOut) {
+      signedOut.formats.forEach((f, i) => { chosen[i].format = f; });
+      source = { client: signedOut.client, yt: signedOut.yt, poToken: undefined };
+      continue;
+    }
     const next = await playerWithFallback(yt, id, undefined, (name, token) => yt.getBasicInfo(id, { client: name, po_token: token }));
     const nextFormats = next.info.streaming_data?.adaptive_formats || [];
     for (const item of chosen) {
@@ -407,6 +453,7 @@ export async function resolveFormats({ id, indices, itags }) {
     }
     entry = { ...entry, info: next.info, client: next.client, poToken: next.poToken };
     putInfo(id, entry);
+    source = { client: entry.client, yt, poToken: entry.poToken };
   }
 }
 

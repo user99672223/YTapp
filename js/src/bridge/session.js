@@ -45,6 +45,7 @@ export async function init(options = {}) {
     state.goodClient = null;
     state.badClients.clear();
     state.refusedClients.clear();
+    state.anon = null;
     resetPoToken();
     return yt;
   })();

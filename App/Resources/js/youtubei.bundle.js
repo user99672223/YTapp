@@ -42597,6 +42597,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     badClients: /* @__PURE__ */ new Map(),
     // Per video: clients whose stream URLs googlevideo refused (403) although the player request worked.
     refusedClients: /* @__PURE__ */ new Map(),
+    // Session without the account cookies, for stream URLs only (see watch.js signedOutStreams).
+    anon: null,
+    anonCreating: null,
     feeds: /* @__PURE__ */ new Map(),
     infos: /* @__PURE__ */ new Map(),
     subscriptions: /* @__PURE__ */ new Map(),
@@ -42678,13 +42681,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return sharedCache;
   }
   __name(cache, "cache");
-  async function createInnertube(opts, retrievePlayer = true) {
+  async function createInnertube(opts, retrievePlayer = true, sessionCache = true) {
     loadPlatform();
     return Innertube.create({
       cookie: opts.cookie || void 0,
       retrieve_player: retrievePlayer,
       cache: cache(),
-      enable_session_cache: true,
+      enable_session_cache: sessionCache,
       generate_session_locally: false,
       visitor_data: opts.visitorData || void 0,
       user_agent: opts.userAgent || DEFAULT_USER_AGENT,
@@ -42696,6 +42699,19 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     });
   }
   __name(createInnertube, "createInnertube");
+  async function anonSession() {
+    if (state.anon) return state.anon;
+    if (!state.anonCreating) {
+      state.anonCreating = createInnertube({ userAgent: state.options.userAgent, lang: state.options.lang, location: state.options.location }, true, false).then((yt) => {
+        state.anon = yt;
+        return yt;
+      }).finally(() => {
+        state.anonCreating = null;
+      });
+    }
+    return state.anonCreating;
+  }
+  __name(anonSession, "anonSession");
   async function requireSession() {
     if (state.creating) await state.creating;
     if (!state.yt) fail("noSession", "Not connected to YouTube yet.");
@@ -43704,6 +43720,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       state.goodClient = null;
       state.badClients.clear();
       state.refusedClients.clear();
+      state.anon = null;
       resetPoToken();
       return yt2;
     })();
@@ -44831,6 +44848,35 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return a.itag === b.itag && (a.audio_track?.id || "") === (b.audio_track?.id || "");
   }
   __name(sameFormat, "sameFormat");
+  var SIGNED_OUT_STREAM_CLIENTS = ["VISIONOS", "TV_SIMPLY", "IOS", "ANDROID_VR"];
+  async function signedOutStreams(id, chosen, refused) {
+    let anon;
+    try {
+      anon = await anonSession();
+    } catch (e) {
+      console.warn(`video ${id}: couldn't start a signed-out session: ${e && e.message ? e.message : e}`);
+      return null;
+    }
+    for (const c of SIGNED_OUT_STREAM_CLIENTS) {
+      if (refused.has(c)) continue;
+      try {
+        const info2 = await anon.getBasicInfo(id, { client: c });
+        checkPlayable(info2);
+        const problem = await streamProblem(anon, info2, c);
+        if (problem) fail("extraction", problem);
+        const available = info2.streaming_data?.adaptive_formats || [];
+        const formats = chosen.map((item) => available.find((f) => sameFormat(f, item.format)));
+        if (formats.some((f) => !f)) fail("extraction", `${c} doesn't offer the chosen streams`);
+        return { info: info2, client: c, yt: anon, formats };
+      } catch (e) {
+        const cls = classify(e);
+        console.warn(`video ${id}: signed-out stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ""}] ${cls.message}`);
+        refused.add(c);
+      }
+    }
+    return null;
+  }
+  __name(signedOutStreams, "signedOutStreams");
   async function resolveFormats({ id, indices, itags }) {
     const yt = await requireSession();
     let entry = getInfo(id);
@@ -44849,37 +44895,47 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       }
       chosen.push({ index, format });
     }
+    let source = { client: entry.client, yt, poToken: entry.poToken };
+    const refused = state.refusedClients.get(id) || /* @__PURE__ */ new Set();
+    state.refusedClients.delete(id);
+    state.refusedClients.set(id, refused);
+    while (state.refusedClients.size > 50) state.refusedClients.delete(state.refusedClients.keys().next().value);
     for (let attempt = 0; ; attempt++) {
       const urls = {};
       for (const { index, format } of chosen) {
-        let url = await format.decipher(yt.session.player);
-        if (entry.poToken && url && /^https?:/.test(url)) {
+        let url = await format.decipher(source.yt.session.player);
+        if (source.poToken && url && /^https?:/.test(url)) {
           const u = new URL(url);
-          u.searchParams.set("pot", entry.poToken);
+          u.searchParams.set("pot", source.poToken);
           url = u.toString();
         }
         if (!url || typeof url !== "string" || !/^https?:/.test(url)) fail("extraction", `Could not get a stream URL for format ${format.itag}.`);
-        if (/[?&]sabr=1/.test(url)) fail("extraction", `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
+        if (/[?&]sabr=1/.test(url)) fail("extraction", `Format ${format.itag} is only available through SABR streaming (client ${source.client}).`);
         urls[String(index)] = url;
       }
-      const meta = clientMeta(entry.client);
+      const meta = clientMeta(source.client);
       const first = chosen.length ? urls[String(chosen[0].index)] : void 0;
-      const refusedNow = !!first && await streamRefused(first, meta);
-      if (refusedNow && attempt >= FALLBACK_CLIENTS.length - 1) {
-        fail("extraction", `YouTube refused the video stream of every client it was tried with (HTTP 403).`);
-      }
-      if (!refusedNow) {
-        console.info(`video ${id}: streams ${chosen.map((c) => c.format.itag).join(" + ")} from ${entry.client}`);
+      if (!first || !await streamRefused(first, meta)) {
+        console.info(`video ${id}: streams ${chosen.map((c) => c.format.itag).join(" + ")} from ${source.client}${source.client !== entry.client ? ` (signed out; history through ${entry.client})` : ""}`);
         return {
           urls,
           userAgent: meta.userAgent,
           headers: { Origin: "https://www.youtube.com", Referer: "https://www.youtube.com/" }
         };
       }
-      console.warn(`video ${id}: googlevideo refused the ${entry.client} stream (itag ${chosen[0].format.itag}, HTTP 403); trying the next client | ${first}`);
-      const refused = state.refusedClients.get(id) || /* @__PURE__ */ new Set();
-      refused.add(entry.client);
-      state.refusedClients.set(id, refused);
+      console.warn(`video ${id}: googlevideo refused the ${source.client} stream (itag ${chosen[0].format.itag}, HTTP 403) | ${first}`);
+      refused.add(source.client);
+      if (attempt >= FALLBACK_CLIENTS.length + SIGNED_OUT_STREAM_CLIENTS.length) {
+        fail("extraction", "YouTube refused the video stream of every client it was tried with (HTTP 403).");
+      }
+      const signedOut = await signedOutStreams(id, chosen, refused);
+      if (signedOut) {
+        signedOut.formats.forEach((f, i2) => {
+          chosen[i2].format = f;
+        });
+        source = { client: signedOut.client, yt: signedOut.yt, poToken: void 0 };
+        continue;
+      }
       const next = await playerWithFallback(yt, id, void 0, (name, token) => yt.getBasicInfo(id, { client: name, po_token: token }));
       const nextFormats = next.info.streaming_data?.adaptive_formats || [];
       for (const item of chosen) {
@@ -44892,6 +44948,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       }
       entry = { ...entry, info: next.info, client: next.client, poToken: next.poToken };
       putInfo(id, entry);
+      source = { client: entry.client, yt, poToken: entry.poToken };
     }
   }
   __name(resolveFormats, "resolveFormats");

@@ -264,7 +264,7 @@ test('"The page needs to be reloaded" switches the TV client to the Samsung iden
   assert.equal(watched.ok, true);
 });
 
-test('a stream googlevideo refuses (403) moves this video to the next client', async () => {
+test('a stream googlevideo refuses (403) is taken from a signed-out client; history stays signed in', async () => {
   const yt = createFakeYouTube({ refuseStreams: ['TVHTML5'] });
   const bundle = loadBundle({ router: yt.router });
   await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
@@ -274,18 +274,35 @@ test('a stream googlevideo refuses (403) moves this video to the next client', a
   const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
   const video = new URL(resolved.urls[String(idx(401))]);
   const audio = new URL(resolved.urls[String(idx(251))]);
-  // TV and TV as a Samsung set are both TVHTML5 and refused; Web embedded is used for this video.
-  assert.equal(video.searchParams.get('fakeclient'), 'WEB_EMBEDDED_PLAYER');
-  assert.equal(audio.searchParams.get('fakeclient'), 'WEB_EMBEDDED_PLAYER');
+  assert.equal(video.searchParams.get('fakeclient'), 'VISIONOS');
+  assert.equal(audio.searchParams.get('fakeclient'), 'VISIONOS');
   assert.equal(video.searchParams.get('itag'), '401');
+  assert.match(resolved.userAgent, /Safari/);
   assert.ok(bundle.logs.some((l) => /googlevideo refused the TV stream \(itag 401, HTTP 403\)/.test(l.message)));
   const probes = yt.hits.filter((h) => h.path === '/videoplayback');
-  assert.equal(probes.length, 3, 'one one-byte probe per client tried');
+  assert.equal(probes.length, 2, 'one one-byte probe per stream source');
   assert.equal(probes[0].headers.range, 'bytes=0-0');
-  // History uses the client that now provides the stream.
+  const visionPlayer = yt.hits.find((h) => h.path === '/youtubei/v1/player' && h.body.context.client.clientName === 'VISIONOS');
+  assert.ok(visionPlayer, 'visionOS was asked');
+  assert.equal(visionPlayer.headers.cookie, undefined, 'the signed-out request carries no account cookies');
+  assert.equal(visionPlayer.headers.authorization, undefined);
+  // History still goes through the signed-in TV answer.
   const watched = await bundle.call('markWatched', { id: 'VIDEOID0001' });
   assert.equal(watched.ok, true);
-  // Opening the video again doesn't go back to the refused clients.
+  const playback = yt.hits.find((h) => h.path === '/api/stats/playback');
+  assert.equal(new URL(playback.url).searchParams.get('c'), 'tvhtml5');
+  assert.ok(playback.headers.cookie, 'history ping carries the account cookies');
+});
+
+test('when signed-out clients are refused too, the next signed-in client provides the streams', async () => {
+  const yt = createFakeYouTube({ refuseStreams: ['TVHTML5', 'VISIONOS', 'TVHTML5_SIMPLY', 'iOS', 'ANDROID_VR'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  const idx = (itag) => details.formats.find((f) => f.itag === itag).index;
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
+  // TV (403) → four signed-out clients (403) → TV as a Samsung set (TVHTML5, 403) → Web embedded.
+  assert.equal(new URL(resolved.urls[String(idx(401))]).searchParams.get('fakeclient'), 'WEB_EMBEDDED_PLAYER');
   const again = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
   assert.equal(again.playerClient, 'WEB_EMBEDDED');
 });
