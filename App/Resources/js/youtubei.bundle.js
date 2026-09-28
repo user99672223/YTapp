@@ -43661,6 +43661,11 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(poTokenState, "poTokenState");
 
   // src/bridge/session.js
+  function decipherReady(player) {
+    const exported = player?.data?.exported;
+    return Array.isArray(exported) && exported.includes("nsigFunction");
+  }
+  __name(decipherReady, "decipherReady");
   function sessionSummary(yt, account, accountError) {
     const ctx = yt.session.context.client;
     return {
@@ -43671,7 +43676,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       clientName: state.options.client,
       playerId: yt.session.player?.player_id,
       signatureTimestamp: yt.session.player?.signature_timestamp,
-      hasDecipher: !!yt.session.player?.data,
+      hasDecipher: decipherReady(yt.session.player),
       userAgent: yt.session.user_agent || DEFAULT_USER_AGENT
     };
   }
@@ -43715,8 +43720,11 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         accountError = e && e.message ? e.message : String(e);
       }
     }
-    if (!yt.session.player?.data) {
+    if (!decipherReady(yt.session.player)) {
       console.warn("player script could not be analysed; deciphering will fail");
+    }
+    if (!(yt.session.player?.signature_timestamp > 0)) {
+      console.warn("player script has no signature timestamp; YouTube may refuse player requests");
     }
     return sessionSummary(yt, account, accountError);
   }
@@ -43752,7 +43760,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       loggedIn: !!yt?.session.logged_in,
       clientName: state.options.client,
       playerId: yt?.session.player?.player_id,
-      hasDecipher: !!yt?.session.player?.data,
+      hasDecipher: decipherReady(yt?.session.player),
       visitorData: yt?.session.context.client.visitorData,
       cachedFeeds: state.feeds.size,
       cachedInfos: state.infos.size,

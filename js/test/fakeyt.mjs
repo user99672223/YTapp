@@ -514,7 +514,11 @@ export function createFakeYouTube(options = {}) {
     if (path === '/sw.js_data') return { status: 200, body: swJsData(), headers: { 'content-type': 'text/plain' } };
     if (path === '/youtubei/v1/config') return { status: 200, body: { configData: 'CFG', responseContext: {} } };
     if (path === '/iframe_api') return { status: 200, body: `var scriptUrl = 'https:\\/\\/www.youtube.com\\/s\\/player\\/${PLAYER_ID}\\/www-widgetapi.vflset\\/www-widgetapi.js';`, headers: { 'content-type': 'text/javascript' } };
-    if (path === `/s/player/${PLAYER_ID}/player_es6.vflset/en_US/base.js`) return { status: 200, body: playerJs, headers: { 'content-type': 'text/javascript' } };
+    if (path === `/s/player/${PLAYER_ID}/player_es6.vflset/en_US/base.js`) {
+      // options.brokenPlayer: a player script the n/sig extractor finds nothing in.
+      const js = options.brokenPlayer ? 'var _yt_player = {}; (function (g) { g.x = 1; })(_yt_player);' : playerJs;
+      return { status: 200, body: js, headers: { 'content-type': 'text/javascript' } };
+    }
     if (path === '/youtubei/v1/account/accounts_list') {
       if (!req.headers.cookie) return { status: 401, body: { error: { code: 401 } } };
       return { status: 200, body: accountsList() };

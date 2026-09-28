@@ -3,6 +3,13 @@ import { state, createInnertube, requireSession, requireLogin, parseAccount, DEF
 import { resetPoToken, poTokenState } from './potoken.js';
 import { fail } from './errors.js';
 
+// YouTube.js keeps the analysed player script even when it could not find the n/sig decipher
+// function in it (it only logs a warning), so `player.data` alone says nothing.
+function decipherReady(player) {
+  const exported = player?.data?.exported;
+  return Array.isArray(exported) && exported.includes('nsigFunction');
+}
+
 function sessionSummary(yt, account, accountError) {
   const ctx = yt.session.context.client;
   return {
@@ -13,7 +20,7 @@ function sessionSummary(yt, account, accountError) {
     clientName: state.options.client,
     playerId: yt.session.player?.player_id,
     signatureTimestamp: yt.session.player?.signature_timestamp,
-    hasDecipher: !!yt.session.player?.data,
+    hasDecipher: decipherReady(yt.session.player),
     userAgent: yt.session.user_agent || DEFAULT_USER_AGENT
   };
 }
@@ -57,8 +64,11 @@ export async function init(options = {}) {
       accountError = e && e.message ? e.message : String(e);
     }
   }
-  if (!yt.session.player?.data) {
+  if (!decipherReady(yt.session.player)) {
     console.warn('player script could not be analysed; deciphering will fail');
+  }
+  if (!(yt.session.player?.signature_timestamp > 0)) {
+    console.warn('player script has no signature timestamp; YouTube may refuse player requests');
   }
   return sessionSummary(yt, account, accountError);
 }
@@ -95,7 +105,7 @@ export async function sessionState() {
     loggedIn: !!yt?.session.logged_in,
     clientName: state.options.client,
     playerId: yt?.session.player?.player_id,
-    hasDecipher: !!yt?.session.player?.data,
+    hasDecipher: decipherReady(yt?.session.player),
     visitorData: yt?.session.context.client.visitorData,
     cachedFeeds: state.feeds.size,
     cachedInfos: state.infos.size,

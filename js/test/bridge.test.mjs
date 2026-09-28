@@ -357,3 +357,12 @@ test('format indices from an earlier load of the video are refused as expired', 
   assert.equal(new URL(resolved.urls[String(uhd(embedded).index)]).searchParams.get('itag'), '401');
   await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [99] }), (e) => e.kind === 'expired');
 });
+
+test('a player script without the n/sig function is reported as not ready', async () => {
+  const yt = createFakeYouTube({ brokenPlayer: true });
+  const bundle = loadBundle({ router: yt.router });
+  const session = await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  assert.equal(session.hasDecipher, false);
+  assert.ok(bundle.logs.some((l) => /player script could not be analysed/.test(l.message)));
+  assert.equal((await bundle.call('sessionState')).hasDecipher, false);
+});
