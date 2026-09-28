@@ -144,8 +144,10 @@ final class CookieStore: @unchecked Sendable {
 
     var hasCookies: Bool { !header.isEmpty }
 
-    /// Replaces the stored session (after setup or re-entry).
-    func replace(with header: String) {
+    /// Replaces the stored session (after setup or re-entry). Returns false when the Keychain
+    /// didn't take it: the sign-in then only lasts until the app quits.
+    @discardableResult
+    func replace(with header: String) -> Bool {
         lock.lock()
         known = header.isEmpty ? [] : [header]
         jar = CookieJar(header: header)
@@ -153,7 +155,7 @@ final class CookieStore: @unchecked Sendable {
         saveWork?.cancel()
         saveWork = nil
         lock.unlock()
-        keychain.saveCookie(header)
+        return keychain.saveCookie(header)
     }
 
     func clear() {

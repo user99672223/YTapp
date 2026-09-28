@@ -47,7 +47,7 @@ final class AppModel: ObservableObject {
     init() {
         let logs = LogBuffer()
         let store = Store(logs: logs)
-        let keychain = KeychainStore()
+        let keychain = KeychainStore(logs: logs)
         let cookies = CookieStore(keychain: keychain)
         self.logs = logs
         self.store = store
@@ -205,12 +205,18 @@ final class AppModel: ObservableObject {
         }
         guard let service else { throw BridgeError(kind: .bridge, message: "The YouTube bundle isn't running.") }
         let info = try await service.validateCookie(header)
-        cookies.replace(with: header)
+        let saved = cookies.replace(with: header)
         account = info
         authProblem = nil
         fileCache.remove("innertube_session_data")
         // Answer the phone/computer right away; the session is created in the background.
-        Task { await self.connect(showProgress: true) }
+        Task {
+            await self.connect(showProgress: true)
+            // The Keychain error is in the log; say on screen that the sign-in won't last.
+            if !saved, self.phase == .ready, self.authProblem == nil {
+                self.authProblem = "This Apple TV didn't save your sign-in, so you'll need to paste your cookies again after the app restarts."
+            }
+        }
         return info
     }
 
