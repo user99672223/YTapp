@@ -129,6 +129,7 @@ struct VideoCard: View {
     @EnvironmentObject private var model: AppModel
     let video: VideoItem
     var width: CGFloat = Layout.cardWidth
+    @State private var watchLaterError: BridgeError?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -140,10 +141,7 @@ struct VideoCard: View {
             .buttonStyle(.card)
             .contextMenu {
                 if model.isSignedIn, !video.isShort {
-                    Button("Save to Watch Later") {
-                        let id = video.id
-                        Task { _ = try? await model.api { try await $0.setWatchLater(videoId: id, true) } }
-                    }
+                    Button("Save to Watch Later") { saveToWatchLater() }
                 }
                 if let channelId = video.channelId {
                     Button("Go to channel") { router.open(.channel(channelId)) }
@@ -162,6 +160,33 @@ struct VideoCard: View {
             }
         }
         .frame(width: width, alignment: .topLeading)
+        .alert("Watch Later failed", isPresented: watchLaterFailed, presenting: watchLaterError) { _ in
+            Button("Retry") { saveToWatchLater() }
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error.userMessage)
+        }
+    }
+
+    private var watchLaterFailed: Binding<Bool> {
+        Binding(get: { watchLaterError != nil }, set: { if !$0 { watchLaterError = nil } })
+    }
+
+    /// Confirms with a toast or offers Retry, and has Watch Later reload the next time it's shown.
+    @MainActor
+    private func saveToWatchLater() {
+        let id = video.id
+        let model = self.model
+        let toasts = self.router.toasts
+        Task {
+            do {
+                _ = try await model.api { try await $0.setWatchLater(videoId: id, true) }
+                FeedModel.markChanged(cacheKey: "playlist:WL")
+                toasts.show("Saved to Watch Later")
+            } catch {
+                watchLaterError = BridgeError.wrap(error)
+            }
+        }
     }
 
     private var thumbnail: some View {
@@ -261,6 +286,28 @@ struct PlaylistCard: View {
             }
         }
         .frame(width: width, alignment: .topLeading)
+    }
+}
+
+/// The app-wide toast (`Router.toasts`), pinned to the top of a screen.
+struct ToastOverlay: View {
+    @EnvironmentObject private var router: Router
+
+    var body: some View {
+        ToastText(toasts: router.toasts)
+    }
+}
+
+private struct ToastText: View {
+    @ObservedObject var toasts: ToastCenter
+
+    var body: some View {
+        if let message = toasts.message {
+            Text(message)
+                .padding(.horizontal, 30).padding(.vertical, 16)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.top, 40)
+        }
     }
 }
 

@@ -34,9 +34,24 @@ final class FeedModel: ObservableObject {
         self.loader = loader
     }
 
+    /// When the user changed a list's content (a card's "Save to Watch Later"), by cache key.
+    private static var changedAt: [String: Date] = [:]
+
+    /// The list behind `cacheKey` changed: its next load fetches it again, even over a fresh
+    /// cache, and shows the result directly.
+    static func markChanged(cacheKey: String) {
+        changedAt[cacheKey] = Date()
+    }
+
+    private var wasChanged: Bool {
+        guard let cacheKey, let changed = Self.changedAt[cacheKey] else { return false }
+        guard let fetchedAt else { return true }
+        return fetchedAt < changed
+    }
+
     var isStale: Bool {
         guard let fetchedAt else { return true }
-        return !RefreshPolicy.isFresh(fetchedAt: fetchedAt, category: category)
+        return wasChanged || !RefreshPolicy.isFresh(fetchedAt: fetchedAt, category: category)
     }
 
     var canLoadMore: Bool {
@@ -54,14 +69,14 @@ final class FeedModel: ObservableObject {
             fetchedAt = cached.fetchedAt
         }
         if page == nil || isStale {
-            await refresh(model, keepPlace: keepPlace)
+            await refresh(model, keepPlace: keepPlace && !wasChanged)
         }
     }
 
     /// Timer tick: refresh only when the TTL expired.
     func refreshIfStale(_ model: AppModel, keepPlace: Bool = false) async {
         guard !isLoading, isStale else { return }
-        await refresh(model, keepPlace: keepPlace)
+        await refresh(model, keepPlace: keepPlace && !wasChanged)
     }
 
     /// `userInitiated`: the Retry / Refresh buttons. Their failures are always shown; a timer
@@ -211,6 +226,7 @@ struct FeedView<Header: View>: View {
             .padding(.horizontal, Layout.horizontalPadding)
             .padding(.vertical, 40)
         }
+        .overlay(alignment: .top) { ToastOverlay() }
         // Keyed on the model: when the view is handed a different FeedModel (another channel
         // tab, a new search) it loads that one instead of leaving it on an endless spinner.
         .task(id: ObjectIdentifier(feed)) {
