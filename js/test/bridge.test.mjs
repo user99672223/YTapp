@@ -155,6 +155,16 @@ test('search, suggestions and channel items', async () => {
   assert.equal(channel.isSubscribed, false);
   assert.ok(items.some((i) => i.id === 'SEARCHVID01'));
   assert.ok(results.sections.some((s) => s.style === 'shorts' && s.items[0].id === 'SHORTID0003'));
+
+  // A Mix has no playlist page: it opens its first video.
+  const mix = items.find((i) => i.title === 'Mix – Channel One');
+  assert.equal(mix.type, 'video');
+  assert.equal(mix.id, 'MIXSEEDVID1');
+  assert.ok(!items.some((i) => i.id === 'RDMIXSEEDVID1'));
+  const list = items.find((i) => i.id === 'PLsearchlist01');
+  assert.equal(list.type, 'playlist');
+  assert.equal(list.channelName, 'Channel Two');
+  assert.equal(list.videoCountText, '12 videos');
 });
 
 test('Subscriptions, subscribed channels and Library playlists load past the first page', async () => {

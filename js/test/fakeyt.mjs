@@ -406,7 +406,19 @@ function searchResponse() {
                       title: runs('Shorts'),
                       items: [shortLockup('SHORTID0003', 'Search short')]
                     }
-                  }
+                  },
+                  lockupView({
+                    id: 'RDMIXSEEDVID1', type: 'PLAYLIST', title: 'Mix – Channel One', badge: 'Mix',
+                    thumb: 'https://i.ytimg.com/vi/MIXSEEDVID1/hqdefault.jpg',
+                    rows: [['Channel One, Channel Two and more'], ['Updated today']],
+                    onTap: { watchEndpoint: { videoId: 'MIXSEEDVID1', playlistId: 'RDMIXSEEDVID1', params: 'OAHyAQIIAQ%3D%3D' } }
+                  }),
+                  lockupView({
+                    id: 'PLsearchlist01', type: 'PLAYLIST', title: 'Search playlist', badge: '12 videos',
+                    thumb: 'https://i.ytimg.com/vi/VIDEOID0001/hqdefault.jpg',
+                    rows: [[{ text: 'Channel Two', browseId: CH2 }, 'Playlist'], ['View full playlist']],
+                    onTap: { watchEndpoint: { videoId: 'VIDEOID0001', playlistId: 'PLsearchlist01' } }
+                  })
                 ]
               }
             }]

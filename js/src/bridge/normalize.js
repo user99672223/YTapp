@@ -26,6 +26,12 @@ function viewsAndAge(texts) {
   return { viewCountText: texts[0], publishedText: texts[1] };
 }
 
+// Mixes ("RD…" radio lists) have no playlist page (YouTube answers "This playlist type is
+// unviewable"), so they are shown as their first video. "RDCLAK…" lists are regular playlists.
+function isMixId(id) {
+  return typeof id === 'string' && id.startsWith('RD') && !id.startsWith('RDCLAK');
+}
+
 function overlaysInfo(overlays) {
   const info = { durationText: undefined, isLive: false, isShort: false, isUpcoming: false, watchedPercent: undefined };
   const list = Array.isArray(overlays) ? overlays : [];
@@ -146,6 +152,16 @@ function fromLockup(lockup) {
       subscriberCountText: parts.flat().map((p) => p.text).find((t) => t && /subscriber/i.test(t))
     };
   }
+  if (type === 'PLAYLIST' && isMixId(id)) {
+    const videoId = endpointVideoId(lockup.renderer_context?.command_context?.on_tap);
+    if (!videoId) return null;
+    return {
+      type: 'video', id: videoId, title,
+      thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+      channelName: lockupChannel(lockup, parts).channelName,
+      isLive: false, isShort: false, isUpcoming: false
+    };
+  }
   if (type === 'PLAYLIST' || type === 'ALBUM' || type === 'PODCAST' || type === 'SHOW') {
     const countBadge = overlays.flatMap((o) => o.badges || []).map((b) => b.text).find((t) => t && /\d/.test(t));
     return {
@@ -229,6 +245,16 @@ function fromPlaylist(node) {
   const id = node.id || node.endpoint?.payload?.playlistId;
   if (!id) return null;
   const thumbs = node.thumbnails?.length ? node.thumbnails : node.thumbnail_renderer?.thumbnail || node.thumbnail_renderer?.thumbnails;
+  if (isMixId(id)) {
+    const videoId = endpointVideoId(node.endpoint);
+    if (!videoId) return null;
+    return {
+      type: 'video', id: videoId,
+      title: text(node.title) || '',
+      thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+      isLive: false, isShort: false, isUpcoming: false
+    };
+  }
   return {
     type: 'playlist', id,
     title: text(node.title) || '',

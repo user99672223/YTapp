@@ -43782,6 +43782,10 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return { viewCountText: texts[0], publishedText: texts[1] };
   }
   __name(viewsAndAge, "viewsAndAge");
+  function isMixId(id) {
+    return typeof id === "string" && id.startsWith("RD") && !id.startsWith("RDCLAK");
+  }
+  __name(isMixId, "isMixId");
   function overlaysInfo(overlays) {
     const info2 = { durationText: void 0, isLive: false, isShort: false, isUpcoming: false, watchedPercent: void 0 };
     const list = Array.isArray(overlays) ? overlays : [];
@@ -43900,6 +43904,20 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         subscriberCountText: parts.flat().map((p) => p.text).find((t) => t && /subscriber/i.test(t))
       };
     }
+    if (type === "PLAYLIST" && isMixId(id)) {
+      const videoId = endpointVideoId(lockup.renderer_context?.command_context?.on_tap);
+      if (!videoId) return null;
+      return {
+        type: "video",
+        id: videoId,
+        title,
+        thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+        channelName: lockupChannel(lockup, parts).channelName,
+        isLive: false,
+        isShort: false,
+        isUpcoming: false
+      };
+    }
     if (type === "PLAYLIST" || type === "ALBUM" || type === "PODCAST" || type === "SHOW") {
       const countBadge = overlays.flatMap((o) => o.badges || []).map((b) => b.text).find((t) => t && /\d/.test(t));
       return {
@@ -43989,6 +44007,19 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const id = node.id || node.endpoint?.payload?.playlistId;
     if (!id) return null;
     const thumbs = node.thumbnails?.length ? node.thumbnails : node.thumbnail_renderer?.thumbnail || node.thumbnail_renderer?.thumbnails;
+    if (isMixId(id)) {
+      const videoId = endpointVideoId(node.endpoint);
+      if (!videoId) return null;
+      return {
+        type: "video",
+        id: videoId,
+        title: text(node.title) || "",
+        thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+        isLive: false,
+        isShort: false,
+        isUpcoming: false
+      };
+    }
     return {
       type: "playlist",
       id,

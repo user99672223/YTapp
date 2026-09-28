@@ -48,6 +48,30 @@
           "isUpcoming": false
         }
       ]
+    },
+    {
+      "id": "s3",
+      "style": "grid",
+      "items": [
+        {
+          "type": "video",
+          "id": "MIXSEEDVID1",
+          "title": "Mix – Channel One",
+          "thumbnail": "https://i.ytimg.com/vi/MIXSEEDVID1/hqdefault.jpg",
+          "channelName": "Channel One, Channel Two and more",
+          "isLive": false,
+          "isShort": false,
+          "isUpcoming": false
+        },
+        {
+          "type": "playlist",
+          "id": "PLsearchlist01",
+          "title": "Search playlist",
+          "thumbnail": "https://i.ytimg.com/vi/VIDEOID0001/hqdefault.jpg",
+          "videoCountText": "12 videos",
+          "channelName": "Channel Two"
+        }
+      ]
     }
   ]
 }
