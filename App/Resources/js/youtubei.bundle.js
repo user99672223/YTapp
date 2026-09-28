@@ -42373,9 +42373,10 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       info2 = "";
     }
     const status = extractStatus(message);
-    const haystack = `${message} ${info2}`;
+    const haystack = `${message} ${info2}`.replace(/https?:\/\/\S+/g, "");
     let kind = "unknown";
-    if (status === 401 || status === 403) kind = "auth";
+    if (status === 400) kind = /\/youtubei\/v1\/player/.test(message) ? "extraction" : "unknown";
+    else if (status === 401 || status === 403) kind = "auth";
     else if (status === 429) kind = "rateLimited";
     else if (status === 404) kind = "notFound";
     else if (status && status >= 500) kind = "network";
@@ -42553,7 +42554,11 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   var state = {
     yt: null,
     creating: null,
-    options: { client: "TV", poTokenMode: "auto" },
+    options: { client: "AUTO", poTokenMode: "auto" },
+    // Stream client that last produced playable streams, and clients that failed for reasons that
+    // are not specific to one video (rejected request, SABR-only, no longer supported).
+    goodClient: null,
+    badClients: /* @__PURE__ */ new Map(),
     feeds: /* @__PURE__ */ new Map(),
     infos: /* @__PURE__ */ new Map(),
     subscriptions: /* @__PURE__ */ new Map(),
@@ -43608,7 +43613,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       const m = await minter();
       return await m.mintAsWebsafeString(videoId);
     } catch (e) {
-      fail("poToken", `Could not create a PO token for the ${client} client: ${e && e.message ? e.message : e}. Switch the stream client to TV in Settings.`);
+      fail("poToken", `Could not create a PO token for the ${client} client: ${e && e.message ? e.message : e}. Set the stream client to Automatic in Settings.`);
     }
   }
   __name(contentPoToken, "contentPoToken");
@@ -43646,7 +43651,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   async function init(options = {}) {
     const opts = {
       cookie: typeof options.cookie === "string" ? options.cookie.trim() : "",
-      client: String(options.client || "TV").toUpperCase(),
+      client: String(options.client || "AUTO").toUpperCase(),
       visitorData: options.visitorData || "",
       userAgent: options.userAgent || DEFAULT_USER_AGENT,
       lang: options.lang || "",
@@ -43660,6 +43665,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       state.options = opts;
       state.feeds.clear();
       state.infos.clear();
+      state.goodClient = null;
+      state.badClients.clear();
       resetPoToken();
       return yt2;
     })();
@@ -43726,7 +43733,10 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(sessionState, "sessionState");
   async function setClient({ client, poTokenMode }) {
-    if (client) state.options.client = String(client).toUpperCase();
+    if (client) {
+      state.options.client = String(client).toUpperCase();
+      state.badClients.clear();
+    }
     if (poTokenMode) state.options.poTokenMode = poTokenMode === "off" ? "off" : "auto";
     return { clientName: state.options.client };
   }
@@ -44665,13 +44675,69 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     };
   }
   __name(detailsOf, "detailsOf");
+  var FALLBACK_CLIENTS = ["TV_SIMPLY", "TV", "ANDROID_VR", "IOS"];
+  var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
+  var CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+  function clientChain(preferred) {
+    const p = String(preferred || state.options.client || "AUTO").toUpperCase();
+    const first = p === "AUTO" ? state.goodClient || FALLBACK_CLIENTS[0] : p;
+    const chain = [first, ...FALLBACK_CLIENTS.filter((c) => c !== first)];
+    return [...chain.filter((c) => !state.badClients.has(c)), ...chain.filter((c) => state.badClients.has(c))];
+  }
+  __name(clientChain, "clientChain");
+  async function streamProblem(yt, info2, client) {
+    const formats = info2.streaming_data?.adaptive_formats || [];
+    if (!formats.length) return `${client} returned no adaptive formats`;
+    const video = formats.find((f) => f.has_video && (f.url || f.signature_cipher || f.cipher));
+    if (!video) return `${client} only offers SABR streams`;
+    let url;
+    try {
+      url = await video.decipher(yt.session.player);
+    } catch (e) {
+      return `${client} stream URLs could not be deciphered: ${e && e.message ? e.message : e}`;
+    }
+    if (!url || !/^https?:/.test(url)) return `${client} stream URLs could not be deciphered`;
+    if (/[?&]sabr=1/.test(url)) return `${client} only offers SABR streams`;
+    return null;
+  }
+  __name(streamProblem, "streamProblem");
+  async function playerWithFallback(yt, id, preferred, load) {
+    const failures = [];
+    for (const c of clientChain(preferred)) {
+      try {
+        const poToken = await contentPoToken(c, id);
+        const info2 = await load(c, poToken || void 0);
+        checkPlayable(info2);
+        const problem = await streamProblem(yt, info2, c);
+        if (problem) fail("extraction", problem);
+        state.goodClient = c;
+        state.badClients.delete(c);
+        if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(", ")} failed)`);
+        return { info: info2, client: c };
+      } catch (e) {
+        const cls = classify(e);
+        failures.push({ client: c, ...cls });
+        console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ""}] ${cls.message}`);
+        if (cls.status === 400 || cls.kind === "poToken" || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
+        if (["network", "timeout", "noSession", "upcoming"].includes(cls.kind)) break;
+        if (cls.kind === "unavailable" && VIDEO_GONE.test(cls.message)) break;
+      }
+    }
+    const summary = failures.map((f) => `${f.client}: [${f.kind}${f.status ? ` ${f.status}` : ""}] ${f.message}`).join("\n");
+    const telling = failures.find((f) => !["extraction", "unknown", "parse", "poToken"].includes(f.kind));
+    if (telling) throw new BridgeError(telling.kind, telling.message, summary);
+    throw new BridgeError("extraction", `No stream client could play this video (tried ${failures.map((f) => f.client).join(", ")}).`, summary);
+  }
+  __name(playerWithFallback, "playerWithFallback");
   async function videoInfo({ id, client }) {
     const yt = await requireSession();
     if (!id) fail("invalid", "Missing video id.");
-    const c = String(client || state.options.client || "TV").toUpperCase();
-    const poToken = await contentPoToken(c, id);
-    const info2 = await yt.getInfo(id, { client: c, po_token: poToken || void 0 });
-    checkPlayable(info2);
+    const { info: info2, client: c } = await playerWithFallback(
+      yt,
+      id,
+      client,
+      (name, poToken) => yt.getInfo(id, { client: name, po_token: poToken })
+    );
     putInfo(id, { info: info2, client: c });
     return detailsOf(info2, c);
   }
@@ -44686,7 +44752,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       if (!format) fail("extraction", `Format ${index} is not available any more.`);
       const url = await format.decipher(yt.session.player);
       if (!url || typeof url !== "string" || !/^https?:/.test(url)) fail("extraction", `Could not get a stream URL for format ${format.itag}.`);
-      if (/[?&]sabr=1/.test(url)) fail("extraction", `Format ${format.itag} is only available through SABR streaming. Choose another stream client in Settings.`);
+      if (/[?&]sabr=1/.test(url)) fail("extraction", `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
       urls[String(index)] = url;
     }
     const meta = clientMeta(entry.client);
@@ -44794,15 +44860,14 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   async function shortInfo({ id, client }) {
     const yt = await requireSession();
     if (!id) fail("invalid", "Missing short id.");
-    const c = String(client || state.options.client || "TV").toUpperCase();
-    const [reel, playerInfo] = await Promise.all([
+    const [reel, player] = await Promise.all([
       yt.getShortsVideoInfo(id).catch((e) => {
         console.warn("getShortsVideoInfo failed", e && e.message);
         return null;
       }),
-      contentPoToken(c, id).then((po2) => yt.getBasicInfo(id, { client: c, po_token: po2 || void 0 }))
+      playerWithFallback(yt, id, client, (name, poToken) => yt.getBasicInfo(id, { client: name, po_token: poToken }))
     ]);
-    checkPlayable(playerInfo);
+    const { info: playerInfo, client: c } = player;
     putInfo(id, { info: playerInfo, client: c, reel });
     const basic = reel && reel.basic_info && reel.basic_info.title ? reel.basic_info : playerInfo.basic_info;
     const channelId = basic.channel_id || playerInfo.basic_info.channel_id;

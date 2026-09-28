@@ -205,6 +205,36 @@ test('subscribed channels come from the channels page, else from the guide', asy
   assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/guide'));
 });
 
+test('a rejected stream client falls back to the next one and is remembered', async () => {
+  const yt = createFakeYouTube({ rejectClients: ['TVHTML5'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });
+  assert.equal(details.playerClient, 'TV_SIMPLY');
+  const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player').map((h) => h.body.context.client.clientName);
+  assert.deepEqual(players(), ['TVHTML5', 'TVHTML5_SIMPLY']);
+  assert.ok(bundle.logs.some((l) => /stream client TV failed: \[extraction 400\]/.test(l.message)), 'each failed client is logged');
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [details.formats.find((f) => f.itag === 251).index] });
+  assert.ok(Object.values(resolved.urls)[0].startsWith('https://'));
+  // The rejected client is skipped for the rest of the session.
+  const short = await bundle.call('shortInfo', { id: 'SHORTID0001', client: 'TV' });
+  assert.equal(short.playerClient, 'TV_SIMPLY');
+  assert.deepEqual(players().slice(2), ['TVHTML5_SIMPLY']);
+});
+
+test('automatic client starts with TV_SIMPLY; all clients failing gives one clear error', async () => {
+  const { call, yt } = await connected();
+  const auto = await call('videoInfo', { id: 'VIDEOID0001', client: 'AUTO' });
+  assert.equal(auto.playerClient, 'TV_SIMPLY');
+  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 1);
+
+  const all = createFakeYouTube({ rejectClients: ['TVHTML5', 'TVHTML5_SIMPLY', 'ANDROID_VR', 'iOS'] });
+  const bundle = loadBundle({ router: all.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  await assert.rejects(bundle.call('videoInfo', { id: 'VIDEOID0001' }), (e) =>
+    e.kind === 'extraction' && /No stream client could play this video/.test(e.message) && /TV_SIMPLY: \[extraction 400\]/.test(e.detail));
+});
+
 test('errors are classified for Swift', async () => {
   const { call } = await connected();
   await assert.rejects(call('resolveFormats', { id: 'NOTLOADED01', indices: [0] }), (e) => e.kind === 'expired');

@@ -21,7 +21,7 @@ function sessionSummary(yt, account, accountError) {
 export async function init(options = {}) {
   const opts = {
     cookie: typeof options.cookie === 'string' ? options.cookie.trim() : '',
-    client: String(options.client || 'TV').toUpperCase(),
+    client: String(options.client || 'AUTO').toUpperCase(),
     visitorData: options.visitorData || '',
     userAgent: options.userAgent || DEFAULT_USER_AGENT,
     lang: options.lang || '',
@@ -35,6 +35,8 @@ export async function init(options = {}) {
     state.options = opts;
     state.feeds.clear();
     state.infos.clear();
+    state.goodClient = null;
+    state.badClients.clear();
     resetPoToken();
     return yt;
   })();
@@ -102,7 +104,10 @@ export async function sessionState() {
 }
 
 export async function setClient({ client, poTokenMode }) {
-  if (client) state.options.client = String(client).toUpperCase();
+  if (client) {
+    state.options.client = String(client).toUpperCase();
+    state.badClients.clear();
+  }
   if (poTokenMode) state.options.poTokenMode = poTokenMode === 'off' ? 'off' : 'auto';
   return { clientName: state.options.client };
 }

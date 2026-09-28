@@ -4,8 +4,7 @@ import { state, requireSession, newKey, putFeed, getFeed, putInfo, clientMeta, l
 import { sectionsFromNodes } from './normalize.js';
 import { text, bestThumb, endpointVideoId } from './util.js';
 import { fail } from './errors.js';
-import { formatsOf, captionsOf, checkPlayable } from './watch.js';
-import { contentPoToken } from './potoken.js';
+import { formatsOf, captionsOf, playerWithFallback } from './watch.js';
 
 function sequenceIds(info) {
   const ids = [];
@@ -48,17 +47,16 @@ export async function shortsMore({ key }) {
 export async function shortInfo({ id, client }) {
   const yt = await requireSession();
   if (!id) fail('invalid', 'Missing short id.');
-  const c = String(client || state.options.client || 'TV').toUpperCase();
   // Metadata (and like/subscription entity states) through the Shorts API; streams through the
-  // configured stream client, like regular videos.
-  const [reel, playerInfo] = await Promise.all([
+  // stream clients, like regular videos.
+  const [reel, player] = await Promise.all([
     yt.getShortsVideoInfo(id).catch((e) => {
       console.warn('getShortsVideoInfo failed', e && e.message);
       return null;
     }),
-    contentPoToken(c, id).then((po) => yt.getBasicInfo(id, { client: c, po_token: po || undefined }))
+    playerWithFallback(yt, id, client, (name, poToken) => yt.getBasicInfo(id, { client: name, po_token: poToken }))
   ]);
-  checkPlayable(playerInfo);
+  const { info: playerInfo, client: c } = player;
   putInfo(id, { info: playerInfo, client: c, reel });
   const basic = (reel && reel.basic_info && reel.basic_info.title) ? reel.basic_info : playerInfo.basic_info;
   const channelId = basic.channel_id || playerInfo.basic_info.channel_id;

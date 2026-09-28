@@ -492,7 +492,14 @@ export function createFakeYouTube(options = {}) {
       return { status: 404, body: { error: 'unknown browse' } };
     }
     if (path === '/youtubei/v1/guide') return { status: 200, body: guideResponse() };
-    if (path === '/youtubei/v1/player') return { status: 200, body: playerResponse(body.videoId) };
+    if (path === '/youtubei/v1/player') {
+      const clientName = body?.context?.client?.clientName;
+      // options.rejectClients: client names YouTube answers with 400 (as it did for TVHTML5 in 2026).
+      if ((options.rejectClients || []).includes(clientName)) {
+        return { status: 400, body: { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT' } } };
+      }
+      return { status: 200, body: playerResponse(body.videoId) };
+    }
     if (path === '/youtubei/v1/next') return { status: 200, body: nextResponse(body.videoId) };
     if (path === '/youtubei/v1/search') return { status: 200, body: searchResponse() };
     if (path === '/complete/search') return { status: 200, body: 'window.google.ac.h(["q",[["query one",0],["query two",0,[512]]],{"k":1}])', headers: { 'content-type': 'text/javascript' } };

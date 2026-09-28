@@ -30,9 +30,11 @@ export function classify(error) {
     info = '';
   }
   const status = extractStatus(message);
-  const haystack = `${message} ${info}`;
+  // URLs are left out of the keyword match ("alt=json" is not a parse error).
+  const haystack = `${message} ${info}`.replace(/https?:\/\/\S+/g, '');
   let kind = 'unknown';
-  if (status === 401 || status === 403) kind = 'auth';
+  if (status === 400) kind = /\/youtubei\/v1\/player/.test(message) ? 'extraction' : 'unknown';
+  else if (status === 401 || status === 403) kind = 'auth';
   else if (status === 429) kind = 'rateLimited';
   else if (status === 404) kind = 'notFound';
   else if (status && status >= 500) kind = 'network';

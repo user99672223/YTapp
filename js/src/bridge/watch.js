@@ -4,7 +4,7 @@ import { YT } from 'youtubei.js/web';
 import { state, requireSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
 import { toItem } from './normalize.js';
 import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
-import { fail } from './errors.js';
+import { fail, classify, BridgeError } from './errors.js';
 import { contentPoToken } from './potoken.js';
 
 const HDR_TRANSFER = /2084|B67|HLG|PQ/i;
@@ -195,13 +195,77 @@ export function detailsOf(info, client) {
   };
 }
 
+// ---------------------------------------------------------------- stream clients
+
+// Tried in this order when the preferred client fails; none of them needs a PO token.
+// TV_SIMPLY first: in September 2026 YouTube rejects the full TV client (HTTP 400 / "The page
+// needs to be reloaded") while TV_SIMPLY, ANDROID_VR and IOS still return direct stream URLs.
+export const FALLBACK_CLIENTS = ['TV_SIMPLY', 'TV', 'ANDROID_VR', 'IOS'];
+
+// Reasons that mean the video itself can't be played, so other clients won't help.
+const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
+// Failures that are about the client, not the video: skip that client for the rest of the session.
+const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+
+export function clientChain(preferred) {
+  const p = String(preferred || state.options.client || 'AUTO').toUpperCase();
+  const first = p === 'AUTO' ? (state.goodClient || FALLBACK_CLIENTS[0]) : p;
+  const chain = [first, ...FALLBACK_CLIENTS.filter((c) => c !== first)];
+  return [...chain.filter((c) => !state.badClients.has(c)), ...chain.filter((c) => state.badClients.has(c))];
+}
+
+// Why this player response can't be streamed directly, or null when it can.
+async function streamProblem(yt, info, client) {
+  const formats = info.streaming_data?.adaptive_formats || [];
+  if (!formats.length) return `${client} returned no adaptive formats`;
+  const video = formats.find((f) => f.has_video && (f.url || f.signature_cipher || f.cipher));
+  if (!video) return `${client} only offers SABR streams`;
+  let url;
+  try {
+    url = await video.decipher(yt.session.player);
+  } catch (e) {
+    return `${client} stream URLs could not be deciphered: ${e && e.message ? e.message : e}`;
+  }
+  if (!url || !/^https?:/.test(url)) return `${client} stream URLs could not be deciphered`;
+  if (/[?&]sabr=1/.test(url)) return `${client} only offers SABR streams`;
+  return null;
+}
+
+// Loads the player response through the first client that gives directly playable streams.
+// `load(client, poToken)` performs the request (getInfo or getBasicInfo).
+export async function playerWithFallback(yt, id, preferred, load) {
+  const failures = [];
+  for (const c of clientChain(preferred)) {
+    try {
+      const poToken = await contentPoToken(c, id);
+      const info = await load(c, poToken || undefined);
+      checkPlayable(info);
+      const problem = await streamProblem(yt, info, c);
+      if (problem) fail('extraction', problem);
+      state.goodClient = c;
+      state.badClients.delete(c);
+      if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(', ')} failed)`);
+      return { info, client: c };
+    } catch (e) {
+      const cls = classify(e);
+      failures.push({ client: c, ...cls });
+      console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ''}] ${cls.message}`);
+      if (cls.status === 400 || cls.kind === 'poToken' || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
+      if (['network', 'timeout', 'noSession', 'upcoming'].includes(cls.kind)) break;
+      if (cls.kind === 'unavailable' && VIDEO_GONE.test(cls.message)) break;
+    }
+  }
+  const summary = failures.map((f) => `${f.client}: [${f.kind}${f.status ? ` ${f.status}` : ''}] ${f.message}`).join('\n');
+  const telling = failures.find((f) => !['extraction', 'unknown', 'parse', 'poToken'].includes(f.kind));
+  if (telling) throw new BridgeError(telling.kind, telling.message, summary);
+  throw new BridgeError('extraction', `No stream client could play this video (tried ${failures.map((f) => f.client).join(', ')}).`, summary);
+}
+
 export async function videoInfo({ id, client }) {
   const yt = await requireSession();
   if (!id) fail('invalid', 'Missing video id.');
-  const c = String(client || state.options.client || 'TV').toUpperCase();
-  const poToken = await contentPoToken(c, id);
-  const info = await yt.getInfo(id, { client: c, po_token: poToken || undefined });
-  checkPlayable(info);
+  const { info, client: c } = await playerWithFallback(yt, id, client,
+    (name, poToken) => yt.getInfo(id, { client: name, po_token: poToken }));
   putInfo(id, { info, client: c });
   return detailsOf(info, c);
 }
@@ -217,7 +281,7 @@ export async function resolveFormats({ id, indices }) {
     if (!format) fail('extraction', `Format ${index} is not available any more.`);
     const url = await format.decipher(yt.session.player);
     if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
-    if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming. Choose another stream client in Settings.`);
+    if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
     urls[String(index)] = url;
   }
   const meta = clientMeta(entry.client);

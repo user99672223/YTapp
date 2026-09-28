@@ -6,7 +6,7 @@ import Core
 
 @Model
 final class SettingsRecord {
-    var streamClient: String = "TV"
+    var streamClient: String = "AUTO"
     var maxHeight: Int = 2160
     var autoplay: Bool = true
     var captionsEnabled: Bool = false
@@ -51,7 +51,7 @@ final class FeedCacheRecord {
 
 /// Plain value copy of the settings used across the app.
 struct AppSettings: Equatable {
-    var streamClient: String = "TV"
+    var streamClient: String = "AUTO"
     var maxHeight: Int = 2160
     var autoplay: Bool = true
     var captionsEnabled: Bool = false
@@ -66,9 +66,10 @@ struct AppSettings: Equatable {
     var quality: QualityPreferences { QualityPreferences(maxHeight: maxHeight) }
 
     static let streamClients: [(id: String, label: String)] = [
-        ("TV", "TV (default, no PO token)"),
-        ("TV_EMBEDDED", "TV embedded"),
+        ("AUTO", "Automatic (recommended)"),
         ("TV_SIMPLY", "TV simply"),
+        ("TV", "TV"),
+        ("TV_EMBEDDED", "TV embedded"),
         ("WEB", "Web (needs PO token)"),
         ("MWEB", "Mobile web (needs PO token)"),
         ("WEB_EMBEDDED", "Web embedded (needs PO token)"),
@@ -125,6 +126,16 @@ final class Store {
 
     func loadSettings() -> AppSettings {
         guard let r = settingsRecord() else { return AppSettings() }
+        // Builds before 1.0.1 stored "TV" as the default stream client; YouTube now rejects it,
+        // so move those installs to Automatic once (a later manual choice is kept).
+        let migrationKey = "tube.streamClient.autoMigration"
+        if !UserDefaults.standard.bool(forKey: migrationKey) {
+            if r.streamClient == "TV" {
+                r.streamClient = "AUTO"
+                try? context?.save()
+            }
+            UserDefaults.standard.set(true, forKey: migrationKey)
+        }
         return AppSettings(streamClient: r.streamClient, maxHeight: r.maxHeight, autoplay: r.autoplay,
                            captionsEnabled: r.captionsEnabled, captionsLanguage: r.captionsLanguage,
                            playbackSpeed: r.playbackSpeed, bundleURL: r.bundleURL, poTokenMode: r.poTokenMode,

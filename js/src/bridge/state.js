@@ -12,7 +12,11 @@ export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) App
 export const state = {
   yt: null,
   creating: null,
-  options: { client: 'TV', poTokenMode: 'auto' },
+  options: { client: 'AUTO', poTokenMode: 'auto' },
+  // Stream client that last produced playable streams, and clients that failed for reasons that
+  // are not specific to one video (rejected request, SABR-only, no longer supported).
+  goodClient: null,
+  badClients: new Map(),
   feeds: new Map(),
   infos: new Map(),
   subscriptions: new Map(),

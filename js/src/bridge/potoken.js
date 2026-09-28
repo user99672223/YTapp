@@ -1,5 +1,5 @@
 // PO (proof of origin) tokens via BgUtils + BotGuard, behind the DOM shim.
-// Only web-type stream clients need them; the default TV client does not.
+// Only web-type stream clients need them; the automatic (TV / Android VR / iOS) clients do not.
 import { BotGuardClient } from 'bgutils-js/botguard';
 import { WebPoMinter } from 'bgutils-js/webpo';
 import { buildURL, GOOG_API_KEY, USER_AGENT } from 'bgutils-js/utils';
@@ -88,7 +88,7 @@ export async function contentPoToken(client, videoId) {
     const m = await minter();
     return await m.mintAsWebsafeString(videoId);
   } catch (e) {
-    fail('poToken', `Could not create a PO token for the ${client} client: ${e && e.message ? e.message : e}. Switch the stream client to TV in Settings.`);
+    fail('poToken', `Could not create a PO token for the ${client} client: ${e && e.message ? e.message : e}. Set the stream client to Automatic in Settings.`);
   }
 }
 
