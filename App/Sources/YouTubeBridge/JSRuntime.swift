@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import os
 import CryptoKit
 import Security
 import Core
@@ -338,8 +339,11 @@ final class FileCache: @unchecked Sendable {
     }
 }
 
-/// Ring buffer of recent log lines for the debug screen.
+/// Ring buffer of recent log lines for the debug screen. Every line also goes to the unified
+/// system log (subsystem com.local.tube) so it shows up in the device syslog.
 final class LogBuffer: @unchecked Sendable {
+    private static let system = Logger(subsystem: "com.local.tube", category: "app")
+
     enum Level: String {
         case debug, info, warn, error
 
@@ -371,9 +375,13 @@ final class LogBuffer: @unchecked Sendable {
         lines.append(Line(id: counter, date: Date(), level: level, text: String(text.prefix(2000))))
         if lines.count > capacity { lines.removeFirst(lines.count - capacity) }
         lock.unlock()
-        #if DEBUG
-        print("[\(level.rawValue)] \(text)")
-        #endif
+        let line = String(text.prefix(4000))
+        switch level {
+        case .error: Self.system.error("\(line, privacy: .public)")
+        case .warn: Self.system.warning("\(line, privacy: .public)")
+        case .info: Self.system.notice("\(line, privacy: .public)")
+        case .debug: Self.system.info("\(line, privacy: .public)")
+        }
     }
 
     var snapshot: [Line] {

@@ -45019,7 +45019,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       }
       Promise.resolve().then(() => fn(args || {})).then((result) => reply(id, null, result), (error2) => {
         const classified = classify(error2);
-        console.warn(`bridge ${method} failed: [${classified.kind}] ${classified.message}`);
+        console.warn(`bridge ${method} failed: [${classified.kind}${classified.status ? ` ${classified.status}` : ""}] ${classified.message}${classified.detail ? ` | ${String(classified.detail).slice(0, 1500)}` : ""}`);
         reply(id, classified);
       });
     }

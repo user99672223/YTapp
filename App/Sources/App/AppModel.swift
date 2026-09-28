@@ -154,6 +154,16 @@ final class AppModel: ObservableObject {
     /// Runs a YouTube call. Repeated 401/403 answers recreate the session and retry once; if it
     /// still fails the user is told to re-enter cookies.
     func api<T>(_ operation: @escaping (YouTubeService) async throws -> T) async throws -> T {
+        do {
+            return try await apiWithRecovery(operation)
+        } catch {
+            let e = BridgeError.wrap(error)
+            logs.append(.error, "api failed [\(e.kind.rawValue)\(e.status.map { " \($0)" } ?? "")]: \(e.message)\(e.detail.map { " | \($0.prefix(1500))" } ?? "")")
+            throw error
+        }
+    }
+
+    private func apiWithRecovery<T>(_ operation: @escaping (YouTubeService) async throws -> T) async throws -> T {
         guard let service else {
             throw BridgeError(kind: .noSession, message: "Not connected to YouTube yet.")
         }

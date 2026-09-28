@@ -96,7 +96,7 @@ export const TubeBridge = {
       .then(() => fn(args || {}))
       .then((result) => reply(id, null, result), (error) => {
         const classified = classify(error);
-        console.warn(`bridge ${method} failed: [${classified.kind}] ${classified.message}`);
+        console.warn(`bridge ${method} failed: [${classified.kind}${classified.status ? ` ${classified.status}` : ''}] ${classified.message}${classified.detail ? ` | ${String(classified.detail).slice(0, 1500)}` : ''}`);
         reply(id, classified);
       });
   }
