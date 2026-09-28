@@ -211,7 +211,7 @@ export function detailsOf(info, client) {
 export const FALLBACK_CLIENTS = ['TV', 'TV_TIZEN', 'WEB_EMBEDDED', 'MWEB'];
 
 // Reasons that mean the video itself can't be played, so other clients won't help.
-const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
+const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn't available any ?more|no longer available|copyright|account associated/i;
 // Failures that are about the client, not the video: skip that client for the rest of the session.
 const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
 
@@ -239,6 +239,18 @@ async function streamProblem(yt, info, client) {
   return null;
 }
 
+// YouTube.js throws a generic "This video is unavailable" for playability status ERROR (deleted,
+// removed or terminated videos); YouTube's own reason is only on the error's `info`.
+function withPlayabilityReason(e) {
+  const p = e && !(e instanceof BridgeError) ? e.info : null;
+  if (!p || typeof p !== 'object' || p.status !== 'ERROR') return e;
+  const reason = text(p.reason) || text(p.error_screen?.reason);
+  const sub = text(p.error_screen?.subreason);
+  let message = reason;
+  if (sub && sub !== reason) message = reason ? `${reason.replace(/[.\s]+$/, '')}. ${sub}` : sub;
+  return message ? new BridgeError('unavailable', message, e.message) : e;
+}
+
 // Loads the player response through the first client that gives directly playable streams.
 // `load(client, poToken)` performs the request (getInfo or getBasicInfo).
 export async function playerWithFallback(yt, id, preferred, load) {
@@ -258,7 +270,7 @@ export async function playerWithFallback(yt, id, preferred, load) {
       if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(', ')} failed)`);
       return { info, client: c, poToken: poToken || undefined };
     } catch (e) {
-      const cls = classify(e);
+      const cls = classify(withPlayabilityReason(e));
       failures.push({ client: c, ...cls });
       console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ''}] ${cls.message}`);
       if (cls.status === 400 || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);

@@ -277,3 +277,10 @@ test('an age gate is shown with YouTube\'s reason, not as a bot check', async ()
     e.kind === 'loginRequired' && /confirm your age/.test(e.message));
   await assert.rejects(call('videoInfo', { id: 'BOTCHECK001', client: 'TV' }), (e) => e.kind === 'botCheck');
 });
+
+test('a deleted video stops at the first client with YouTube\'s reason', async () => {
+  const { call, yt } = await connected();
+  await assert.rejects(call('videoInfo', { id: 'DELETED0001', client: 'TV' }), (e) =>
+    e.kind === 'unavailable' && /removed by the uploader/.test(e.message));
+  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 1);
+});

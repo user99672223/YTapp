@@ -44706,7 +44706,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(detailsOf, "detailsOf");
   var FALLBACK_CLIENTS = ["TV", "TV_TIZEN", "WEB_EMBEDDED", "MWEB"];
-  var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
+  var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn't available any ?more|no longer available|copyright|account associated/i;
   var CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
   function clientChain(preferred) {
     const p = String(preferred || state.options.client || "AUTO").toUpperCase();
@@ -44731,6 +44731,16 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return null;
   }
   __name(streamProblem, "streamProblem");
+  function withPlayabilityReason(e) {
+    const p = e && !(e instanceof BridgeError) ? e.info : null;
+    if (!p || typeof p !== "object" || p.status !== "ERROR") return e;
+    const reason = text(p.reason) || text(p.error_screen?.reason);
+    const sub = text(p.error_screen?.subreason);
+    let message = reason;
+    if (sub && sub !== reason) message = reason ? `${reason.replace(/[.\s]+$/, "")}. ${sub}` : sub;
+    return message ? new BridgeError("unavailable", message, e.message) : e;
+  }
+  __name(withPlayabilityReason, "withPlayabilityReason");
   async function playerWithFallback(yt, id, preferred, load) {
     const failures = [];
     for (const c of clientChain(preferred)) {
@@ -44747,7 +44757,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(", ")} failed)`);
         return { info: info2, client: c, poToken: poToken || void 0 };
       } catch (e) {
-        const cls = classify(e);
+        const cls = classify(withPlayabilityReason(e));
         failures.push({ client: c, ...cls });
         console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ""}] ${cls.message}`);
         if (cls.status === 400 || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);

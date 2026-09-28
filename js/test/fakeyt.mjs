@@ -182,10 +182,15 @@ function cipher(itag) {
   return `s=SIGXYZ&sp=sig&url=${encodeURIComponent(FORMAT_URL(itag))}`;
 }
 
-// Player answers for special video ids: an age gate and a bot check.
+// Player answers for special video ids: an age gate, a bot check and a deleted video.
 const NOT_PLAYABLE = {
   AGEGATED001: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm your age. This video may be inappropriate for some users.' },
-  BOTCHECK001: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm you’re not a bot' }
+  BOTCHECK001: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm you’re not a bot' },
+  DELETED0001: {
+    status: 'ERROR',
+    reason: 'Video unavailable',
+    errorScreen: { playerErrorMessageRenderer: { reason: simple('Video unavailable'), subreason: simple('This video has been removed by the uploader') } }
+  }
 };
 
 function playerResponse(id) {
