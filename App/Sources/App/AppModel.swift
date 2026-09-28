@@ -46,7 +46,7 @@ final class AppModel: ObservableObject {
 
     init() {
         let logs = LogBuffer()
-        let store = Store()
+        let store = Store(logs: logs)
         let keychain = KeychainStore()
         let cookies = CookieStore(keychain: keychain)
         self.logs = logs
