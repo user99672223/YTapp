@@ -43,6 +43,9 @@ final class WatchViewModel: ObservableObject {
     private var overrideAudio: StreamFormat?
     private var countdownTask: Task<Void, Never>?
     private var startedPlayback = false
+    // Periodic playback line in the log (what the Apple TV sustains for the chosen stream).
+    private var statsLoggedAt = Date.distantPast
+    private var statsDroppedAtLog = 0
     private var lastSavedPosition: Double = 0
     private var waitingForDisplay = false
     /// Bumped for every file handed to mpv, so a `fileLoaded` task of an older one stops.
@@ -202,6 +205,8 @@ final class WatchViewModel: ObservableObject {
         playingDetails = details
         playbackToken += 1
         startedPlayback = false
+        statsLoggedAt = .distantPast
+        statsDroppedAtLog = 0
         lastSavedPosition = start ?? 0
         waitingForDisplay = true
         let settings = model.settings
@@ -295,6 +300,24 @@ final class WatchViewModel: ObservableObject {
         PlaybackDiagnostics.shared.update(videoId: playingDetails.id, title: playingDetails.title, client: playingDetails.playerClient,
                                           selection: selection, state: player.state,
                                           refreshRate: appliedRefreshRate, history: historyStatus)
+        logPlaybackStatsIfDue(playing: playing, videoId: playingDetails.id)
+    }
+
+    /// Every 30 s of playback one log line: resolution, codec, decoder, frames dropped since the
+    /// last line, A/V sync, CPU and buffer. Shows whether the TV keeps up with the chosen stream.
+    private func logPlaybackStatsIfDue(playing: Bool, videoId: String) {
+        let now = Date()
+        guard playing, now.timeIntervalSince(statsLoggedAt) >= 30 else { return }
+        let stats = player.state.stats
+        let first = statsLoggedAt == .distantPast
+        let dropped = max(0, stats.droppedFrames - statsDroppedAtLog)
+        statsLoggedAt = now
+        statsDroppedAtLog = stats.droppedFrames
+        guard !first else { return }
+        let fps = String(format: "%.2f", stats.estimatedFps)
+        let avsync = String(format: "%.3f", stats.avsync)
+        let cpu = String(format: "%.0f", ProcessStats.cpuPercent())
+        model.logs.append(.info, "playback \(videoId): \(stats.width)x\(stats.height) \(stats.videoCodec) \(fps) fps hw:\(stats.hwdec), \(dropped) frames dropped in 30 s, avsync \(avsync) s, cpu \(cpu)%, buffer \(Int(stats.bufferedSeconds)) s")
     }
 
     private func pauseChanged(_ paused: Bool) {
@@ -492,6 +515,7 @@ final class WatchViewModel: ObservableObject {
         Task {
             do {
                 inWatchLater = try await model.api { try await $0.setWatchLater(videoId: id, target) }
+                FeedModel.markChanged(cacheKey: "playlist:WL")
                 show(target ? "Saved to Watch Later" : "Removed from Watch Later")
             } catch {
                 show("Watch Later failed: \(BridgeError.wrap(error).userMessage)")

@@ -67,15 +67,19 @@ final class FeedModel: ObservableObject {
     /// First appearance: show cache, fetch if missing or stale. With `keepPlace` (FeedView,
     /// which offers "Show the latest"), a fetch for a list already on screen is kept aside.
     func loadIfNeeded(_ model: AppModel, keepPlace: Bool = false) async {
+        var restoredOld = false
         if page == nil, let key = cacheKey, let cached = model.store.cachedPage(key, as: FeedPage.self) {
             var restored = cached.value
             hasStaleContinuation = restored.continuation != nil
             restored.continuation = nil
             page = restored
             fetchedAt = cached.fetchedAt
+            // A list from an earlier launch that is over an hour old is replaced as soon as the
+            // new one arrives instead of waiting for "Show the latest".
+            restoredOld = Date().timeIntervalSince(cached.fetchedAt) > 3600
         }
         if page == nil || isStale {
-            await refresh(model, keepPlace: keepPlace && !wasChanged)
+            await refresh(model, keepPlace: keepPlace && !wasChanged && !restoredOld)
         }
     }
 
