@@ -42390,6 +42390,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     throw new BridgeError(kind, message, detail);
   }
   __name(fail, "fail");
+  var BOT_CHECK = /not a bot|confirm you(?:'|’| a)re not/i;
   function extractStatus(message) {
     const m = /status(?: code)? (\d{3})/i.exec(message) || /failed: (\d{3})/i.exec(message);
     return m ? Number(m[1]) : void 0;
@@ -42415,7 +42416,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     else if (status === 404) kind = "notFound";
     else if (status && status >= 500) kind = "network";
     else if (/Network request failed|timed out|offline|could not connect|NSURLErrorDomain|network connection/i.test(haystack)) kind = "network";
-    else if (/not a bot|confirm you/i.test(haystack)) kind = "botCheck";
+    else if (BOT_CHECK.test(haystack)) kind = "botCheck";
     else if (/must be signed in|sign in|login|log in/i.test(haystack)) kind = "loginRequired";
     else if (/po ?token|botguard|integrity token/i.test(haystack)) kind = "poToken";
     else if (/decipher|nsig|n\/sig|signature|player script|player id|player data/i.test(haystack)) kind = "extraction";
@@ -44640,11 +44641,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return { status: p.status || "UNKNOWN", reason: text(p.reason) || text(p.error_screen?.reason) || void 0 };
   }
   __name(playabilityOf, "playabilityOf");
+  var AGE_GATE = /confirm your age|age[- ]restricted|inappropriate for some users/i;
   function checkPlayable(info2) {
     const { status, reason } = playabilityOf(info2);
     if (status === "OK") return;
     const message = reason || `YouTube says this video can't be played (${status}).`;
-    if (/not a bot|confirm you/i.test(message)) fail("botCheck", message, status);
+    if (AGE_GATE.test(message) || /^AGE_/.test(status)) fail("loginRequired", message, status);
+    if (BOT_CHECK.test(message)) fail("botCheck", message, status);
     if (status === "LOGIN_REQUIRED") fail("loginRequired", message, status);
     if (status === "LIVE_STREAM_OFFLINE") fail("upcoming", message, status);
     fail("unavailable", message, status);

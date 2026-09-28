@@ -4,7 +4,7 @@ import { YT } from 'youtubei.js/web';
 import { state, requireSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
 import { toItem } from './normalize.js';
 import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
-import { fail, classify, BridgeError } from './errors.js';
+import { fail, classify, BridgeError, BOT_CHECK } from './errors.js';
 import { contentPoToken } from './potoken.js';
 import { tvIdentity } from './platform.js';
 
@@ -133,11 +133,15 @@ function playabilityOf(info) {
   return { status: p.status || 'UNKNOWN', reason: text(p.reason) || text(p.error_screen?.reason) || undefined };
 }
 
+// Age gates ("Sign in to confirm your age"): shown with YouTube's reason, not as a bot check.
+const AGE_GATE = /confirm your age|age[- ]restricted|inappropriate for some users/i;
+
 export function checkPlayable(info) {
   const { status, reason } = playabilityOf(info);
   if (status === 'OK') return;
   const message = reason || `YouTube says this video can't be played (${status}).`;
-  if (/not a bot|confirm you/i.test(message)) fail('botCheck', message, status);
+  if (AGE_GATE.test(message) || /^AGE_/.test(status)) fail('loginRequired', message, status);
+  if (BOT_CHECK.test(message)) fail('botCheck', message, status);
   if (status === 'LOGIN_REQUIRED') fail('loginRequired', message, status);
   if (status === 'LIVE_STREAM_OFFLINE') fail('upcoming', message, status);
   fail('unavailable', message, status);

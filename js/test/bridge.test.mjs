@@ -270,3 +270,10 @@ test('errors are classified for Swift', async () => {
   await assert.rejects(call('more', { key: 'nope:1' }), (e) => e.kind === 'expired');
   await assert.rejects(call('search', { query: '   ' }), (e) => e.kind === 'invalid');
 });
+
+test('an age gate is shown with YouTube\'s reason, not as a bot check', async () => {
+  const { call } = await connected();
+  await assert.rejects(call('videoInfo', { id: 'AGEGATED001', client: 'TV' }), (e) =>
+    e.kind === 'loginRequired' && /confirm your age/.test(e.message));
+  await assert.rejects(call('videoInfo', { id: 'BOTCHECK001', client: 'TV' }), (e) => e.kind === 'botCheck');
+});

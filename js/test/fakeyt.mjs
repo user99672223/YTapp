@@ -182,6 +182,12 @@ function cipher(itag) {
   return `s=SIGXYZ&sp=sig&url=${encodeURIComponent(FORMAT_URL(itag))}`;
 }
 
+// Player answers for special video ids: an age gate and a bot check.
+const NOT_PLAYABLE = {
+  AGEGATED001: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm your age. This video may be inappropriate for some users.' },
+  BOTCHECK001: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm you’re not a bot' }
+};
+
 function playerResponse(id) {
   return {
     responseContext: {},
@@ -502,6 +508,7 @@ export function createFakeYouTube(options = {}) {
       if ((options.rejectClients || []).includes(clientName)) {
         return { status: 400, body: { error: { code: 400, message: 'Request contains an invalid argument.', status: 'INVALID_ARGUMENT' } } };
       }
+      if (NOT_PLAYABLE[body.videoId]) return { status: 200, body: { responseContext: {}, playabilityStatus: NOT_PLAYABLE[body.videoId] } };
       return { status: 200, body: playerResponse(body.videoId) };
     }
     if (path === '/youtubei/v1/next') return { status: 200, body: nextResponse(body.videoId) };
