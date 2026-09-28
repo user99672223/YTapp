@@ -5,11 +5,15 @@ YouTube.js inside JavaScriptCore for InnerTube access, libmpv (MPVKit) for playb
 
 ## Layout
 - `project.yml` — XcodeGen spec. **Never hand-edit a `.pbxproj`**; the project is generated in CI.
-- `App/Sources/App` — app entry, root/tab navigation, shared app state, SwiftData persistence.
-- `App/Sources/YouTubeBridge` — JavaScriptCore runtime, native polyfill backing (fetch via URLSession,
-  timers, crypto, file cache), `YouTubeClient` (typed async API over the JS bridge), Keychain.
-- `App/Sources/Player` — libmpv wrapper, Metal layer view, display criteria (frame-rate match),
-  watch-history sync, CPU monitor.
+- `App/Sources/App` — `TubeApp` (entry + root/tab views), `AppModel` (runtime + session lifecycle,
+  auth-error recovery via `api {}`), `Router` (tabs, stacks, full-screen players), `Persistence`
+  (SwiftData: settings, resume positions, feed cache).
+- `App/Sources/YouTubeBridge` — `JSRuntime` (JavaScriptCore host + `__native` functions, implements
+  Core's `BridgeTransport`), `NativeHTTP` + `CookieStore` (URLSession fetch, cookie rotation),
+  `KeychainStore`, `BundleManager` (downloaded vs built-in bundle). The typed API is Core's
+  `YouTubeService`.
+- `App/Sources/Player` — `MPVPlayer` (libmpv), `PlayerViews` (Metal view, frame-rate matching,
+  CPU/memory stats), `PlaybackReporter` (history + watch-time pings), `PlaybackDiagnostics`.
 - `App/Sources/Features/*` — one folder per screen (Setup, Home, Subscriptions, Shorts, Search,
   Watch, Channel, Library, Settings) + `Features/Shared` UI components.
 - `App/Resources/js/youtubei.bundle.js` — built by `js/` and **committed**. CI fails if stale.

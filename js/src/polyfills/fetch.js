@@ -1,7 +1,7 @@
 // fetch, Request, Response, Headers, Blob, File, FormData and a minimal ReadableStream.
 // Network I/O is delegated to the host (`__native.fetch`, URLSession in the app).
 import { nativeFn } from './native.js';
-import { utf8Encode, utf8Decode, toUint8Array } from './encoding.js';
+import { utf8Encode, utf8Decode, toUint8Array, exactBytes } from './encoding.js';
 import { DOMException } from './events.js';
 import { URLSearchParams } from './url.js';
 
@@ -573,7 +573,7 @@ export function fetch(input, init) {
       entry.cleanup = () => signal.removeEventListener('abort', onAbort);
     }
     const headerPairs = Array.from(request.headers.entries());
-    const body = request._bodyText !== null ? request._bodyText : request._bodyBytes;
+    const body = request._bodyText !== null ? request._bodyText : (request._bodyBytes ? exactBytes(request._bodyBytes) : null);
     try {
       nativeFetch(id, request.url, request.method, JSON.stringify(headerPairs), body === undefined ? null : body, request.redirect);
     } catch (e) {

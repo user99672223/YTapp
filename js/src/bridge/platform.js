@@ -3,7 +3,7 @@
 import { Platform, Log } from 'youtubei.js/web';
 import { nativeFn } from '../polyfills/native.js';
 import { sha1Hex } from '../polyfills/base.js';
-import { toUint8Array } from '../polyfills/encoding.js';
+import { toUint8Array, exactBytes } from '../polyfills/encoding.js';
 
 // ICache backed by files in the app's Caches directory (see JSRuntime.swift).
 export class NativeCache {
@@ -32,7 +32,7 @@ export class NativeCache {
   async set(key, value) {
     const k = String(key);
     const setter = nativeFn('cacheSet');
-    const u8 = new Uint8Array(toUint8Array(value));
+    const u8 = exactBytes(new Uint8Array(toUint8Array(value)));
     if (setter) setter(k, u8);
     else this._memory.set(k, u8.buffer);
   }

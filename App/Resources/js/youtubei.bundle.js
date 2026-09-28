@@ -77,11 +77,16 @@
     throw new TypeError("Expected an ArrayBuffer or ArrayBufferView");
   }
   __name(toUint8Array, "toUint8Array");
+  function exactBytes(bytes) {
+    const u82 = toUint8Array(bytes);
+    return u82.byteOffset === 0 && u82.byteLength === u82.buffer.byteLength ? u82 : u82.slice();
+  }
+  __name(exactBytes, "exactBytes");
   function utf8Decode(input) {
     const bytes = toUint8Array(input);
     const nativeDecode = nativeFn("utf8Decode");
     if (nativeDecode && bytes.length > 64) {
-      const out2 = nativeDecode(bytes);
+      const out2 = nativeDecode(exactBytes(bytes));
       if (typeof out2 === "string") return out2;
     }
     let out = "";
@@ -1585,7 +1590,7 @@ ${value}\r
         entry.cleanup = () => signal.removeEventListener("abort", onAbort);
       }
       const headerPairs = Array.from(request.headers.entries());
-      const body = request._bodyText !== null ? request._bodyText : request._bodyBytes;
+      const body = request._bodyText !== null ? request._bodyText : request._bodyBytes ? exactBytes(request._bodyBytes) : null;
       try {
         nativeFetch(id, request.url, request.method, JSON.stringify(headerPairs), body === void 0 ? null : body, request.redirect);
       } catch (e) {
@@ -42277,7 +42282,7 @@ ${getNsigProcessorFn(eval_args.n, eval_args.sp, eval_args.sig)}`;
     async set(key, value) {
       const k = String(key);
       const setter = nativeFn("cacheSet");
-      const u82 = new Uint8Array(toUint8Array(value));
+      const u82 = exactBytes(new Uint8Array(toUint8Array(value)));
       if (setter) setter(k, u82);
       else this._memory.set(k, u82.buffer);
     }

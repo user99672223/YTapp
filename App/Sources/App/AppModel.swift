@@ -37,6 +37,8 @@ final class AppModel: ObservableObject {
     let logs = LogBuffer()
     let bundles = BundleManager()
     let fileCache: FileCache
+    /// Video info is reused for 5 minutes (RefreshPolicy.videoInfo) instead of refetching.
+    let videoInfoCache = TTLCache<String, VideoDetails>()
     private(set) var runtime: JSRuntime?
     private(set) var service: YouTubeService?
     private var authFailures = 0
@@ -194,7 +196,8 @@ final class AppModel: ObservableObject {
         account = info
         authProblem = nil
         fileCache.remove("innertube_session_data")
-        await connect(showProgress: true)
+        // Answer the phone/computer right away; the session is created in the background.
+        Task { await self.connect(showProgress: true) }
         return info
     }
 
@@ -221,6 +224,7 @@ final class AppModel: ObservableObject {
     // MARK: - Maintenance
 
     func clearCaches() async {
+        videoInfoCache.removeAll()
         store.clearFeedCache()
         fileCache.clear()
         URLCache.shared.removeAllCachedResponses()

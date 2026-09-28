@@ -84,17 +84,42 @@ final class WatchViewModel: ObservableObject {
         phase = .loading("Loading video…")
         do {
             let client = model.settings.streamClient
-            let fetched = try await model.api { try await $0.videoInfo(videoId, client: client) }
+            let cacheKey = "\(videoId)|\(client)"
+            let cached = model.videoInfoCache.value(for: cacheKey)
+            var fetched: VideoDetails
+            if let cached {
+                fetched = cached
+            } else {
+                fetched = try await fetchDetails(videoId, client: client)
+            }
             guard !closed, self.videoId == videoId else { return }
             details = fetched
             likeStatus = fetched.likeStatus
             isSubscribed = fetched.channel.isSubscribed
-            try await startPlayback(fetched, at: nil)
+            do {
+                try await startPlayback(fetched, at: nil)
+            } catch let error as BridgeError where error.kind == .expired && cached != nil {
+                // The bridge no longer holds this video's player data; fetch it again.
+                fetched = try await fetchDetails(videoId, client: client)
+                details = fetched
+                try await startPlayback(fetched, at: nil)
+            }
             loadWatchLaterStatus()
         } catch {
             guard !closed else { return }
             phase = .failed(Self.describe(error))
         }
+    }
+
+    private func fetchDetails(_ id: String, client: String) async throws -> VideoDetails {
+        let fetched = try await model.api { try await $0.videoInfo(id, client: client) }
+        model.videoInfoCache.set(fetched, for: "\(id)|\(client)", ttl: RefreshPolicy.ttl(.videoInfo))
+        return fetched
+    }
+
+    private func invalidateCachedDetails() {
+        guard let id = details?.id else { return }
+        model.videoInfoCache.remove("\(id)|\(model.settings.streamClient)")
     }
 
     /// Re-fetches (stream URLs may have expired) and continues at the current position.
@@ -104,8 +129,7 @@ final class WatchViewModel: ObservableObject {
         Task {
             phase = .loading("Retrying…")
             do {
-                let client = model.settings.streamClient
-                let fetched = try await model.api { try await $0.videoInfo(id, client: client) }
+                let fetched = try await fetchDetails(id, client: model.settings.streamClient)
                 details = fetched
                 try await startPlayback(fetched, at: position > 1 ? position : nil)
             } catch {
@@ -322,6 +346,7 @@ final class WatchViewModel: ObservableObject {
         let desired: LikeStatus = likeStatus == target ? .none : target
         let previous = likeStatus
         likeStatus = desired
+        invalidateCachedDetails()
         Task {
             do {
                 likeStatus = try await model.api { try await $0.rate(videoId: id, desired) }
@@ -335,6 +360,7 @@ final class WatchViewModel: ObservableObject {
     func toggleSubscription() {
         guard let channelId = details?.channel.id else { return }
         let target = !(isSubscribed ?? false)
+        invalidateCachedDetails()
         Task {
             do {
                 isSubscribed = try await model.api { try await $0.setSubscribed(channelId: channelId, target) }

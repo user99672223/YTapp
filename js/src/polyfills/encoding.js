@@ -45,11 +45,18 @@ export function toUint8Array(input) {
   throw new TypeError('Expected an ArrayBuffer or ArrayBufferView');
 }
 
+// Typed arrays handed to the host always start at offset 0 of their own buffer, so the host
+// never has to care about views into larger buffers.
+export function exactBytes(bytes) {
+  const u8 = toUint8Array(bytes);
+  return u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength ? u8 : u8.slice();
+}
+
 export function utf8Decode(input) {
   const bytes = toUint8Array(input);
   const nativeDecode = nativeFn('utf8Decode');
   if (nativeDecode && bytes.length > 64) {
-    const out = nativeDecode(bytes);
+    const out = nativeDecode(exactBytes(bytes));
     if (typeof out === 'string') return out;
   }
   let out = '';

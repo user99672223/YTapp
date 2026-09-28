@@ -118,17 +118,15 @@ final class ShortsViewModel: ObservableObject {
             current = info
             likeStatus = info.likeStatus
             isSubscribed = info.channel.isSubscribed
-            let streams: ResolvedStreams
-            let selection: StreamSelection
+            let resolved: (selection: StreamSelection, streams: ResolvedStreams)
             do {
-                selection = try QualitySelector.select(info.formats, preferences: model.settings.quality)
-                streams = try await resolve(id, selection)
+                resolved = try await selectAndResolve(id, formats: info.formats)
             } catch let error as BridgeError where error.kind == .expired {
                 // The bridge dropped this Short's player data; fetch it again.
                 let fresh = try await detailsFor(id, refresh: true)
-                selection = try QualitySelector.select(fresh.formats, preferences: model.settings.quality)
-                streams = try await resolve(id, selection)
+                resolved = try await selectAndResolve(id, formats: fresh.formats)
             }
+            let (selection, streams) = resolved
             guard index == position, !closed else { return }
             guard let videoURL = streams.url(for: selection.video) else {
                 throw BridgeError(kind: .extraction, message: "YouTube didn't return a URL for this Short.")
@@ -156,10 +154,13 @@ final class ShortsViewModel: ObservableObject {
 
     private var reporterSelection: StreamSelection?
 
-    private func resolve(_ id: String, _ selection: StreamSelection) async throws -> ResolvedStreams {
+    private func selectAndResolve(_ id: String, formats available: [StreamFormat]) async throws
+        -> (selection: StreamSelection, streams: ResolvedStreams) {
+        let selection = try QualitySelector.select(available, preferences: model.settings.quality)
         var formats = [selection.video]
         if let audio = selection.audio { formats.append(audio) }
-        return try await model.api { try await $0.resolveFormats(videoId: id, formats: formats) }
+        let streams = try await model.api { try await $0.resolveFormats(videoId: id, formats: formats) }
+        return (selection, streams)
     }
 
     private func detailsFor(_ id: String, refresh: Bool) async throws -> ShortDetails {
