@@ -181,6 +181,16 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
   assert.equal(moreLists.continuation, undefined);
 });
 
+test('channel header counts', async () => {
+  const { call } = await connected();
+  const one = await call('channel', { id: CH1 });
+  // The handle contains "video"; the video count is the "321 videos" part.
+  assert.equal(one.channel.handle, '@videogamefan');
+  assert.equal(one.channel.subscriberCountText, '1.5M subscribers');
+  assert.equal(one.channel.videoCountText, '321 videos');
+  assert.deepEqual(one.tabs, ['videos']);
+});
+
 test('Shorts feed seeds from Home and resolves a short', async () => {
   const { call, yt } = await connected();
   const feed = await call('shortsFeed', {});

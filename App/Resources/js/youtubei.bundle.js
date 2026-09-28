@@ -44373,8 +44373,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       out.banner = bestThumb(v?.banner?.image, 2560);
       const parts = (v?.metadata?.metadata_rows || []).flatMap((row) => (row.metadata_parts || []).map((p) => text(p.text))).filter(Boolean);
       out.handle = parts.find((p) => p.startsWith("@"));
-      out.subscriberCountText = parts.find((p) => /subscriber/i.test(p));
-      out.videoCountText = parts.find((p) => /video/i.test(p));
+      out.subscriberCountText = parts.find((p) => !p.startsWith("@") && /\bsubscribers?\b/i.test(p));
+      out.videoCountText = parts.find((p) => !p.startsWith("@") && /\bvideos?\b/i.test(p));
       if (!out.description) out.description = text(v?.description?.description);
     } else if (type === "C4TabbedHeader") {
       out.name = out.name || text(h.author?.name);

@@ -189,9 +189,10 @@ function channelHeader(channel, id) {
     out.avatar = out.avatar || bestThumb(image?.avatar?.image || image?.image, 240);
     out.banner = bestThumb(v?.banner?.image, 2560);
     const parts = (v?.metadata?.metadata_rows || []).flatMap((row) => (row.metadata_parts || []).map((p) => text(p.text))).filter(Boolean);
+    // The @handle is one of these parts and may itself contain "video" (@videogamedunkey).
     out.handle = parts.find((p) => p.startsWith('@'));
-    out.subscriberCountText = parts.find((p) => /subscriber/i.test(p));
-    out.videoCountText = parts.find((p) => /video/i.test(p));
+    out.subscriberCountText = parts.find((p) => !p.startsWith('@') && /\bsubscribers?\b/i.test(p));
+    out.videoCountText = parts.find((p) => !p.startsWith('@') && /\bvideos?\b/i.test(p));
     if (!out.description) out.description = text(v?.description?.description);
   } else if (type === 'C4TabbedHeader') {
     out.name = out.name || text(h.author?.name);

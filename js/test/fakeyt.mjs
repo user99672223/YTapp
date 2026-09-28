@@ -488,6 +488,64 @@ function playlistsBrowse() {
   });
 }
 
+// A channel page. Without params it is the Home tab; params 'VIDEOS' selects the Videos tab,
+// whose lockups have a single "views • date" metadata row and no author.
+function channelBrowse(id, params) {
+  const name = id === CH1 ? 'Channel One' : 'Channel Two';
+  const handle = id === CH1 ? '@videogamefan' : '@channeltwo';
+  const prefix = id === CH1 ? 'ONE' : 'TWO';
+  const tab = (title, path, tabParams, content) => ({
+    tabRenderer: {
+      title,
+      selected: !!content,
+      endpoint: {
+        browseEndpoint: { browseId: id, params: tabParams, canonicalBaseUrl: `/${handle}` },
+        commandMetadata: { webCommandMetadata: { url: `/${handle}/${path}`, webPageType: 'WEB_PAGE_TYPE_CHANNEL', apiUrl: '/youtubei/v1/browse' } }
+      },
+      ...(content ? { content } : {})
+    }
+  });
+  const videos = params === 'VIDEOS' ? {
+    richGridRenderer: {
+      contents: [
+        richItem(lockupView({ id: `${prefix}VIDEO01`, title: `${name} upload`, rows: [['1.2M views', '3 days ago']] })),
+        richItem(lockupView({ id: `${prefix}VIDEO02`, title: `${name} older upload`, rows: [['900 views', '2 years ago']] }))
+      ]
+    }
+  } : null;
+  return {
+    responseContext: {},
+    header: {
+      pageHeaderRenderer: {
+        pageTitle: name,
+        content: {
+          pageHeaderViewModel: {
+            title: { dynamicTextViewModel: { text: { content: name } } },
+            metadata: {
+              contentMetadataViewModel: {
+                metadataRows: [
+                  { metadataParts: [{ text: { content: handle } }] },
+                  { metadataParts: [{ text: { content: '1.5M subscribers' } }, { text: { content: '321 videos' } }] }
+                ],
+                delimiter: ' • '
+              }
+            }
+          }
+        }
+      }
+    },
+    metadata: { channelMetadataRenderer: { title: name, description: `About ${name}`, externalId: id, avatar: thumbs(`https://yt3.ggpht.com/${prefix}`, 176, 176) } },
+    contents: {
+      twoColumnBrowseResultsRenderer: {
+        tabs: [
+          tab('Home', 'featured', 'HOME', videos ? null : { sectionListRenderer: { contents: [] } }),
+          tab('Videos', 'videos', 'VIDEOS', videos)
+        ]
+      }
+    }
+  };
+}
+
 function guideResponse() {
   const entry = (id, name) => ({
     guideEntryRenderer: {
@@ -578,6 +636,7 @@ export function createFakeYouTube(options = {}) {
       }
       if (body?.browseId === 'FEsubscriptions') return { status: 200, body: subscriptionsBrowse() };
       if (body?.browseId === 'FEplaylist_aggregation') return { status: 200, body: playlistsBrowse() };
+      if (body?.browseId === CH1 || body?.browseId === CH2) return { status: 200, body: channelBrowse(body.browseId, body.params) };
       return { status: 404, body: { error: 'unknown browse' } };
     }
     if (path === '/youtubei/v1/guide') return { status: 200, body: guideResponse() };
