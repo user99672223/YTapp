@@ -52,6 +52,13 @@ public struct BundleInfo: Codable, Hashable, Sendable {
     public var youtubeiVersion: String
     public var bgutilsVersion: String?
     public var `protocol`: Int?
+
+    public init(bundleVersion: String, youtubeiVersion: String, bgutilsVersion: String? = nil, protocol: Int? = nil) {
+        self.bundleVersion = bundleVersion
+        self.youtubeiVersion = youtubeiVersion
+        self.bgutilsVersion = bgutilsVersion
+        self.protocol = `protocol`
+    }
 }
 
 public enum ChannelTab: String, Codable, Sendable, CaseIterable, Identifiable {

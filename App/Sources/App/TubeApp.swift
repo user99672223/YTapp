@@ -1,10 +1,17 @@
 import SwiftUI
+import AVFoundation
 import Core
 
 @main
 struct TubeApp: App {
     @StateObject private var model = AppModel()
     @StateObject private var router = Router()
+
+    init() {
+        // Video playback app: play audio even with the silent switch / other apps' audio.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
 
     var body: some Scene {
         WindowGroup {

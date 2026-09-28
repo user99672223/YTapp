@@ -203,11 +203,19 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     func seek(to seconds: Double) {
+        clearEOF()
         queue.async { [self] in command(["seek", String(format: "%.3f", max(0, seconds)), "absolute"]) }
     }
 
     func seek(by delta: Double) {
+        clearEOF()
         queue.async { [self] in command(["seek", String(format: "%.3f", delta), "relative"]) }
+    }
+
+    private func clearEOF() {
+        DispatchQueue.main.async { [state] in
+            if state.isEOF { state.isEOF = false }
+        }
     }
 
     func setSpeed(_ speed: Double) {
