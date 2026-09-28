@@ -396,7 +396,7 @@ test('a stream googlevideo refuses (403) is taken from a signed-out client; hist
   assert.equal(audio.searchParams.get('fakeclient'), 'VISIONOS');
   assert.equal(video.searchParams.get('itag'), '401');
   assert.match(resolved.userAgent, /Safari/);
-  assert.ok(bundle.logs.some((l) => /googlevideo refused the TV stream \(itag 401, HTTP 403\)/.test(l.message)));
+  assert.ok(bundle.logs.some((l) => l.level === 'info' && /googlevideo refused the TV stream \(itag 401, HTTP 403\)/.test(l.message)), 'a handled refusal is logged below the error level');
   const probes = yt.hits.filter((h) => h.path === '/videoplayback');
   assert.equal(probes.length, 2, 'one one-byte probe per stream source');
   assert.equal(probes[0].headers.range, 'bytes=0-0');

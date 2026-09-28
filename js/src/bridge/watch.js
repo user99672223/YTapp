@@ -445,7 +445,8 @@ export async function resolveFormats({ id, indices, itags }) {
         headers: { Origin: 'https://www.youtube.com', Referer: 'https://www.youtube.com/' }
       };
     }
-    console.warn(`video ${id}: googlevideo refused the ${source.client} stream (itag ${chosen[0].format.itag}, HTTP 403) | ${first}`);
+    // Handled below (another source is tried), so not an error.
+    console.info(`video ${id}: googlevideo refused the ${source.client} stream (itag ${chosen[0].format.itag}, HTTP 403) | ${first}`);
     refused.add(source.client);
     if (attempt >= FALLBACK_CLIENTS.length + SIGNED_OUT_STREAM_CLIENTS.length) {
       fail('extraction', 'YouTube refused the video stream of every client it was tried with (HTTP 403).');
