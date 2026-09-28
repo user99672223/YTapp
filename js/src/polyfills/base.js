@@ -25,11 +25,20 @@ function formatArg(arg) {
   }
 }
 
+// YouTube.js reports gaps in its parser (renderers it doesn't know, text runs it can't map) as
+// warnings. They don't affect the app, so they are logged below the error level.
+function levelFor(level, message) {
+  if (level !== 'warn' && level !== 'error') return level;
+  if (message.startsWith('[YOUTUBEJS][Text]')) return 'debug';
+  if (message.startsWith('[YOUTUBEJS][Parser]')) return 'info';
+  return level;
+}
+
 export function makeConsole() {
   const log = nativeFn('log');
   const emit = (level) => (...args) => {
     const message = args.map(formatArg).join(' ');
-    if (log) log(level, message);
+    if (log) log(levelFor(level, message), message);
   };
   return {
     log: emit('log'),

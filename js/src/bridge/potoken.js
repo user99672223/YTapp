@@ -8,14 +8,13 @@ import { installDomShim } from './domshim.js';
 import { fail } from './errors.js';
 
 const REQUEST_KEY = 'O43z0dpjhgX20SCx4KAo';
-const NEEDS_PO_TOKEN = new Set(['WEB', 'MWEB', 'WEB_EMBEDDED', 'WEB_CREATOR', 'YTKIDS']);
+const NEEDS_PO_TOKEN = new Set(['WEB', 'MWEB', 'WEB_CREATOR', 'YTKIDS']);
 
 const po = {
   minter: null,
   expiresAt: 0,
   creating: null,
-  lastError: null,
-  sessionToken: null
+  lastError: null
 };
 
 export function clientNeedsPoToken(client) {
@@ -56,13 +55,9 @@ async function createMinter() {
   if (typeof integrityToken !== 'string') fail('poToken', 'YouTube did not issue an integrity token (the BotGuard check failed).');
   po.minter = await WebPoMinter.create({ integrityToken }, webPoSignalOutput);
   po.expiresAt = Date.now() + Math.max(300, ttl - 120) * 1000;
-  // Session-bound token for streaming URLs (pot=) — bound to the visitor data.
-  const visitorData = yt.session.context.client.visitorData;
-  if (visitorData) {
-    po.sessionToken = await po.minter.mintAsWebsafeString(visitorData);
-    yt.session.po_token = po.sessionToken;
-    if (yt.session.player) yt.session.player.po_token = po.sessionToken;
-  }
+  // Tokens are minted per video (content-bound) and passed with that video's player request and
+  // its googlevideo URLs only. Never set yt.session.po_token: YouTube.js would then send it with
+  // every client's player request and append it to every deciphered URL.
   return po.minter;
 }
 
@@ -95,7 +90,6 @@ export async function contentPoToken(client, videoId) {
 export function resetPoToken() {
   po.minter = null;
   po.expiresAt = 0;
-  po.sessionToken = null;
 }
 
 export function poTokenState() {

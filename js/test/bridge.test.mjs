@@ -210,29 +210,40 @@ test('a rejected stream client falls back to the next one and is remembered', as
   const bundle = loadBundle({ router: yt.router });
   await bundle.call('init', { cookie: COOKIE, client: 'TV' });
   const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });
-  assert.equal(details.playerClient, 'TV_SIMPLY');
+  assert.equal(details.playerClient, 'WEB_EMBEDDED');
   const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player').map((h) => h.body.context.client.clientName);
-  assert.deepEqual(players(), ['TVHTML5', 'TVHTML5_SIMPLY']);
+  assert.deepEqual(players(), ['TVHTML5', 'WEB_EMBEDDED_PLAYER']);
   assert.ok(bundle.logs.some((l) => /stream client TV failed: \[extraction 400\]/.test(l.message)), 'each failed client is logged');
   const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [details.formats.find((f) => f.itag === 251).index] });
-  assert.ok(Object.values(resolved.urls)[0].startsWith('https://'));
+  const url = new URL(Object.values(resolved.urls)[0]);
+  assert.equal(url.searchParams.get('pot'), null, 'no PO token on clients that need none');
   // The rejected client is skipped for the rest of the session.
   const short = await bundle.call('shortInfo', { id: 'SHORTID0001', client: 'TV' });
-  assert.equal(short.playerClient, 'TV_SIMPLY');
-  assert.deepEqual(players().slice(2), ['TVHTML5_SIMPLY']);
+  assert.equal(short.playerClient, 'WEB_EMBEDDED');
+  assert.deepEqual(players().slice(2), ['WEB_EMBEDDED_PLAYER']);
 });
 
-test('automatic client starts with TV_SIMPLY; all clients failing gives one clear error', async () => {
+test('automatic client is the 5.x TV app identity; all clients failing gives one clear error', async () => {
   const { call, yt } = await connected();
   const auto = await call('videoInfo', { id: 'VIDEOID0001', client: 'AUTO' });
-  assert.equal(auto.playerClient, 'TV_SIMPLY');
-  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 1);
+  assert.equal(auto.playerClient, 'TV');
+  const hits = yt.hits.filter((h) => h.path === '/youtubei/v1/player');
+  assert.equal(hits.length, 1);
+  const client = hits[0].body.context.client;
+  assert.equal(client.clientName, 'TVHTML5');
+  assert.equal(client.clientVersion, '5.20260707');
+  assert.equal(client.browserName, undefined);
+  assert.match(hits[0].headers['user-agent'], /Cobalt/);
+  assert.equal(hits[0].headers['x-youtube-client-version'], '5.20260707');
+  const resolved = await call('resolveFormats', { id: 'VIDEOID0001', indices: [auto.formats.find((f) => f.itag === 401).index] });
+  assert.equal(new URL(Object.values(resolved.urls)[0]).searchParams.get('cver'), '5.20260707');
 
-  const all = createFakeYouTube({ rejectClients: ['TVHTML5', 'TVHTML5_SIMPLY', 'ANDROID_VR', 'iOS'] });
+  const all = createFakeYouTube({ rejectClients: ['TVHTML5', 'WEB_EMBEDDED_PLAYER', 'MWEB'] });
   const bundle = loadBundle({ router: all.router });
   await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
   await assert.rejects(bundle.call('videoInfo', { id: 'VIDEOID0001' }), (e) =>
-    e.kind === 'extraction' && /No stream client could play this video/.test(e.message) && /TV_SIMPLY: \[extraction 400\]/.test(e.detail));
+    e.kind === 'extraction' && /No stream client could play this video/.test(e.message) &&
+    /TV: \[extraction 400\]/.test(e.detail) && /WEB_EMBEDDED: \[extraction 400\]/.test(e.detail));
 });
 
 test('errors are classified for Swift', async () => {

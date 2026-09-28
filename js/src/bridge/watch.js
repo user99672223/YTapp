@@ -197,15 +197,16 @@ export function detailsOf(info, client) {
 
 // ---------------------------------------------------------------- stream clients
 
-// Tried in this order when the preferred client fails; none of them needs a PO token.
-// TV_SIMPLY first: in September 2026 YouTube rejects the full TV client (HTTP 400 / "The page
-// needs to be reloaded") while TV_SIMPLY, ANDROID_VR and IOS still return direct stream URLs.
-export const FALLBACK_CLIENTS = ['TV_SIMPLY', 'TV', 'ANDROID_VR', 'IOS'];
+// Tried in this order when the preferred client fails. All of them accept the account cookies
+// (September 2026): TV (sent as the older 5.x TV app, see platform.js; the 7.x version gets
+// SABR-only answers when signed in), WEB_EMBEDDED (no PO token, embeddable videos only) and MWEB
+// (needs a PO token). TV_SIMPLY, ANDROID_VR, IOS and VISIONOS answer signed-in requests with 400.
+export const FALLBACK_CLIENTS = ['TV', 'WEB_EMBEDDED', 'MWEB'];
 
 // Reasons that mean the video itself can't be played, so other clients won't help.
 const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
 // Failures that are about the client, not the video: skip that client for the rest of the session.
-const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+const CLIENT_BROKEN = /no longer supported|SABR|could not be deciphered|no adaptive formats/i;
 
 export function clientChain(preferred) {
   const p = String(preferred || state.options.client || 'AUTO').toUpperCase();
@@ -245,12 +246,12 @@ export async function playerWithFallback(yt, id, preferred, load) {
       state.goodClient = c;
       state.badClients.delete(c);
       if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(', ')} failed)`);
-      return { info, client: c };
+      return { info, client: c, poToken: poToken || undefined };
     } catch (e) {
       const cls = classify(e);
       failures.push({ client: c, ...cls });
       console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ''}] ${cls.message}`);
-      if (cls.status === 400 || cls.kind === 'poToken' || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
+      if (cls.status === 400 || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
       if (['network', 'timeout', 'noSession', 'upcoming'].includes(cls.kind)) break;
       if (cls.kind === 'unavailable' && VIDEO_GONE.test(cls.message)) break;
     }
@@ -264,9 +265,9 @@ export async function playerWithFallback(yt, id, preferred, load) {
 export async function videoInfo({ id, client }) {
   const yt = await requireSession();
   if (!id) fail('invalid', 'Missing video id.');
-  const { info, client: c } = await playerWithFallback(yt, id, client,
-    (name, poToken) => yt.getInfo(id, { client: name, po_token: poToken }));
-  putInfo(id, { info, client: c });
+  const { info, client: c, poToken } = await playerWithFallback(yt, id, client,
+    (name, token) => yt.getInfo(id, { client: name, po_token: token }));
+  putInfo(id, { info, client: c, poToken });
   return detailsOf(info, c);
 }
 
@@ -279,7 +280,13 @@ export async function resolveFormats({ id, indices }) {
   for (const index of indices || []) {
     const format = formats[index];
     if (!format) fail('extraction', `Format ${index} is not available any more.`);
-    const url = await format.decipher(yt.session.player);
+    let url = await format.decipher(yt.session.player);
+    // Web clients need the (video-bound) PO token on googlevideo requests too.
+    if (entry.poToken && url && /^https?:/.test(url)) {
+      const u = new URL(url);
+      u.searchParams.set('pot', entry.poToken);
+      url = u.toString();
+    }
     if (!url || typeof url !== 'string' || !/^https?:/.test(url)) fail('extraction', `Could not get a stream URL for format ${format.itag}.`);
     if (/[?&]sabr=1/.test(url)) fail('extraction', `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
     urls[String(index)] = url;

@@ -250,11 +250,18 @@ ${arg.stack}` : ""}`;
     }
   }
   __name(formatArg, "formatArg");
+  function levelFor(level, message) {
+    if (level !== "warn" && level !== "error") return level;
+    if (message.startsWith("[YOUTUBEJS][Text]")) return "debug";
+    if (message.startsWith("[YOUTUBEJS][Parser]")) return "info";
+    return level;
+  }
+  __name(levelFor, "levelFor");
   function makeConsole() {
     const log = nativeFn("log");
     const emit = /* @__PURE__ */ __name((level) => (...args) => {
       const message = args.map(formatArg).join(" ");
-      if (log) log(level, message);
+      if (log) log(levelFor(level, message), message);
     }, "emit");
     return {
       log: emit("log"),
@@ -42316,10 +42323,32 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return new Function(code)();
   }
   __name(evaluate2, "evaluate");
+  var TV_CLIENT_VERSION = "5.20260707";
+  var WEB_EMBEDDED_VERSION = "2.20260708.00.00";
+  function adjustRequestInit(init2) {
+    const body = init2 && init2.body;
+    if (typeof body !== "string" || body.indexOf('"TVHTML5"') === -1) return init2;
+    let json;
+    try {
+      json = JSON.parse(body);
+    } catch {
+      return init2;
+    }
+    const client = json && json.context && json.context.client;
+    if (!client || client.clientName !== "TVHTML5") return init2;
+    delete client.browserName;
+    delete client.browserVersion;
+    const headers = new globalThis.Headers(init2.headers);
+    headers.set("User-Agent", client.userAgent || Constants_exports.CLIENTS.TV.USER_AGENT);
+    return { ...init2, body: JSON.stringify(json), headers };
+  }
+  __name(adjustRequestInit, "adjustRequestInit");
   var loaded = false;
   function loadPlatform() {
     if (loaded) return;
     loaded = true;
+    Constants_exports.CLIENTS.TV.VERSION = TV_CLIENT_VERSION;
+    Constants_exports.CLIENTS.WEB_EMBEDDED.VERSION = WEB_EMBEDDED_VERSION;
     Platform.load({
       runtime: "unknown",
       // We are a native client (URLSession), so YouTube.js may set User-Agent / Origin headers.
@@ -42328,7 +42357,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       sha1Hash: /* @__PURE__ */ __name(async (data) => sha1Hex(data), "sha1Hash"),
       uuidv4: /* @__PURE__ */ __name(() => globalThis.crypto.randomUUID(), "uuidv4"),
       eval: evaluate2,
-      fetch: /* @__PURE__ */ __name((input, init2) => globalThis.fetch(input, init2), "fetch"),
+      fetch: /* @__PURE__ */ __name((input, init2) => globalThis.fetch(input, adjustRequestInit(init2)), "fetch"),
       Request: globalThis.Request,
       Response: globalThis.Response,
       Headers: globalThis.Headers,
@@ -43540,13 +43569,12 @@ return process(__tube_n, __tube_sp, __tube_s);`);
 
   // src/bridge/potoken.js
   var REQUEST_KEY = "O43z0dpjhgX20SCx4KAo";
-  var NEEDS_PO_TOKEN = /* @__PURE__ */ new Set(["WEB", "MWEB", "WEB_EMBEDDED", "WEB_CREATOR", "YTKIDS"]);
+  var NEEDS_PO_TOKEN = /* @__PURE__ */ new Set(["WEB", "MWEB", "WEB_CREATOR", "YTKIDS"]);
   var po = {
     minter: null,
     expiresAt: 0,
     creating: null,
-    lastError: null,
-    sessionToken: null
+    lastError: null
   };
   function clientNeedsPoToken(client) {
     return NEEDS_PO_TOKEN.has(String(client || "").toUpperCase());
@@ -43585,12 +43613,6 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (typeof integrityToken !== "string") fail("poToken", "YouTube did not issue an integrity token (the BotGuard check failed).");
     po.minter = await WebPoMinter.create({ integrityToken }, webPoSignalOutput);
     po.expiresAt = Date.now() + Math.max(300, ttl - 120) * 1e3;
-    const visitorData = yt.session.context.client.visitorData;
-    if (visitorData) {
-      po.sessionToken = await po.minter.mintAsWebsafeString(visitorData);
-      yt.session.po_token = po.sessionToken;
-      if (yt.session.player) yt.session.player.po_token = po.sessionToken;
-    }
     return po.minter;
   }
   __name(createMinter, "createMinter");
@@ -43620,7 +43642,6 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   function resetPoToken() {
     po.minter = null;
     po.expiresAt = 0;
-    po.sessionToken = null;
   }
   __name(resetPoToken, "resetPoToken");
   function poTokenState() {
@@ -44675,9 +44696,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     };
   }
   __name(detailsOf, "detailsOf");
-  var FALLBACK_CLIENTS = ["TV_SIMPLY", "TV", "ANDROID_VR", "IOS"];
+  var FALLBACK_CLIENTS = ["TV", "WEB_EMBEDDED", "MWEB"];
   var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|copyright|account associated/i;
-  var CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
+  var CLIENT_BROKEN = /no longer supported|SABR|could not be deciphered|no adaptive formats/i;
   function clientChain(preferred) {
     const p = String(preferred || state.options.client || "AUTO").toUpperCase();
     const first = p === "AUTO" ? state.goodClient || FALLBACK_CLIENTS[0] : p;
@@ -44713,12 +44734,12 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         state.goodClient = c;
         state.badClients.delete(c);
         if (failures.length) console.info(`video ${id}: streams from ${c} (after ${failures.map((f) => f.client).join(", ")} failed)`);
-        return { info: info2, client: c };
+        return { info: info2, client: c, poToken: poToken || void 0 };
       } catch (e) {
         const cls = classify(e);
         failures.push({ client: c, ...cls });
         console.warn(`video ${id}: stream client ${c} failed: [${cls.kind}${cls.status ? ` ${cls.status}` : ""}] ${cls.message}`);
-        if (cls.status === 400 || cls.kind === "poToken" || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
+        if (cls.status === 400 || CLIENT_BROKEN.test(cls.message)) state.badClients.set(c, cls.message);
         if (["network", "timeout", "noSession", "upcoming"].includes(cls.kind)) break;
         if (cls.kind === "unavailable" && VIDEO_GONE.test(cls.message)) break;
       }
@@ -44732,13 +44753,13 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   async function videoInfo({ id, client }) {
     const yt = await requireSession();
     if (!id) fail("invalid", "Missing video id.");
-    const { info: info2, client: c } = await playerWithFallback(
+    const { info: info2, client: c, poToken } = await playerWithFallback(
       yt,
       id,
       client,
-      (name, poToken) => yt.getInfo(id, { client: name, po_token: poToken })
+      (name, token) => yt.getInfo(id, { client: name, po_token: token })
     );
-    putInfo(id, { info: info2, client: c });
+    putInfo(id, { info: info2, client: c, poToken });
     return detailsOf(info2, c);
   }
   __name(videoInfo, "videoInfo");
@@ -44750,7 +44771,12 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     for (const index of indices || []) {
       const format = formats[index];
       if (!format) fail("extraction", `Format ${index} is not available any more.`);
-      const url = await format.decipher(yt.session.player);
+      let url = await format.decipher(yt.session.player);
+      if (entry.poToken && url && /^https?:/.test(url)) {
+        const u = new URL(url);
+        u.searchParams.set("pot", entry.poToken);
+        url = u.toString();
+      }
       if (!url || typeof url !== "string" || !/^https?:/.test(url)) fail("extraction", `Could not get a stream URL for format ${format.itag}.`);
       if (/[?&]sabr=1/.test(url)) fail("extraction", `Format ${format.itag} is only available through SABR streaming (client ${entry.client}).`);
       urls[String(index)] = url;
@@ -44865,10 +44891,10 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         console.warn("getShortsVideoInfo failed", e && e.message);
         return null;
       }),
-      playerWithFallback(yt, id, client, (name, poToken) => yt.getBasicInfo(id, { client: name, po_token: poToken }))
+      playerWithFallback(yt, id, client, (name, poToken2) => yt.getBasicInfo(id, { client: name, po_token: poToken2 }))
     ]);
-    const { info: playerInfo, client: c } = player;
-    putInfo(id, { info: playerInfo, client: c, reel });
+    const { info: playerInfo, client: c, poToken } = player;
+    putInfo(id, { info: playerInfo, client: c, reel, poToken });
     const basic = reel && reel.basic_info && reel.basic_info.title ? reel.basic_info : playerInfo.basic_info;
     const channelId = basic.channel_id || playerInfo.basic_info.channel_id;
     const subscribed = state.subscriptions.get(channelId);

@@ -1,6 +1,6 @@
 // YouTube.js platform shim for JavaScriptCore: native file cache, SHA-1, UUIDs, fetch and the
 // JavaScript evaluator used to run the extracted signature / n-parameter decipher code.
-import { Platform, Log } from 'youtubei.js/web';
+import { Platform, Log, Constants } from 'youtubei.js/web';
 import { nativeFn } from '../polyfills/native.js';
 import { sha1Hex } from '../polyfills/base.js';
 import { toUint8Array, exactBytes } from '../polyfills/encoding.js';
@@ -71,11 +71,39 @@ export function evaluate(data, env) {
   return new Function(code)();
 }
 
+// Stream-client identities (September 2026, same as yt-dlp): the TV client is sent as the 5.x TV
+// app ("tv_downgraded"), because signed-in 7.x requests only get SABR streams; WEB_EMBEDDED uses
+// a current web version. Player.decipher and the history pings read the same constants.
+export const TV_CLIENT_VERSION = '5.20260707';
+export const WEB_EMBEDDED_VERSION = '2.20260708.00.00';
+
+// TV requests look like the TV app: its user agent, and none of the desktop browser fields that
+// the web session context carries.
+export function adjustRequestInit(init) {
+  const body = init && init.body;
+  if (typeof body !== 'string' || body.indexOf('"TVHTML5"') === -1) return init;
+  let json;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return init;
+  }
+  const client = json && json.context && json.context.client;
+  if (!client || client.clientName !== 'TVHTML5') return init;
+  delete client.browserName;
+  delete client.browserVersion;
+  const headers = new globalThis.Headers(init.headers);
+  headers.set('User-Agent', client.userAgent || Constants.CLIENTS.TV.USER_AGENT);
+  return { ...init, body: JSON.stringify(json), headers };
+}
+
 let loaded = false;
 
 export function loadPlatform() {
   if (loaded) return;
   loaded = true;
+  Constants.CLIENTS.TV.VERSION = TV_CLIENT_VERSION;
+  Constants.CLIENTS.WEB_EMBEDDED.VERSION = WEB_EMBEDDED_VERSION;
   Platform.load({
     runtime: 'unknown',
     // We are a native client (URLSession), so YouTube.js may set User-Agent / Origin headers.
@@ -84,7 +112,7 @@ export function loadPlatform() {
     sha1Hash: async (data) => sha1Hex(data),
     uuidv4: () => globalThis.crypto.randomUUID(),
     eval: evaluate,
-    fetch: (input, init) => globalThis.fetch(input, init),
+    fetch: (input, init) => globalThis.fetch(input, adjustRequestInit(init)),
     Request: globalThis.Request,
     Response: globalThis.Response,
     Headers: globalThis.Headers,

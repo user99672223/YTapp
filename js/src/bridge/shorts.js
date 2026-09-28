@@ -56,8 +56,8 @@ export async function shortInfo({ id, client }) {
     }),
     playerWithFallback(yt, id, client, (name, poToken) => yt.getBasicInfo(id, { client: name, po_token: poToken }))
   ]);
-  const { info: playerInfo, client: c } = player;
-  putInfo(id, { info: playerInfo, client: c, reel });
+  const { info: playerInfo, client: c, poToken } = player;
+  putInfo(id, { info: playerInfo, client: c, reel, poToken });
   const basic = (reel && reel.basic_info && reel.basic_info.title) ? reel.basic_info : playerInfo.basic_info;
   const channelId = basic.channel_id || playerInfo.basic_info.channel_id;
   const subscribed = state.subscriptions.get(channelId);

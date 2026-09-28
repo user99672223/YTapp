@@ -65,18 +65,13 @@ struct AppSettings: Equatable {
 
     var quality: QualityPreferences { QualityPreferences(maxHeight: maxHeight) }
 
+    /// Clients that accept the account cookies and return direct stream URLs (September 2026).
+    /// TV_SIMPLY, ANDROID_VR, IOS, VISIONOS and TV_EMBEDDED no longer work signed in; WEB is SABR-only.
     static let streamClients: [(id: String, label: String)] = [
         ("AUTO", "Automatic (recommended)"),
-        ("TV_SIMPLY", "TV simply"),
         ("TV", "TV"),
-        ("TV_EMBEDDED", "TV embedded"),
-        ("WEB", "Web (needs PO token)"),
-        ("MWEB", "Mobile web (needs PO token)"),
-        ("WEB_EMBEDDED", "Web embedded (needs PO token)"),
-        ("IOS", "iOS"),
-        ("ANDROID", "Android"),
-        ("ANDROID_VR", "Android VR"),
-        ("VISIONOS", "visionOS")
+        ("WEB_EMBEDDED", "Web embedded"),
+        ("MWEB", "Mobile web (PO token)")
     ]
 }
 
@@ -126,11 +121,13 @@ final class Store {
 
     func loadSettings() -> AppSettings {
         guard let r = settingsRecord() else { return AppSettings() }
-        // Builds before 1.0.1 stored "TV" as the default stream client; YouTube now rejects it,
-        // so move those installs to Automatic once (a later manual choice is kept).
+        // Builds before 1.0.1 defaulted to the TV 7.x client and offered clients YouTube no longer
+        // serves signed in; move every install to Automatic once (a later manual choice is kept),
+        // and never keep a value the picker doesn't offer.
         let migrationKey = "tube.streamClient.autoMigration"
-        if !UserDefaults.standard.bool(forKey: migrationKey) {
-            if r.streamClient == "TV" {
+        let known = AppSettings.streamClients.map(\.id)
+        if !UserDefaults.standard.bool(forKey: migrationKey) || !known.contains(r.streamClient) {
+            if r.streamClient != "AUTO" {
                 r.streamClient = "AUTO"
                 try? context?.save()
             }
