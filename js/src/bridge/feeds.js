@@ -215,7 +215,7 @@ export async function channel({ id }) {
   if (!id) fail('invalid', 'Missing channel id.');
   const ch = await yt.getChannel(id);
   const header = channelHeader(ch, id);
-  const key = register('channel', 'channelBase', ch, { channelId: header.id });
+  const key = register('channel', 'channelBase', ch, { channelId: header.id, requestedId: id });
   const tabs = [];
   const safe = (fn) => {
     try {
@@ -233,7 +233,9 @@ export async function channel({ id }) {
 
 export async function channelTab({ key, id, tab }) {
   let base = key ? state.feeds.get(key) : null;
-  if (!base || base.kind !== 'channelBase') {
+  // Keys restart with every JavaScript context, and Swift can hand back one saved by an earlier
+  // launch: only reuse the entry when it is this channel's.
+  if (!base || base.kind !== 'channelBase' || (id && base.channelId !== id && base.requestedId !== id)) {
     const yt = await requireSession();
     const ch = await yt.getChannel(id);
     base = { kind: 'channelBase', feed: ch };

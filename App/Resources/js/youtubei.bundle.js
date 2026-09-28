@@ -44397,7 +44397,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (!id) fail("invalid", "Missing channel id.");
     const ch = await yt.getChannel(id);
     const header = channelHeader(ch, id);
-    const key = register("channel", "channelBase", ch, { channelId: header.id });
+    const key = register("channel", "channelBase", ch, { channelId: header.id, requestedId: id });
     const tabs = [];
     const safe = /* @__PURE__ */ __name((fn) => {
       try {
@@ -44415,7 +44415,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   __name(channel, "channel");
   async function channelTab({ key, id, tab }) {
     let base = key ? state.feeds.get(key) : null;
-    if (!base || base.kind !== "channelBase") {
+    if (!base || base.kind !== "channelBase" || id && base.channelId !== id && base.requestedId !== id) {
       const yt = await requireSession();
       const ch2 = await yt.getChannel(id);
       base = { kind: "channelBase", feed: ch2 };

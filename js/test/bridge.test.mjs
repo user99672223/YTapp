@@ -181,14 +181,19 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
   assert.equal(moreLists.continuation, undefined);
 });
 
-test('channel header counts', async () => {
-  const { call } = await connected();
+test('channel header counts and a channel tab key from another launch', async () => {
+  const { call, yt } = await connected();
   const one = await call('channel', { id: CH1 });
   // The handle contains "video"; the video count is the "321 videos" part.
   assert.equal(one.channel.handle, '@videogamefan');
   assert.equal(one.channel.subscriberCountText, '1.5M subscribers');
   assert.equal(one.channel.videoCountText, '321 videos');
   assert.deepEqual(one.tabs, ['videos']);
+
+  // Keys restart with every JavaScript context, so a saved key can name another channel's entry.
+  const other = await call('channelTab', { key: one.key, id: CH2, tab: 'videos' });
+  assert.deepEqual(other.sections.flatMap((s) => s.items).map((i) => i.id), ['TWOVIDEO01', 'TWOVIDEO02']);
+  assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/browse' && h.body?.browseId === CH2));
 });
 
 test('Shorts feed seeds from Home and resolves a short', async () => {
