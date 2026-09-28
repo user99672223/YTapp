@@ -34,8 +34,8 @@ final class AppModel: ObservableObject {
     let keychain: KeychainStore
     let cookies: CookieStore
     let http: NativeHTTP
-    let logs = LogBuffer()
-    let bundles = BundleManager()
+    let logs: LogBuffer
+    let bundles: BundleManager
     let fileCache: FileCache
     /// Video info is reused for 5 minutes (RefreshPolicy.videoInfo) instead of refetching.
     let videoInfoCache = TTLCache<String, VideoDetails>()
@@ -45,12 +45,15 @@ final class AppModel: ObservableObject {
     private var recreating: Task<Void, Never>?
 
     init() {
+        let logs = LogBuffer()
         let store = Store()
         let keychain = KeychainStore()
         let cookies = CookieStore(keychain: keychain)
+        self.logs = logs
         self.store = store
         self.keychain = keychain
         self.cookies = cookies
+        bundles = BundleManager(logs: logs)
         http = NativeHTTP(cookies: cookies)
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
         fileCache = FileCache(directory: caches.appendingPathComponent("youtubei", isDirectory: true))
