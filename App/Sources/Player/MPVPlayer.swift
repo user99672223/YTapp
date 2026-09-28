@@ -97,7 +97,7 @@ final class MPVPlayer: @unchecked Sendable {
                 ("gpu-api", "vulkan"),
                 ("gpu-context", "moltenvk"),
                 ("hwdec", "no"),
-                ("hwdec-codecs", "h264,hevc"),
+                ("hwdec-codecs", "h264,hevc,vp9,av1"),
                 ("ytdl", "no"),
                 ("cache", "yes"),
                 ("demuxer-max-bytes", "600MiB"),

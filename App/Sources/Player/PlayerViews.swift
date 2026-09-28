@@ -3,6 +3,7 @@ import UIKit
 import AVKit
 import AVFoundation
 import CoreMedia
+import VideoToolbox
 import Darwin
 import os
 import Core
@@ -143,6 +144,18 @@ enum DisplayCriteriaController {
 
     static func reset() {
         manager?.preferredDisplayCriteria = nil
+    }
+}
+
+/// Which codecs this Apple TV decodes in hardware (VideoToolbox).
+enum DecoderSupport {
+    static let vp9 = VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9)
+    static let av1 = VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)
+    static let hevc = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+
+    static func report() {
+        Logger(subsystem: "com.local.tube", category: "display")
+            .notice("hardware decoding: VP9 \(vp9, privacy: .public), AV1 \(av1, privacy: .public), HEVC \(hevc, privacy: .public)")
     }
 }
 

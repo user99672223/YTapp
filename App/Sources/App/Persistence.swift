@@ -63,7 +63,8 @@ struct AppSettings: Equatable {
     var showStatsOverlay: Bool = false
     var hardwareDecodeH264: Bool = true
 
-    var quality: QualityPreferences { QualityPreferences(maxHeight: maxHeight) }
+    // EXPERIMENT: VP9 first when the TV decodes it in hardware.
+    var quality: QualityPreferences { QualityPreferences(maxHeight: maxHeight, codecOrder: DecoderSupport.vp9 ? [.vp9, .av1, .avc] : [.av1, .vp9, .avc]) }
 
     /// Clients that accept the account cookies and return direct stream URLs (September 2026).
     /// TV_SIMPLY, ANDROID_VR, IOS, VISIONOS and TV_EMBEDDED no longer work signed in; WEB is SABR-only.

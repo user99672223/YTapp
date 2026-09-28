@@ -55,6 +55,7 @@ final class AppModel: ObservableObject {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
         fileCache = FileCache(directory: caches.appendingPathComponent("youtubei", isDirectory: true))
         settings = store.loadSettings()
+        DecoderSupport.report()
         URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 300 * 1024 * 1024,
                                    directory: caches.appendingPathComponent("images", isDirectory: true))
     }

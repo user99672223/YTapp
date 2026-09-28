@@ -137,7 +137,7 @@ final class ShortsViewModel: ObservableObject {
                 userAgent: streams.userAgent ?? info.userAgent ?? "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
                 headers: streams.headers ?? [:],
                 startTime: nil,
-                hardwareDecode: selection.video.codecFamily == .avc && model.settings.hardwareDecodeH264,
+                hardwareDecode: (selection.video.codecFamily == .avc && model.settings.hardwareDecodeH264) || (selection.video.codecFamily == .vp9 && DecoderSupport.vp9),
                 loop: true,
                 startPaused: false
             ))

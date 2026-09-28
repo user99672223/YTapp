@@ -167,7 +167,7 @@ final class WatchViewModel: ObservableObject {
             userAgent: streams.userAgent ?? details.userAgent ?? "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
             headers: streams.headers ?? [:],
             startTime: start,
-            hardwareDecode: chosen.video.codecFamily == .avc && settings.hardwareDecodeH264,
+            hardwareDecode: (chosen.video.codecFamily == .avc && settings.hardwareDecodeH264) || (chosen.video.codecFamily == .vp9 && DecoderSupport.vp9),
             loop: false,
             startPaused: true
         ))
