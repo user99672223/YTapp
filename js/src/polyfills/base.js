@@ -124,12 +124,15 @@ export function queueMicrotask(fn) {
 
 // ---------------------------------------------------------------- performance
 
+// performance.now() counts from timeOrigin (bundle load). The native clock is monotonic but counts
+// from device boot, so its reading at load is subtracted.
 const startMs = Date.now();
+const nativeNow = nativeFn('now');
+const nativeStart = nativeNow ? nativeNow() : 0;
 export const performance = {
   timeOrigin: startMs,
   now() {
-    const now = nativeFn('now');
-    return now ? now() : Date.now() - startMs;
+    return nativeNow ? nativeNow() - nativeStart : Date.now() - startMs;
   },
   mark() {},
   measure() {},

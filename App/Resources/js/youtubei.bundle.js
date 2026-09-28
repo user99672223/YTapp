@@ -345,11 +345,12 @@ ${arg.stack}` : ""}`;
   }
   __name(queueMicrotask2, "queueMicrotask");
   var startMs = Date.now();
+  var nativeNow = nativeFn("now");
+  var nativeStart = nativeNow ? nativeNow() : 0;
   var performance = {
     timeOrigin: startMs,
     now() {
-      const now = nativeFn("now");
-      return now ? now() : Date.now() - startMs;
+      return nativeNow ? nativeNow() - nativeStart : Date.now() - startMs;
     },
     mark() {
     },
