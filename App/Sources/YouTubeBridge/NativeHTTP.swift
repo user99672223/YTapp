@@ -48,8 +48,9 @@ final class NativeHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         request.httpMethod = method
         let isYouTube = requestURL.host?.lowercased().hasSuffix("youtube.com") ?? false
         // Only answers to requests made with the signed-in session may rotate its cookies
-        // (validating newly pasted cookies must not touch the stored ones).
-        var carriesSession = false
+        // (validating newly pasted cookies must not touch the stored ones), and only while that
+        // session is still the stored one.
+        var sessionGeneration: Int?
         for pair in headers where pair.count == 2 {
             let name = pair[0]
             var value = pair[1]
@@ -58,10 +59,11 @@ final class NativeHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             if lower == "cookie", isYouTube {
                 let substituted = cookies.substitute(value)
                 value = substituted.header
-                carriesSession = substituted.isSession
+                sessionGeneration = substituted.generation
             }
             request.setValue(value, forHTTPHeaderField: name)
         }
+        let carriedGeneration = sessionGeneration
         if let body, method != "GET", method != "HEAD" { request.httpBody = body }
         let task = session.dataTask(with: request) { [weak self] data, response, error in
             if let error {
@@ -76,8 +78,8 @@ final class NativeHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             for (key, value) in http.allHeaderFields {
                 if let k = key as? String, let v = value as? String { headerMap[k] = v }
             }
-            if carriesSession, http.url?.host?.lowercased().hasSuffix("youtube.com") ?? isYouTube {
-                self?.cookies.absorb(responseHeaders: headerMap, url: http.url ?? requestURL)
+            if let generation = carriedGeneration, http.url?.host?.lowercased().hasSuffix("youtube.com") ?? isYouTube {
+                self?.cookies.absorb(responseHeaders: headerMap, url: http.url ?? requestURL, generation: generation)
             }
             completion(.success(Response(status: http.statusCode, finalURL: http.url?.absoluteString ?? url,
                                          headers: headerMap, body: data ?? Data())))
@@ -169,23 +171,27 @@ final class CookieStore: @unchecked Sendable {
         keychain.deleteCookie()
     }
 
-    /// If `requestCookie` is a header of the stored session, send the freshest version instead.
-    /// Other cookie headers (e.g. validation of newly pasted cookies) pass through untouched.
-    func substitute(_ requestCookie: String) -> (header: String, isSession: Bool) {
+    /// If `requestCookie` is a header of the stored session, send the freshest version instead
+    /// and return the session's generation (pass it to `absorb`). Other cookie headers (e.g.
+    /// validation of newly pasted cookies) pass through untouched, with no generation.
+    func substitute(_ requestCookie: String) -> (header: String, generation: Int?) {
         lock.lock()
         defer { lock.unlock() }
-        guard known.contains(requestCookie) else { return (requestCookie, false) }
-        return (jar.header, true)
+        guard known.contains(requestCookie) else { return (requestCookie, nil) }
+        return (jar.header, generation)
     }
 
-    func absorb(responseHeaders: [String: String], url: URL) {
+    /// Folds cookies YouTube rotated into the stored session. `generation` is what `substitute`
+    /// returned when the request was sent: if the cookies were replaced or cleared since (another
+    /// account), the answer belongs to the old session and is ignored.
+    func absorb(responseHeaders: [String: String], url: URL, generation: Int) {
         let cookies = HTTPCookie.cookies(withResponseHeaderFields: responseHeaders, for: url)
         guard !cookies.isEmpty else { return }
         let updates = cookies.map {
             CookieJar.Update(name: $0.name, value: $0.value, domain: $0.domain, expires: $0.expiresDate)
         }
         lock.lock()
-        guard !known.isEmpty else {
+        guard !known.isEmpty, generation == self.generation else {
             lock.unlock()
             return
         }
@@ -197,7 +203,6 @@ final class CookieStore: @unchecked Sendable {
             if known.count > 512 { known = [before] }
             known.insert(header)
         }
-        let generation = self.generation
         lock.unlock()
         guard changed else { return }
         scheduleSave(header, generation: generation)
