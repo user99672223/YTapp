@@ -20,6 +20,12 @@ final class FeedModel: ObservableObject {
     /// The page came from the cache (or its key expired with the JS session), so its
     /// continuation can't be used; the next page starts again from the first one.
     @Published private(set) var hasStaleContinuation = false
+    /// Goes up after each page that loaded (and when a new first page is shown), so the footer
+    /// goes on loading while it stays on screen. The bridge hands back the same continuation key
+    /// for every page of a feed, so the key alone can't tell that a page arrived.
+    @Published private(set) var listVersion = 0
+    /// Pages in a row that added nothing (every card already shown).
+    private var pagesWithNothingNew = 0
     private(set) var fetchedAt: Date?
     private var lastMoreFailure: Date?
 
@@ -89,7 +95,18 @@ final class FeedModel: ObservableObject {
         do {
             let fresh = try await model.api(loader)
             if keepPlace, !userInitiated, let page, !page.isEmpty {
-                pendingPage = fresh
+                let latest = fresh.allItems.map(\.id)
+                if !latest.isEmpty, page.allItems.map(\.id).starts(with: latest) {
+                    // Nothing new at the top: no "Show the latest" for the same cards. A cached
+                    // list goes on from this page's continuation instead of fetching it again.
+                    pendingPage = nil
+                    if hasStaleContinuation {
+                        self.page?.continuation = fresh.continuation
+                        hasStaleContinuation = false
+                    }
+                } else {
+                    pendingPage = fresh
+                }
             } else {
                 show(fresh)
             }
@@ -121,6 +138,8 @@ final class FeedModel: ObservableObject {
         moreError = nil
         lastMoreFailure = nil
         hasStaleContinuation = false
+        pagesWithNothingNew = 0
+        listVersion += 1
     }
 
     /// Next page. `automatic` loads (the footer or the last cards coming on screen) don't retry
@@ -136,19 +155,25 @@ final class FeedModel: ObservableObject {
         moreError = nil
         defer { isLoadingMore = false }
         do {
+            var added = 0
             if !hasStaleContinuation, let key = page?.continuation {
                 do {
                     let next = try await model.api { try await $0.more(key) }
-                    appendNew(next)
+                    added = appendNew(next)
                 } catch let error as BridgeError where error.kind == .expired {
                     // The key died with the JS session (recreated after an auth error, or evicted).
                     hasStaleContinuation = true
-                    try await resumeFromFirstPage(model)
+                    added = try await resumeFromFirstPage(model)
                 }
             } else {
-                try await resumeFromFirstPage(model)
+                added = try await resumeFromFirstPage(model)
             }
             lastMoreFailure = nil
+            // The footer loads on by itself while pages bring new cards (or while a resumed list
+            // catches up with what it shows), but a run of pages with nothing new stops at its
+            // Load more button instead of requesting page after page.
+            pagesWithNothingNew = added > 0 ? 0 : pagesWithNothingNew + 1
+            if pagesWithNothingNew < 5 { listVersion += 1 }
         } catch {
             moreError = BridgeError.wrap(error)
             lastMoreFailure = Date()
@@ -158,18 +183,19 @@ final class FeedModel: ObservableObject {
     /// Continues a page whose continuation can't be used: fetches the first page again and
     /// appends only what isn't shown yet, so the list grows instead of being replaced under the
     /// user.
-    private func resumeFromFirstPage(_ model: AppModel) async throws {
+    private func resumeFromFirstPage(_ model: AppModel) async throws -> Int {
         let first = try await model.api(loader)
-        appendNew(first)
+        let added = appendNew(first)
         hasStaleContinuation = false
+        return added
     }
 
     /// Appends a page, skipping items the list already shows (continuation pages repeat videos,
-    /// and resuming appends the first page again).
-    private func appendNew(_ next: FeedPage) {
+    /// and resuming appends the first page again). Returns how many cards it added.
+    private func appendNew(_ next: FeedPage) -> Int {
         guard var current = page else {
             page = next
-            return
+            return next.allItems.count
         }
         var seen = Set(current.allItems.map(\.id))
         var unseen = next
@@ -180,6 +206,7 @@ final class FeedModel: ObservableObject {
         }
         current.append(unseen)
         page = current
+        return unseen.allItems.count
     }
 
     func clear() {
@@ -265,7 +292,7 @@ struct FeedView<Header: View>: View {
             }
         }
         if !page.isEmpty || feed.error == nil {
-            footer(page)
+            footer
         }
     }
 
@@ -277,7 +304,7 @@ struct FeedView<Header: View>: View {
 
     /// One button whose label follows the state: replacing it with a spinner while loading would
     /// remove the focused view and send focus back to the top.
-    private func footer(_ page: FeedPage) -> some View {
+    private var footer: some View {
         VStack(spacing: 16) {
             if let error = feed.moreError ?? feed.refreshError {
                 Text(error.userMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -294,9 +321,10 @@ struct FeedView<Header: View>: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
-        // Infinite scroll: load the next page while the footer is on screen, and again after
-        // each page (the continuation changes).
-        .task(id: page.continuation) {
+        // Infinite scroll: load the next page when the footer comes on screen, and again after
+        // each page that brought new cards (the continuation key stays the same, so it can't be
+        // the trigger).
+        .task(id: feed.listVersion) {
             await feed.loadMore(model, automatic: true)
         }
     }
