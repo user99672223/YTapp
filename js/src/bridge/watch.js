@@ -5,7 +5,7 @@ import { state, requireSession, putInfo, getInfo, clientMeta, likeStatusFor } fr
 import { toItem } from './normalize.js';
 import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
 import { fail, classify, BridgeError, BOT_CHECK } from './errors.js';
-import { contentPoToken } from './potoken.js';
+import { contentPoToken, clientNeedsPoToken } from './potoken.js';
 import { tvIdentity } from './platform.js';
 
 const HDR_TRANSFER = /2084|B67|HLG|PQ/i;
@@ -273,6 +273,11 @@ export async function playerWithFallback(yt, id, preferred, load) {
   for (const c of clientChain(p)) {
     try {
       const poToken = await contentPoToken(c, id);
+      // Without its PO token a web client's streams are refused (403) later, in the player, where
+      // this fallback can't see it. Only a client the user picked is tried that way.
+      if (!poToken && clientNeedsPoToken(c) && c !== p) {
+        fail('poToken', `${c} needs a PO token for its streams, and PO tokens are turned off in Settings.`);
+      }
       // TV_TIZEN is YouTube.js' TV client with another device identity (platform.js).
       const ytClient = c === 'TV_TIZEN' ? 'TV' : c;
       if (ytClient === 'TV') tvIdentity.current = c === 'TV_TIZEN' ? 'tizen' : 'cobalt';

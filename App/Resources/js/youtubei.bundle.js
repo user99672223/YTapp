@@ -44759,6 +44759,9 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     for (const c of clientChain(p)) {
       try {
         const poToken = await contentPoToken(c, id);
+        if (!poToken && clientNeedsPoToken(c) && c !== p) {
+          fail("poToken", `${c} needs a PO token for its streams, and PO tokens are turned off in Settings.`);
+        }
         const ytClient = c === "TV_TIZEN" ? "TV" : c;
         if (ytClient === "TV") tvIdentity.current = c === "TV_TIZEN" ? "tizen" : "cobalt";
         const info2 = await load(ytClient, poToken || void 0);

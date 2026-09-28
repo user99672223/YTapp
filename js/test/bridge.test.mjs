@@ -316,3 +316,17 @@ test('changing the stream client setting starts the automatic choice over', asyn
   // The manual choice (Web embedded) is not kept as the automatic first choice.
   assert.deepEqual(players().slice(before), ['TVHTML5', 'TV_TIZEN']);
 });
+
+test('Automatic skips Mobile web when PO tokens are off; picked by hand it is still tried', async () => {
+  const yt = createFakeYouTube({ rejectClients: ['TVHTML5', 'WEB_EMBEDDED_PLAYER'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO', poTokenMode: 'off' });
+  await assert.rejects(bundle.call('videoInfo', { id: 'VIDEOID0001' }), (e) =>
+    e.kind === 'extraction' && /MWEB: \[poToken\] .*PO tokens are turned off/.test(e.detail));
+  const mweb = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player' && h.body.context.client.clientName === 'MWEB');
+  assert.equal(mweb().length, 0);
+  await bundle.call('setClient', { client: 'MWEB' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'MWEB' });
+  assert.equal(details.playerClient, 'MWEB');
+  assert.equal(mweb().length, 1);
+});
