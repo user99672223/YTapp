@@ -92,13 +92,13 @@ final class MPVPlayer: @unchecked Sendable {
             mpv_request_log_messages(mpv, "warn")
             var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
             mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &wid)
+            // MPVKit is built without the ytdl hook and the OSC script, so `ytdl`/`osc` don't exist.
             let options: [(String, String)] = [
                 ("vo", "gpu-next"),
                 ("gpu-api", "vulkan"),
                 ("gpu-context", "moltenvk"),
                 ("hwdec", "no"),
                 ("hwdec-codecs", "h264,hevc"),
-                ("ytdl", "no"),
                 ("cache", "yes"),
                 ("demuxer-max-bytes", "600MiB"),
                 ("demuxer-max-back-bytes", "200MiB"),
@@ -111,7 +111,6 @@ final class MPVPlayer: @unchecked Sendable {
                 ("idle", "yes"),
                 ("input-default-bindings", "no"),
                 ("input-vo-keyboard", "no"),
-                ("osc", "no"),
                 ("osd-level", "0"),
                 ("vd-lavc-threads", "0"),
                 ("framedrop", "vo"),
