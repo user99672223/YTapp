@@ -72,6 +72,8 @@ final class MPVPlayer: @unchecked Sendable {
     var onTick: (@MainActor (Double, Bool) -> Void)?
     /// Paused or resumed (time-pos doesn't change while paused, so `onTick` never says so).
     var onPauseChanged: (@MainActor (Bool) -> Void)?
+    /// A caption track added with `addSubtitle` couldn't be loaded (already logged).
+    var onSubtitleFailed: (@MainActor (String) -> Void)?
     /// Called on the mpv queue; mpv's own levels are mapped (fatal/error → error, warn → warn).
     var logSink: ((LogBuffer.Level, String) -> Void)?
 
@@ -98,6 +100,11 @@ final class MPVPlayer: @unchecked Sendable {
     /// mpv queue: FILE_LOADED arrived for that file. Until then time-pos and eof-reached can
     /// still come from the file it replaces.
     private var fileIsLoaded = false
+    /// mpv queue: reply ids of `sub-add` (run asynchronously), the one still downloading, and
+    /// whether captions were switched off since.
+    private var subtitleRequest: UInt64 = 0
+    private var pendingSubtitle: UInt64?
+    private var subtitlesOff = false
     /// Main thread only: the generation of the latest `load`; events of older ones are dropped.
     private var generationOnMain = 0
     /// Main thread only: set by `destroy()` so late pause events can't keep the screensaver off.
@@ -223,6 +230,8 @@ final class MPVPlayer: @unchecked Sendable {
         lastErrorLog = nil
         lastHttpError = nil
         lastWarnLog = nil
+        // mpv aborts a caption download when its file ends; that reply isn't about the new file.
+        pendingSubtitle = nil
         position = source.startTime ?? 0
         duration = 0
         DispatchQueue.main.async { [state] in
@@ -276,12 +285,43 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in setString("speed", String(format: "%.2f", speed)) }
     }
 
+    /// Downloads and selects a WebVTT track. It runs as an asynchronous mpv command: waiting for
+    /// the download here would hold up the player queue (position, buffering, pause, seeks) for
+    /// as long as it takes, up to the network timeout. Failures come back via `onSubtitleFailed`.
     func addSubtitle(url: String, title: String, language: String) {
-        queue.async { [self] in command(["sub-add", url, "select", title, language]) }
+        queue.async { [self] in
+            guard handle != nil else { return }
+            abortPendingSubtitle()
+            subtitlesOff = false
+            subtitleRequest += 1
+            let status = command(["sub-add", url, "select", title, language], reply: subtitleRequest)
+            if status >= 0 { pendingSubtitle = subtitleRequest } else { subtitleFailed(status) }
+        }
     }
 
     func disableSubtitles() {
-        queue.async { [self] in setString("sid", "no") }
+        queue.async { [self] in
+            abortPendingSubtitle()
+            subtitlesOff = true
+            setString("sid", "no")
+        }
+    }
+
+    /// A newer caption choice replaces a download that is still running.
+    private func abortPendingSubtitle() {
+        guard let handle, let request = pendingSubtitle else { return }
+        pendingSubtitle = nil
+        mpv_abort_async_command(handle, request)
+    }
+
+    private func subtitleFailed(_ status: Int32) {
+        let reason = String(cString: mpv_error_string(status))
+        log(.error, "mpv sub-add failed: \(reason)\(problemDetail().map { " (\($0))" } ?? "")")
+        let generation = loadGeneration
+        DispatchQueue.main.async { [self] in
+            guard generation == generationOnMain else { return }
+            MainActor.assumeIsolated { onSubtitleFailed?("Couldn't load the captions (\(reason)).") }
+        }
     }
 
     func stop() {
@@ -290,15 +330,23 @@ final class MPVPlayer: @unchecked Sendable {
 
     // MARK: - mpv helpers (queue only)
 
+    /// Runs a command and waits for it, or with `reply` starts it asynchronously; its result then
+    /// arrives as MPV_EVENT_COMMAND_REPLY with that id.
     @discardableResult
-    private func command(_ args: [String]) -> Int32 {
+    private func command(_ args: [String], reply: UInt64? = nil) -> Int32 {
         guard let handle else { return -1 }
         var cargs: [UnsafePointer<CChar>?] = args.map { UnsafePointer(strdup($0)) }
         cargs.append(nil)
         defer {
             for pointer in cargs where pointer != nil { free(UnsafeMutablePointer(mutating: pointer)) }
         }
-        let status = mpv_command(handle, &cargs)
+        let status: Int32
+        if let reply {
+            // mpv copies the arguments before this returns.
+            status = mpv_command_async(handle, reply, &cargs)
+        } else {
+            status = mpv_command(handle, &cargs)
+        }
         if status < 0 {
             log(.error, "mpv command \(args.first ?? "") failed: \(String(cString: mpv_error_string(status)))")
         }
@@ -374,6 +422,18 @@ final class MPVPlayer: @unchecked Sendable {
             case MPV_EVENT_END_FILE:
                 if let data = event.pointee.data {
                     handleEndFile(data.assumingMemoryBound(to: mpv_event_end_file.self).pointee)
+                }
+            case MPV_EVENT_COMMAND_REPLY:
+                // Only `sub-add` runs asynchronously.
+                let request = event.pointee.reply_userdata
+                let status = event.pointee.error
+                if request == pendingSubtitle {
+                    pendingSubtitle = nil
+                    if status < 0 { subtitleFailed(status) }
+                } else if status >= 0, subtitlesOff {
+                    // A download the viewer switched off finished before the abort reached it
+                    // and selected its track after all.
+                    setString("sid", "no")
                 }
             case MPV_EVENT_LOG_MESSAGE:
                 if let data = event.pointee.data {

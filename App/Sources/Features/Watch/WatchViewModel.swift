@@ -47,6 +47,9 @@ final class WatchViewModel: ObservableObject {
     private var waitingForDisplay = false
     /// Automatic reconnects after the stream broke off, per video (see `streamEndedEarly`).
     private var earlyEnds = 0
+    /// Captions were set up for this video (from Settings or by the viewer); later files of the
+    /// same video get `activeCaption` back instead of the default.
+    private var captionsApplied = false
     private var closed = false
     private var toastTask: Task<Void, Never>?
 
@@ -61,6 +64,7 @@ final class WatchViewModel: ObservableObject {
         player.onError = { [weak self] message in self?.playerFailed(message) }
         player.onTick = { [weak self] position, playing in self?.tick(position: position, playing: playing) }
         player.onPauseChanged = { [weak self] paused in self?.pauseChanged(paused) }
+        player.onSubtitleFailed = { [weak self] message in self?.captionFailed(message) }
     }
 
     var nextVideo: VideoItem? {
@@ -93,6 +97,7 @@ final class WatchViewModel: ObservableObject {
         overrideVideo = nil
         overrideAudio = nil
         activeCaption = nil
+        captionsApplied = false
         earlyEnds = 0
         inWatchLater = nil
         historyStatus = ""
@@ -231,16 +236,32 @@ final class WatchViewModel: ObservableObject {
             }
             guard !closed else { return }
             player.setPaused(false)
-            applyDefaultCaptions()
+            applyCaptions()
         }
     }
 
-    private func applyDefaultCaptions() {
-        guard model.settings.captionsEnabled, let details else { return }
+    /// A new file starts without captions. The first file of a video gets the default from
+    /// Settings; after a restart of the same video (quality change, Retry, reconnect) the
+    /// viewer's choice comes back, and nothing if they switched captions off.
+    private func applyCaptions() {
+        guard let details else { return }
+        if captionsApplied {
+            // Retry fetched the video again, with fresh caption URLs.
+            if let current = activeCaption { setCaption(details.captions.first { $0.id == current.id } ?? current) }
+            return
+        }
+        captionsApplied = true
+        guard model.settings.captionsEnabled else { return }
         let language = model.settings.captionsLanguage
         let track = details.captions.first { $0.languageCode == language && !$0.isAuto }
             ?? details.captions.first { $0.languageCode.hasPrefix(language) }
         if let track { setCaption(track) }
+    }
+
+    private func captionFailed(_ message: String) {
+        guard activeCaption != nil else { return }
+        activeCaption = nil
+        show(message)
     }
 
     private func tick(position: Double, playing: Bool) {
@@ -371,6 +392,7 @@ final class WatchViewModel: ObservableObject {
 
     func setCaption(_ track: CaptionTrack?) {
         activeCaption = track
+        captionsApplied = true
         if let track {
             player.addSubtitle(url: track.url, title: track.name, language: track.languageCode)
         } else {
