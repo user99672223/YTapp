@@ -69,7 +69,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var lastStatsPublish = Date.distantPast
     private var position: Double = 0
     private var duration: Double = 0
-    private var paused = true
+    private var paused = true  // mpv queue only
     private var loadGeneration = 0
     /// Main thread only: set by `destroy()` so late pause events can't keep the screensaver off.
     private var destroyedOnMain = false
@@ -209,8 +209,10 @@ final class MPVPlayer: @unchecked Sendable {
         queue.async { [self] in setFlag("pause", paused) }
     }
 
+    /// mpv flips its own state: `paused` is only updated once mpv reports the change, so reading
+    /// it here (on main, while the mpv queue writes it) would lose a quick second press.
     func togglePause() {
-        setPaused(!paused)
+        queue.async { [self] in command(["cycle", "pause"]) }
     }
 
     func seek(to seconds: Double) {
