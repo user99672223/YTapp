@@ -138,3 +138,11 @@ jobs:
         with:
           files: App-unsigned.ipa
           fail_on_unmatched_files: true
+          body: |
+            Unsigned tvOS build of Tube (Apple TV 4K, tvOS 17 or later).
+
+            1. Download **App-unsigned.ipa** below.
+            2. Install it on the Apple TV with Sideloadly (it signs the app with your Apple ID).
+            3. Open Tube, scan the QR code and paste your YouTube cookies from a private browser window.
+
+            Step-by-step guide: [README](https://github.com/${{ github.repository }}#readme)
