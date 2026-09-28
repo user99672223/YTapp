@@ -8,6 +8,8 @@ final class ChannelModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var isSubscribed: Bool?
     @Published var busy = false
+    /// A failed Subscribe/Unsubscribe (shown with Retry). `error` is only for the page itself.
+    @Published var actionError: BridgeError?
     @Published var tab: ChannelTab = .videos
     private var feeds: [ChannelTab: FeedModel] = [:]
     let channelId: String
@@ -60,6 +62,8 @@ final class ChannelModel: ObservableObject {
     }
 
     func toggleSubscription(_ model: AppModel) async {
+        // The button stays enabled while busy (so it keeps focus); ignore presses until done.
+        guard !busy else { return }
         guard let current = isSubscribed ?? page?.channel.isSubscribed else {
             await setSubscribed(true, model)
             return
@@ -73,8 +77,9 @@ final class ChannelModel: ObservableObject {
         do {
             let id = channelId
             isSubscribed = try await model.api { try await $0.setSubscribed(channelId: id, value) }
+            actionError = nil
         } catch {
-            self.error = BridgeError.wrap(error)
+            actionError = BridgeError.wrap(error)
         }
     }
 }
@@ -105,6 +110,16 @@ struct ChannelView: View {
             }
         }
         .task { await channel.load(model) }
+        .alert("Couldn't change the subscription", isPresented: subscriptionFailed, presenting: channel.actionError) { _ in
+            Button("Retry") { Task { await channel.toggleSubscription(model) } }
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error.userMessage)
+        }
+    }
+
+    private var subscriptionFailed: Binding<Bool> {
+        Binding(get: { channel.actionError != nil }, set: { if !$0 { channel.actionError = nil } })
     }
 
     private func header(_ page: ChannelPage) -> some View {
@@ -131,13 +146,19 @@ struct ChannelView: View {
                 }
                 Spacer()
                 if model.isSignedIn {
+                    // Not disabled while busy: a disabled button loses focus on tvOS.
                     Button {
                         Task { await channel.toggleSubscription(model) }
                     } label: {
-                        Label(channel.isSubscribed == true ? "Subscribed" : "Subscribe",
-                              systemImage: channel.isSubscribed == true ? "bell.fill" : "plus")
+                        HStack(spacing: 12) {
+                            if channel.busy {
+                                ProgressView()
+                            } else {
+                                Image(systemName: channel.isSubscribed == true ? "bell.fill" : "plus")
+                            }
+                            Text(channel.isSubscribed == true ? "Subscribed" : "Subscribe")
+                        }
                     }
-                    .disabled(channel.busy)
                     .tint(channel.isSubscribed == true ? .gray : .red)
                 }
             }
