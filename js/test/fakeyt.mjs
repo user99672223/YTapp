@@ -367,6 +367,11 @@ function nextResponse(id) {
                 onTap: { watchEndpoint: { videoId: id, playlistId: `RD${id}`, params: 'OAHyAQIIAQ%3D%3D' } }
               }),
               lockup('RELATEDVID1', 'Related one', CH2, 'Channel Two'),
+              // A promotion shaped like a video card that opens the Premium page.
+              lockupView({
+                id: 'PROMOPREM01', title: 'Try YouTube Premium', rows: [['YouTube']], badge: '',
+                onTap: { browseEndpoint: { browseId: 'SPunlimited' } }
+              }),
               lockup('RELATEDVID2', 'Related two', CH2, 'Channel Two')
             ]
           }

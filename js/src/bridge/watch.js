@@ -3,7 +3,7 @@
 import { YT } from 'youtubei.js/web';
 import { state, requireSession, anonSession, putInfo, getInfo, clientMeta, likeStatusFor } from './state.js';
 import { toItem } from './normalize.js';
-import { text, bestThumb, videoThumb, fixUrl, clean } from './util.js';
+import { text, bestThumb, videoThumb, fixUrl, clean, endpointVideoId, nodeType } from './util.js';
 import { fail, classify, BridgeError, BOT_CHECK } from './errors.js';
 import { contentPoToken, clientNeedsPoToken } from './potoken.js';
 import { tvIdentity } from './platform.js';
@@ -106,12 +106,28 @@ export function chaptersOf(info) {
   return out.sort((a, b) => a.startSeconds - b.startSeconds);
 }
 
+// Where a card leads when it is clicked (lockups and the older renderers keep it in different places).
+function tapEndpoint(node) {
+  return node?.renderer_context?.command_context?.on_tap || node?.endpoint || node?.navigation_endpoint || node?.on_tap;
+}
+
+// Promotions ("Try YouTube Premium") come as video-like cards that open a page instead of a video.
+function isPromotion(node) {
+  const endpoint = tapEndpoint(node);
+  if (!endpoint || !endpoint.name) return false;
+  return !/^(watchEndpoint|reelWatchEndpoint|watchPlaylistEndpoint)$/.test(endpoint.name) && !endpointVideoId(endpoint);
+}
+
 function upNextOf(info) {
   const feed = info.watch_next_feed || [];
   const items = [];
   // The video being watched never comes next (the watch page's "Mix – …" card opens it again).
   const seen = new Set([info.basic_info?.id].filter(Boolean));
   for (const node of feed) {
+    if (isPromotion(node)) {
+      console.info(`up next: left out a ${nodeType(node)} that opens ${tapEndpoint(node).name} (${text(node.metadata?.title) || text(node.title) || '?'})`);
+      continue;
+    }
     const item = toItem(node);
     if (item && item.type === 'video' && !item.isShort && !item.isLive && !seen.has(item.id)) {
       seen.add(item.id);

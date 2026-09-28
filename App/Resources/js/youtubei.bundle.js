@@ -44730,11 +44730,25 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return out.sort((a, b) => a.startSeconds - b.startSeconds);
   }
   __name(chaptersOf, "chaptersOf");
+  function tapEndpoint(node) {
+    return node?.renderer_context?.command_context?.on_tap || node?.endpoint || node?.navigation_endpoint || node?.on_tap;
+  }
+  __name(tapEndpoint, "tapEndpoint");
+  function isPromotion(node) {
+    const endpoint = tapEndpoint(node);
+    if (!endpoint || !endpoint.name) return false;
+    return !/^(watchEndpoint|reelWatchEndpoint|watchPlaylistEndpoint)$/.test(endpoint.name) && !endpointVideoId(endpoint);
+  }
+  __name(isPromotion, "isPromotion");
   function upNextOf(info2) {
     const feed = info2.watch_next_feed || [];
     const items = [];
     const seen = new Set([info2.basic_info?.id].filter(Boolean));
     for (const node of feed) {
+      if (isPromotion(node)) {
+        console.info(`up next: left out a ${nodeType(node)} that opens ${tapEndpoint(node).name} (${text(node.metadata?.title) || text(node.title) || "?"})`);
+        continue;
+      }
       const item = toItem(node);
       if (item && item.type === "video" && !item.isShort && !item.isLive && !seen.has(item.id)) {
         seen.add(item.id);
