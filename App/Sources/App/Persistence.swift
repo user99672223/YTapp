@@ -4,6 +4,8 @@ import Core
 
 // MARK: - SwiftData models
 
+/// Where older builds kept the settings; read once to move them to UserDefaults (see
+/// `Store.loadSettings`). Kept in the schema so existing stores still open.
 @Model
 final class SettingsRecord {
     var streamClient: String = "AUTO"
@@ -76,85 +78,128 @@ struct AppSettings: Equatable {
     ]
 }
 
+extension AppSettings {
+    /// Property-list form kept in UserDefaults. A missing or mistyped key keeps its default, so
+    /// adding a setting later doesn't reset the others.
+    init(dictionary d: [String: Any]) {
+        self.init()
+        if let v = d["streamClient"] as? String { streamClient = v }
+        if let v = d["maxHeight"] as? Int { maxHeight = v }
+        if let v = d["autoplay"] as? Bool { autoplay = v }
+        if let v = d["captionsEnabled"] as? Bool { captionsEnabled = v }
+        if let v = d["captionsLanguage"] as? String { captionsLanguage = v }
+        if let v = d["playbackSpeed"] as? Double { playbackSpeed = v }
+        if let v = d["bundleURL"] as? String { bundleURL = v }
+        if let v = d["poTokenMode"] as? String { poTokenMode = v }
+        if let v = d["visitorData"] as? String { visitorData = v }
+        if let v = d["showStatsOverlay"] as? Bool { showStatsOverlay = v }
+        if let v = d["hardwareDecodeH264"] as? Bool { hardwareDecodeH264 = v }
+    }
+
+    var dictionary: [String: Any] {
+        [
+            "streamClient": streamClient,
+            "maxHeight": maxHeight,
+            "autoplay": autoplay,
+            "captionsEnabled": captionsEnabled,
+            "captionsLanguage": captionsLanguage,
+            "playbackSpeed": playbackSpeed,
+            "bundleURL": bundleURL,
+            "poTokenMode": poTokenMode,
+            "visitorData": visitorData,
+            "showStatsOverlay": showStatsOverlay,
+            "hardwareDecodeH264": hardwareDecodeH264
+        ]
+    }
+}
+
 // MARK: - Store
 
-/// SwiftData access for settings, resume positions and the feed cache.
+/// Settings (UserDefaults) plus SwiftData access for resume positions and the feed cache.
 @MainActor
 final class Store {
     let container: ModelContainer?
+    private let logs: LogBuffer
     private var context: ModelContext? { container?.mainContext }
 
-    init() {
+    init(logs: LogBuffer) {
+        self.logs = logs
         let schema = Schema([SettingsRecord.self, ResumeRecord.self, FeedCacheRecord.self])
-        container = Store.makeContainer(schema: schema)
+        container = Store.makeContainer(schema: schema, logs: logs)
     }
 
-    /// tvOS keeps Application Support for small data; fall back to Caches, then memory.
-    private static func makeContainer(schema: Schema) -> ModelContainer? {
+    /// A tvOS app may only write to Library/Caches and tmp (plus about 500 KB of UserDefaults),
+    /// and tvOS can purge Caches when storage runs low. So only data that may be lost lives in
+    /// this store (resume positions, feed cache): in Caches, else tmp, else memory. The settings
+    /// are in UserDefaults, which tvOS keeps.
+    private static func makeContainer(schema: Schema, logs: LogBuffer) -> ModelContainer? {
         let fm = FileManager.default
         var candidates: [URL] = []
-        if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first { candidates.append(support) }
         if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first { candidates.append(caches) }
-        for base in candidates {
+        candidates.append(fm.temporaryDirectory)
+        for (index, base) in candidates.enumerated() {
             let dir = base.appendingPathComponent("store", isDirectory: true)
             do {
                 try fm.createDirectory(at: dir, withIntermediateDirectories: true)
                 let config = ModelConfiguration("Tube", schema: schema, url: dir.appendingPathComponent("tube.store"), cloudKitDatabase: .none)
-                return try ModelContainer(for: schema, configurations: [config])
+                let container = try ModelContainer(for: schema, configurations: [config])
+                if index > 0 { logs.append(.warn, "The data store is in \(dir.path) instead.") }
+                return container
             } catch {
-                continue
+                logs.append(.error, "Couldn't open the data store in \(dir.path): \(error.localizedDescription)")
             }
         }
+        logs.append(.warn, "Resume positions and the feed cache are kept in memory only.")
         let memory = ModelConfiguration("TubeMemory", schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
-        return try? ModelContainer(for: schema, configurations: [memory])
+        do {
+            return try ModelContainer(for: schema, configurations: [memory])
+        } catch {
+            logs.append(.error, "Couldn't create the in-memory data store: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: Settings
 
-    private func settingsRecord() -> SettingsRecord? {
-        guard let context else { return nil }
-        if let existing = try? context.fetch(FetchDescriptor<SettingsRecord>()).first { return existing }
-        let record = SettingsRecord()
-        context.insert(record)
-        try? context.save()
-        return record
-    }
+    private static let settingsKey = "tube.settings"
 
     func loadSettings() -> AppSettings {
-        guard let r = settingsRecord() else { return AppSettings() }
+        let defaults = UserDefaults.standard
+        var settings: AppSettings
+        if let stored = defaults.dictionary(forKey: Self.settingsKey) {
+            settings = AppSettings(dictionary: stored)
+        } else {
+            settings = legacySettings() ?? AppSettings()
+            defaults.set(settings.dictionary, forKey: Self.settingsKey)
+        }
         // Builds before 1.0.1 defaulted to the TV 7.x client and offered clients YouTube no longer
         // serves signed in; move every install to Automatic once (a later manual choice is kept),
         // and never keep a value the picker doesn't offer.
         let migrationKey = "tube.streamClient.autoMigration"
         let known = AppSettings.streamClients.map(\.id)
-        if !UserDefaults.standard.bool(forKey: migrationKey) || !known.contains(r.streamClient) {
-            if r.streamClient != "AUTO" {
-                r.streamClient = "AUTO"
-                try? context?.save()
+        if !defaults.bool(forKey: migrationKey) || !known.contains(settings.streamClient) {
+            if settings.streamClient != "AUTO" {
+                settings.streamClient = "AUTO"
+                defaults.set(settings.dictionary, forKey: Self.settingsKey)
             }
-            UserDefaults.standard.set(true, forKey: migrationKey)
+            defaults.set(true, forKey: migrationKey)
         }
+        return settings
+    }
+
+    func saveSettings(_ s: AppSettings) {
+        UserDefaults.standard.set(s.dictionary, forKey: Self.settingsKey)
+    }
+
+    /// Settings an older build kept in the SwiftData store (which lives in purgeable Caches).
+    private func legacySettings() -> AppSettings? {
+        guard let context, let r = try? context.fetch(FetchDescriptor<SettingsRecord>()).first else { return nil }
+        logs.append(.info, "Moved the settings from the data store to UserDefaults.")
         return AppSettings(streamClient: r.streamClient, maxHeight: r.maxHeight, autoplay: r.autoplay,
                            captionsEnabled: r.captionsEnabled, captionsLanguage: r.captionsLanguage,
                            playbackSpeed: r.playbackSpeed, bundleURL: r.bundleURL, poTokenMode: r.poTokenMode,
                            visitorData: r.visitorData, showStatsOverlay: r.showStatsOverlay,
                            hardwareDecodeH264: r.hardwareDecodeH264)
-    }
-
-    func saveSettings(_ s: AppSettings) {
-        guard let r = settingsRecord() else { return }
-        r.streamClient = s.streamClient
-        r.maxHeight = s.maxHeight
-        r.autoplay = s.autoplay
-        r.captionsEnabled = s.captionsEnabled
-        r.captionsLanguage = s.captionsLanguage
-        r.playbackSpeed = s.playbackSpeed
-        r.bundleURL = s.bundleURL
-        r.poTokenMode = s.poTokenMode
-        r.visitorData = s.visitorData
-        r.showStatsOverlay = s.showStatsOverlay
-        r.hardwareDecodeH264 = s.hardwareDecodeH264
-        try? context?.save()
     }
 
     // MARK: Resume positions

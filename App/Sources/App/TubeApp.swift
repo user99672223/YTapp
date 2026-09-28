@@ -26,26 +26,33 @@ struct TubeApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        switch model.phase {
-        case .launching:
-            LaunchView(message: "Starting…")
-        case .connecting(let message):
-            LaunchView(message: message)
-        case .needsSetup:
-            SetupView()
-        case .failed(let error):
-            VStack(spacing: 40) {
-                ErrorStateView(error: error) {
-                    Task { await model.start() }
+        Group {
+            switch model.phase {
+            case .launching:
+                LaunchView(message: "Starting…")
+            case .connecting(let message):
+                LaunchView(message: message)
+            case .needsSetup:
+                SetupView()
+            case .failed(let error):
+                VStack(spacing: 40) {
+                    ErrorStateView(error: error) {
+                        Task { await model.start() }
+                    }
+                    if model.isSignedIn {
+                        Button("Re-enter cookies") { model.beginCookieReentry() }
+                    }
                 }
-                if model.isSignedIn {
-                    Button("Re-enter cookies") { model.beginCookieReentry() }
-                }
+            case .ready:
+                MainTabView()
             }
-        case .ready:
-            MainTabView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // tvOS may terminate the app once it's in the background: save rotated cookies now.
+            if phase != .active { model.cookies.flush() }
         }
     }
 }

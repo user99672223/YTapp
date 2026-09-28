@@ -2,19 +2,26 @@ import Foundation
 import JavaScriptCore
 import Core
 
-/// Chooses which youtubei bundle to run: a newer one downloaded from Settings (kept in
-/// Application Support) or the one built into the app.
+/// Chooses which youtubei bundle to run: a newer one downloaded from Settings or the one built
+/// into the app. A tvOS app may only write to Library/Caches and tmp, so the download is kept in
+/// Caches/bundles; if tvOS purges it, the built-in bundle is used again.
 final class BundleManager: @unchecked Sendable {
     static let defaultUpdateURL = "https://raw.githubusercontent.com/user99672223/YTapp/main/App/Resources/js/youtubei.bundle.js"
 
     private let directory: URL
+    private let logs: LogBuffer
     private var downloadedURL: URL { directory.appendingPathComponent("youtubei.bundle.js") }
 
-    init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
+    init(logs: LogBuffer) {
+        self.logs = logs
+        let base: URL
+        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            base = caches
+        } else {
+            base = FileManager.default.temporaryDirectory
+            logs.append(.warn, "No Caches folder; a downloaded bundle is kept in \(base.path) instead.")
+        }
         directory = base.appendingPathComponent("bundles", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
     var builtInURL: URL? {
@@ -40,6 +47,14 @@ final class BundleManager: @unchecked Sendable {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)),
               let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
             throw BridgeError(kind: .invalid, message: "That isn't a valid http(s) URL.")
+        }
+        // Checked first, so a folder that can't be written fails before the download and the
+        // costly evaluation.
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            logs.append(.error, "Couldn't create the bundle folder \(directory.path): \(error.localizedDescription)")
+            throw BridgeError(kind: .bridge, message: "This Apple TV didn't let the app save the bundle (\(error.localizedDescription)).")
         }
         let (data, response) = try await URLSession.shared.data(from: url)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
