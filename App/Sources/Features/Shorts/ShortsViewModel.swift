@@ -148,6 +148,7 @@ final class ShortsViewModel: ObservableObject {
             playbackStarted = false
             phase = .playing
             prefetch(position + 1)
+            trimDetails(around: position)
             if position >= ids.count - 3 { Task { await loadMore() } }
         } catch {
             guard index == position, !closed else { return }
@@ -172,6 +173,15 @@ final class ShortsViewModel: ObservableObject {
         let fetched = try await model.api { try await $0.shortInfo(id, client: client) }
         details[id] = fetched
         return fetched
+    }
+
+    /// Keeps the details of the Shorts just before and after the current one. An endless feed
+    /// would otherwise hold every Short's formats for the whole session, and older entries are
+    /// fetched again anyway once the bridge has dropped their player data.
+    private func trimDetails(around position: Int) {
+        guard ids.indices.contains(position) else { return }
+        let keep = Set(ids[max(0, position - 5)...min(ids.count - 1, position + 2)])
+        details = details.filter { keep.contains($0.key) }
     }
 
     private func prefetch(_ position: Int) {
