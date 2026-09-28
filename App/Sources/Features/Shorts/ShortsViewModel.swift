@@ -108,7 +108,8 @@ final class ShortsViewModel: ObservableObject {
         guard ids.indices.contains(position) else { return }
         reporter?.stop()
         reporter = nil
-        playbackStarted = false
+        // The previous Short would keep looping (with sound) while this one loads.
+        player.setPaused(true)
         let id = ids[position]
         comments.reset(videoId: id)
         phase = .loading("Loading Short…")
@@ -141,8 +142,10 @@ final class ShortsViewModel: ObservableObject {
                 loop: true,
                 startPaused: false
             ))
+            // Only ticks of this file reach the reporter (the player drops the previous file's).
             reporter = PlaybackReporter(videoId: id, model: model)
             reporterSelection = selection
+            playbackStarted = false
             phase = .playing
             prefetch(position + 1)
             if position >= ids.count - 3 { Task { await loadMore() } }
@@ -193,11 +196,14 @@ final class ShortsViewModel: ObservableObject {
     }
 
     private func tick(position: Double, playing: Bool) {
-        reporter?.tick(position: position, isPlaying: playing)
-        if playing, !playbackStarted, position > 0.3 {
-            playbackStarted = true
-            reporter?.playbackStarted(length: current?.durationSeconds, videoItag: reporterSelection?.video.itag,
-                                      audioItag: reporterSelection?.audio?.itag)
+        // No reporter while the next Short loads: a tick then must not use up its start.
+        if let reporter {
+            reporter.tick(position: position, isPlaying: playing)
+            if playing, !playbackStarted, position > 0.3 {
+                playbackStarted = true
+                reporter.playbackStarted(length: current?.durationSeconds, videoItag: reporterSelection?.video.itag,
+                                         audioItag: reporterSelection?.audio?.itag)
+            }
         }
         if let current {
             PlaybackDiagnostics.shared.update(videoId: current.id, title: current.title, client: current.playerClient,

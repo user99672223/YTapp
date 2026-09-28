@@ -5,6 +5,9 @@ import Core
 
 /// Thin libmpv wrapper. Video URL is the file, audio URL is added via `audio-files`; software
 /// decoding for AV1/VP9/Opus (hwdec only for H.264/HEVC), big demuxer cache, no ytdl.
+///
+/// Every `load` starts a new generation: ticks, file-loaded, end-of-file and playback errors of
+/// an earlier file that are still on their way never reach the callbacks of the next one.
 final class MPVPlayer: @unchecked Sendable {
     struct Source {
         var videoURL: URL
@@ -51,7 +54,7 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     let state = State()
-    // Callbacks run on the main thread.
+    // Callbacks run on the main thread, only for the file of the latest `load`.
     var onFileLoaded: (@MainActor () -> Void)?
     var onEndOfFile: (@MainActor () -> Void)?
     var onError: (@MainActor (String) -> Void)?
@@ -61,7 +64,7 @@ final class MPVPlayer: @unchecked Sendable {
 
     private var handle: OpaquePointer?
     private let queue = DispatchQueue(label: "tube.mpv", qos: .userInitiated)
-    private var pendingSource: Source?
+    private var pendingSource: (source: Source, generation: Int)?
     private var retainedSelf: Unmanaged<MPVPlayer>?
     private var lastErrorLog: String?
     private var stats = Stats()
@@ -70,7 +73,13 @@ final class MPVPlayer: @unchecked Sendable {
     private var position: Double = 0
     private var duration: Double = 0
     private var paused = true  // mpv queue only
+    /// mpv queue: the generation of the file mpv is loading or playing.
     private var loadGeneration = 0
+    /// mpv queue: FILE_LOADED arrived for that file. Until then time-pos and eof-reached can
+    /// still come from the file it replaces.
+    private var fileIsLoaded = false
+    /// Main thread only: the generation of the latest `load`; events of older ones are dropped.
+    private var generationOnMain = 0
     /// Main thread only: set by `destroy()` so late pause events can't keep the screensaver off.
     private var destroyedOnMain = false
 
@@ -143,9 +152,9 @@ final class MPVPlayer: @unchecked Sendable {
                 guard let context else { return }
                 Unmanaged<MPVPlayer>.fromOpaque(context).takeUnretainedValue().wakeup()
             }, retained.toOpaque())
-            if let source = pendingSource {
+            if let pending = pendingSource {
                 pendingSource = nil
-                performLoad(source)
+                performLoad(pending.source, generation: pending.generation)
             }
         }
     }
@@ -154,6 +163,7 @@ final class MPVPlayer: @unchecked Sendable {
     func destroy() {
         let releaseIdleTimer = { [self] in
             destroyedOnMain = true
+            generationOnMain += 1
             MainActor.assumeIsolated { IdleTimer.set(self, playing: false) }
         }
         if Thread.isMainThread { releaseIdleTimer() } else { DispatchQueue.main.async(execute: releaseIdleTimer) }
@@ -169,18 +179,23 @@ final class MPVPlayer: @unchecked Sendable {
 
     // MARK: - Playback control
 
+    /// Replaces the current file. From here on nothing of the previous file reaches the callbacks.
+    @MainActor
     func load(_ source: Source) {
+        generationOnMain += 1
+        let generation = generationOnMain
         queue.async { [self] in
             guard handle != nil else {
-                pendingSource = source
+                pendingSource = (source, generation)
                 return
             }
-            performLoad(source)
+            performLoad(source, generation: generation)
         }
     }
 
-    private func performLoad(_ source: Source) {
-        loadGeneration += 1
+    private func performLoad(_ source: Source, generation: Int) {
+        loadGeneration = generation
+        fileIsLoaded = false
         lastErrorLog = nil
         position = source.startTime ?? 0
         duration = 0
@@ -312,10 +327,13 @@ final class MPVPlayer: @unchecked Sendable {
                     handleProperty(data.assumingMemoryBound(to: mpv_event_property.self).pointee)
                 }
             case MPV_EVENT_FILE_LOADED:
+                fileIsLoaded = true
                 // `paused-for-cache` only reports changes; seed the buffering flag with its
                 // current value so a stream that never stalls doesn't look stuck.
                 let buffering = stats.pausedForCache
+                let generation = loadGeneration
                 DispatchQueue.main.async { [self] in
+                    guard generation == generationOnMain else { return }
                     state.isFileLoaded = true
                     state.isBuffering = buffering
                     MainActor.assumeIsolated { onFileLoaded?() }
@@ -348,14 +366,10 @@ final class MPVPlayer: @unchecked Sendable {
             let reason = String(cString: mpv_error_string(end.error))
             let detail = lastErrorLog.map { " (\($0))" } ?? ""
             log(.error, "mpv end-file: error \(at): \(reason)\(detail)")
-            report(error: "Playback failed: \(reason)\(detail)")
+            report(error: "Playback failed: \(reason)\(detail)", generation: loadGeneration)
         } else if end.reason == MPV_END_FILE_REASON_EOF {
             log(.info, "mpv end-file: eof \(at)")
-            DispatchQueue.main.async { [self] in
-                guard !state.isEOF else { return }
-                state.isEOF = true
-                MainActor.assumeIsolated { onEndOfFile?() }
-            }
+            reachedEnd()
         } else if end.reason == MPV_END_FILE_REASON_STOP {
             // Every `loadfile replace` and `stop` ends the previous file this way.
             log(.debug, "mpv end-file: stop \(at)")
@@ -365,6 +379,16 @@ final class MPVPlayer: @unchecked Sendable {
             log(.info, "mpv end-file: redirect \(at)")
         } else {
             log(.warn, "mpv end-file: unknown reason \(at)")
+        }
+    }
+
+    /// The file played to its end (END_FILE eof, or eof-reached with keep-open).
+    private func reachedEnd() {
+        let generation = loadGeneration
+        DispatchQueue.main.async { [self] in
+            guard generation == generationOnMain, !state.isEOF else { return }
+            state.isEOF = true
+            MainActor.assumeIsolated { onEndOfFile?() }
         }
     }
 
@@ -391,13 +415,16 @@ final class MPVPlayer: @unchecked Sendable {
 
         switch name {
         case "time-pos":
-            guard let value = double() else { return }
+            // After a new `loadfile` the replaced file can still report its position.
+            guard let value = double(), fileIsLoaded else { return }
             position = value
             let now = Date()
             if now.timeIntervalSince(lastPublish) >= 0.25 {
                 lastPublish = now
                 let isPlaying = !paused
+                let generation = loadGeneration
                 DispatchQueue.main.async { [self] in
+                    guard generation == generationOnMain else { return }
                     state.position = value
                     MainActor.assumeIsolated { onTick?(value, isPlaying) }
                 }
@@ -427,13 +454,9 @@ final class MPVPlayer: @unchecked Sendable {
             stats.bufferedSeconds = value
             DispatchQueue.main.async { [state] in state.bufferedSeconds = value }
         case "eof-reached":
-            if flag() == true {
+            if flag() == true, fileIsLoaded {
                 log(.info, "mpv eof-reached at \(Formatters.duration(position)) of \(Formatters.duration(duration))")
-                DispatchQueue.main.async { [self] in
-                    guard !state.isEOF else { return }
-                    state.isEOF = true
-                    MainActor.assumeIsolated { onEndOfFile?() }
-                }
+                reachedEnd()
             }
         case "speed":
             let value = double() ?? 1
@@ -472,9 +495,12 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
-    private func report(error: String) {
+    /// Shows `error` on screen. A playback error passes its file's generation, so the error of a
+    /// replaced file isn't shown over the next one; setup errors pass nil.
+    private func report(error: String, generation: Int? = nil) {
         log(.error, error)
         DispatchQueue.main.async { [self] in
+            if let generation, generation != generationOnMain { return }
             state.errorMessage = error
             state.isBuffering = false
             MainActor.assumeIsolated { onError?(error) }

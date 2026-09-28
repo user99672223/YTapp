@@ -36,6 +36,9 @@ final class WatchViewModel: ObservableObject {
     private(set) var videoId: String
     private let model: AppModel
     private var reporter: PlaybackReporter?
+    /// The video whose file was handed to mpv. Ticks, resume points and the end of file belong
+    /// to it; `details` already shows the next video while that one is still loading.
+    private var playingDetails: VideoDetails?
     private var overrideVideo: StreamFormat?
     private var overrideAudio: StreamFormat?
     private var countdownTask: Task<Void, Never>?
@@ -77,6 +80,9 @@ final class WatchViewModel: ObservableObject {
 
     func load(videoId: String) async {
         finishCurrent()
+        // The previous video would keep playing behind the loading screen until the next
+        // one's file reaches mpv.
+        player.setPaused(true)
         self.videoId = videoId
         countdownTask?.cancel()
         countdown = nil
@@ -106,12 +112,16 @@ final class WatchViewModel: ObservableObject {
             } catch let error as BridgeError where error.kind == .expired && cached != nil {
                 // The bridge no longer holds this video's player data; fetch it again.
                 fetched = try await fetchDetails(videoId, client: client)
+                guard !closed, self.videoId == videoId else { return }
                 details = fetched
                 try await startPlayback(fetched, at: nil)
             }
             loadWatchLaterStatus()
         } catch {
-            guard !closed else { return }
+            guard !closed, self.videoId == videoId else { return }
+            // Nothing of this video reached mpv; don't keep the previous one loaded behind the
+            // error (it would hold the screensaver off once unpaused).
+            player.stop()
             phase = .failed(Self.describe(error))
         }
     }
@@ -129,15 +139,20 @@ final class WatchViewModel: ObservableObject {
 
     /// Re-fetches (stream URLs may have expired) and continues at the current position.
     func retry() {
-        let position = player.state.position
         let id = videoId
+        // Only this video's own position: if its load failed before the file reached mpv, the
+        // player still holds the previous video's position, and the resume rule decides.
+        let current = playingDetails?.id == id ? player.state.position : 0
+        let position: Double? = current > 1 ? current : nil
         Task {
             phase = .loading("Retrying…")
             do {
                 let fetched = try await fetchDetails(id, client: model.settings.streamClient)
+                guard !closed, videoId == id else { return }
                 details = fetched
-                try await startPlayback(fetched, at: position > 1 ? position : nil)
+                try await startPlayback(fetched, at: position)
             } catch {
+                guard !closed, videoId == id else { return }
                 phase = .failed(Self.describe(error))
             }
         }
@@ -152,7 +167,7 @@ final class WatchViewModel: ObservableObject {
         var formats = [chosen.video]
         if let audio = chosen.audio { formats.append(audio) }
         let streams = try await model.api { try await $0.resolveFormats(videoId: details.id, formats: formats) }
-        guard !closed else { return }
+        guard !closed, videoId == details.id else { return }
         guard let videoURL = streams.url(for: chosen.video) else {
             throw BridgeError(kind: .extraction, message: "YouTube didn't return a URL for the chosen video stream.")
         }
@@ -161,6 +176,7 @@ final class WatchViewModel: ObservableObject {
         let start = position ?? ResumePolicy.startPosition(saved: saved, duration: details.durationSeconds)
         reporter?.stop()
         reporter = PlaybackReporter(videoId: details.id, model: model)
+        playingDetails = details
         startedPlayback = false
         lastSavedPosition = start ?? 0
         waitingForDisplay = true
@@ -217,29 +233,34 @@ final class WatchViewModel: ObservableObject {
     }
 
     private func tick(position: Double, playing: Bool) {
+        // Between switching videos and the next file reaching mpv, nothing is playing for us.
+        guard let playingDetails else { return }
         reporter?.tick(position: position, isPlaying: playing)
         if playing, !startedPlayback, position > 0.3 {
             startedPlayback = true
-            reporter?.playbackStarted(length: details?.durationSeconds, videoItag: selection?.video.itag, audioItag: selection?.audio?.itag)
+            reporter?.playbackStarted(length: playingDetails.durationSeconds, videoItag: selection?.video.itag, audioItag: selection?.audio?.itag)
         }
         if abs(position - lastSavedPosition) >= 10 {
             lastSavedPosition = position
             saveResume(position)
         }
         if let reporter, historyStatus != reporter.lastStatus { historyStatus = reporter.lastStatus }
-        PlaybackDiagnostics.shared.update(videoId: videoId, title: details?.title, client: details?.playerClient,
+        PlaybackDiagnostics.shared.update(videoId: playingDetails.id, title: playingDetails.title, client: playingDetails.playerClient,
                                           selection: selection, state: player.state,
                                           refreshRate: appliedRefreshRate, history: historyStatus)
     }
 
     private func saveResume(_ position: Double) {
-        guard let details else { return }
-        model.store.saveResume(videoId: details.id, position: position, duration: details.durationSeconds ?? player.state.duration)
+        guard let playingDetails else { return }
+        model.store.saveResume(videoId: playingDetails.id, position: position,
+                               duration: playingDetails.durationSeconds ?? player.state.duration)
     }
 
     private func endOfFile() {
+        guard let playingDetails else { return }
         reporter?.stop()
-        if let details { model.store.saveResume(videoId: details.id, position: details.durationSeconds ?? player.state.duration, duration: details.durationSeconds ?? 0) }
+        model.store.saveResume(videoId: playingDetails.id, position: playingDetails.durationSeconds ?? player.state.duration,
+                               duration: playingDetails.durationSeconds ?? 0)
         guard model.settings.autoplay, nextVideo != nil else { return }
         startCountdown()
     }
@@ -334,11 +355,13 @@ final class WatchViewModel: ObservableObject {
 
     private func restartAtCurrentPosition() {
         guard let details else { return }
-        let position = player.state.position
+        // While a newly picked video is still loading, the player holds the previous one.
+        let position: Double? = playingDetails?.id == details.id ? player.state.position : nil
         Task {
             do {
                 try await startPlayback(details, at: position)
             } catch {
+                guard !closed, videoId == details.id else { return }
                 phase = .failed(Self.describe(error))
             }
         }
@@ -413,6 +436,7 @@ final class WatchViewModel: ObservableObject {
         if player.state.isFileLoaded, player.state.position > 0 { saveResume(player.state.position) }
         reporter?.stop()
         reporter = nil
+        playingDetails = nil
     }
 
     func close() {
