@@ -22,6 +22,7 @@ export const state = {
   // Session without the account cookies, for stream URLs only (see watch.js signedOutStreams).
   anon: null,
   anonCreating: null,
+  initSeq: 0,
   feeds: new Map(),
   infos: new Map(),
   subscriptions: new Map(),

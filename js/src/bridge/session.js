@@ -36,8 +36,13 @@ export async function init(options = {}) {
     playerId: options.playerId || '',
     poTokenMode: options.poTokenMode === 'off' ? 'off' : 'auto'
   };
+  // Only the latest init installs its session: an older one (previous cookies) that finishes
+  // late must not replace the new account's session.
+  state.initSeq = (state.initSeq || 0) + 1;
+  const seq = state.initSeq;
   const creating = (async () => {
     const yt = await createInnertube(opts, true);
+    if (seq !== state.initSeq) fail('noSession', 'A newer sign-in replaced this one.');
     state.yt = yt;
     state.options = opts;
     state.feeds.clear();
@@ -54,7 +59,7 @@ export async function init(options = {}) {
   try {
     yt = await creating;
   } finally {
-    state.creating = null;
+    if (seq === state.initSeq) state.creating = null;
   }
   let account = null;
   let accountError = null;

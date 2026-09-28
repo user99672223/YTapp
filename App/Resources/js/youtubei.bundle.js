@@ -42607,6 +42607,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     // Session without the account cookies, for stream URLs only (see watch.js signedOutStreams).
     anon: null,
     anonCreating: null,
+    initSeq: 0,
     feeds: /* @__PURE__ */ new Map(),
     infos: /* @__PURE__ */ new Map(),
     subscriptions: /* @__PURE__ */ new Map(),
@@ -43718,8 +43719,11 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       playerId: options.playerId || "",
       poTokenMode: options.poTokenMode === "off" ? "off" : "auto"
     };
+    state.initSeq = (state.initSeq || 0) + 1;
+    const seq = state.initSeq;
     const creating = (async () => {
       const yt2 = await createInnertube(opts, true);
+      if (seq !== state.initSeq) fail("noSession", "A newer sign-in replaced this one.");
       state.yt = yt2;
       state.options = opts;
       state.feeds.clear();
@@ -43736,7 +43740,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     try {
       yt = await creating;
     } finally {
-      state.creating = null;
+      if (seq === state.initSeq) state.creating = null;
     }
     let account = null;
     let accountError = null;

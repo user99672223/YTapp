@@ -425,6 +425,18 @@ test('when signed-out clients are refused too, the next signed-in client provide
   assert.equal(again.playerClient, 'WEB_EMBEDDED');
 });
 
+test('an older init that finishes last does not replace the newer session', async () => {
+  const yt = createFakeYouTube();
+  const bundle = loadBundle({ router: yt.router });
+  const first = bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const second = bundle.call('init', { cookie: '', client: 'AUTO' });
+  const results = await Promise.allSettled([first, second]);
+  assert.equal(results[1].status, 'fulfilled');
+  assert.equal(results[1].value.loggedIn, false);
+  const state = await bundle.call('sessionState');
+  assert.equal(state.loggedIn, false, 'the signed-out (newer) session stays installed');
+});
+
 test('errors are classified for Swift', async () => {
   const { call } = await connected();
   await assert.rejects(call('resolveFormats', { id: 'NOTLOADED01', indices: [0] }), (e) => e.kind === 'expired');
