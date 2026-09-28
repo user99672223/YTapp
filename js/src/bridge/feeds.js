@@ -7,10 +7,29 @@ import { fail } from './errors.js';
 function pageNodes(feed) {
   if (!feed) return [];
   if (feed.contents && Array.isArray(feed.contents.contents)) return feed.contents.contents;
-  const pc = feed.page_contents;
+  // YouTube.js' page_contents only knows first pages: on a plain Feed continuation (Subscriptions,
+  // subscribed channels, Library playlists) there is no Tab and the getter throws.
+  let pc;
+  try {
+    pc = feed.page_contents;
+  } catch {
+    pc = undefined;
+  }
+  if (!pc) pc = continuationContents(feed.page);
   if (pc && Array.isArray(pc.contents)) return pc.contents;
   if (pc && pc.content && Array.isArray(pc.content.contents)) return pc.content.contents;
   return [];
+}
+
+// The appended items of a continuation response (appendContinuationItemsAction and friends).
+function continuationContents(parsed) {
+  if (!parsed) return undefined;
+  const commands = [
+    ...(parsed.on_response_received_actions || []),
+    ...(parsed.on_response_received_endpoints || []),
+    ...(parsed.on_response_received_commands || [])
+  ];
+  return commands.find((c) => c && Array.isArray(c.contents)) || parsed.continuation_contents || undefined;
 }
 
 function hasMore(feed) {
@@ -299,7 +318,6 @@ export async function more({ key }) {
   const current = entry.feed;
   if (!hasMore(current)) return page([], undefined);
   const next = await current.getContinuation();
-  entry.feed = next;
   let sections;
   switch (entry.kind) {
     case 'search':
@@ -320,6 +338,8 @@ export async function more({ key }) {
       sections = sectionsFromNodes(pageNodes(next));
       if (entry.channelsOnly) sections = onlyChannels(sections, next);
   }
+  // Only move on once this page was read, so a failure (and its Retry) does not skip a page.
+  entry.feed = next;
   return page(sections, hasMore(next) ? key : undefined);
 }
 

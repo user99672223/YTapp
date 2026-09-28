@@ -44202,12 +44202,28 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   function pageNodes(feed) {
     if (!feed) return [];
     if (feed.contents && Array.isArray(feed.contents.contents)) return feed.contents.contents;
-    const pc = feed.page_contents;
+    let pc;
+    try {
+      pc = feed.page_contents;
+    } catch {
+      pc = void 0;
+    }
+    if (!pc) pc = continuationContents(feed.page);
     if (pc && Array.isArray(pc.contents)) return pc.contents;
     if (pc && pc.content && Array.isArray(pc.content.contents)) return pc.content.contents;
     return [];
   }
   __name(pageNodes, "pageNodes");
+  function continuationContents(parsed) {
+    if (!parsed) return void 0;
+    const commands = [
+      ...parsed.on_response_received_actions || [],
+      ...parsed.on_response_received_endpoints || [],
+      ...parsed.on_response_received_commands || []
+    ];
+    return commands.find((c) => c && Array.isArray(c.contents)) || parsed.continuation_contents || void 0;
+  }
+  __name(continuationContents, "continuationContents");
   function hasMore(feed) {
     try {
       return !!feed.has_continuation;
@@ -44490,7 +44506,6 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const current = entry.feed;
     if (!hasMore(current)) return page([], void 0);
     const next = await current.getContinuation();
-    entry.feed = next;
     let sections;
     switch (entry.kind) {
       case "search":
@@ -44511,6 +44526,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         sections = sectionsFromNodes(pageNodes(next));
         if (entry.channelsOnly) sections = onlyChannels(sections, next);
     }
+    entry.feed = next;
     return page(sections, hasMore(next) ? key : void 0);
   }
   __name(more, "more");

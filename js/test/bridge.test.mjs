@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { loadBundle } from './harness.mjs';
-import { createFakeYouTube, COOKIE, CH1, CH2, PLAYER_ID } from './fakeyt.mjs';
+import { createFakeYouTube, COOKIE, CH1, CH2, CH3, PLAYER_ID } from './fakeyt.mjs';
 
 const fixturesDir = new URL('../../Packages/Core/Tests/CoreTests/Fixtures/', import.meta.url);
 mkdirSync(fixturesDir, { recursive: true });
@@ -155,6 +155,30 @@ test('search, suggestions and channel items', async () => {
   assert.equal(channel.isSubscribed, false);
   assert.ok(items.some((i) => i.id === 'SEARCHVID01'));
   assert.ok(results.sections.some((s) => s.style === 'shorts' && s.items[0].id === 'SHORTID0003'));
+});
+
+test('Subscriptions, subscribed channels and Library playlists load past the first page', async () => {
+  const { call } = await connected();
+  const subs = await call('subscriptions');
+  assert.deepEqual(subs.sections.flatMap((s) => s.items).map((i) => i.id), ['SUBSVIDEO01', 'STREAMVID01', 'UPCOMINGV01', 'LIVENOWVID1']);
+  assert.ok(subs.continuation);
+  const moreSubs = await call('more', { key: subs.continuation });
+  assert.deepEqual(moreSubs.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText]), [['SUBSVIDEO02', 'Channel One', '7K views']]);
+  assert.equal(moreSubs.continuation, undefined);
+
+  const channels = await call('subscribedChannels');
+  assert.ok(channels.continuation);
+  const moreChannels = await call('more', { key: channels.continuation });
+  assert.deepEqual(moreChannels.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.name]), [['channel', CH3, 'Channel Three']]);
+  assert.equal(moreChannels.continuation, undefined);
+
+  const lists = await call('playlists');
+  assert.deepEqual(lists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.videoCountText]),
+    [['playlist', 'PLmine000001', '3 videos'], ['playlist', 'PLother00001', '40 videos']]);
+  assert.ok(lists.continuation);
+  const moreLists = await call('more', { key: lists.continuation });
+  assert.deepEqual(moreLists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id]), [['playlist', 'PLmine000002']]);
+  assert.equal(moreLists.continuation, undefined);
 });
 
 test('Shorts feed seeds from Home and resolves a short', async () => {

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 export const PLAYER_ID = '0a1b2c3d';
 export const CH1 = 'UC' + 'a'.repeat(22);
 export const CH2 = 'UC' + 'b'.repeat(22);
+export const CH3 = 'UC' + 'c'.repeat(22);
 export const COOKIE = 'SID=sid; HSID=hsid; SSID=ssid; APISID=apisid; SAPISID=sapisid123/abc; __Secure-3PAPISID=sapisid123/abc; LOGIN_INFO=li';
 
 const playerJs = readFileSync(new URL('./fixtures/player.js', import.meta.url), 'utf8');
@@ -103,6 +104,55 @@ function lockup(id, title, channelId, channelName) {
     }
   };
 }
+
+// A lockupViewModel with explicit metadata rows. A part is a string, or { text, browseId } for a
+// part linking to a channel (an attributed-text command run, as YouTube sends the author).
+function lockupView({ id, title, type = 'VIDEO', rows, badge = '12:34', badgeStyle = 'THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT', thumb, onTap }) {
+  const part = (p) => (typeof p === 'string'
+    ? { text: { content: p } }
+    : { text: { content: p.text, commandRuns: [{ startIndex: 0, length: p.text.length, onTap: { innertubeCommand: { browseEndpoint: { browseId: p.browseId } } } }] } });
+  const image = {
+    thumbnailViewModel: {
+      image: { sources: [{ url: thumb || `https://i.ytimg.com/vi/${id}/hq720.jpg`, width: 1280, height: 720 }] },
+      overlays: badge ? [{
+        thumbnailOverlayBadgeViewModel: {
+          thumbnailBadges: [{ thumbnailBadgeViewModel: { text: badge, badgeStyle } }],
+          position: 'THUMBNAIL_OVERLAY_BADGE_POSITION_BOTTOM_END'
+        }
+      }] : []
+    }
+  };
+  return {
+    lockupViewModel: {
+      contentImage: type === 'PLAYLIST' ? { collectionThumbnailViewModel: { primaryThumbnail: image } } : image,
+      metadata: {
+        lockupMetadataViewModel: {
+          title: { content: title },
+          metadata: { contentMetadataViewModel: { metadataRows: rows.map((r) => ({ metadataParts: r.map(part) })), delimiter: ' • ' } }
+        }
+      },
+      contentId: id,
+      contentType: `LOCKUP_CONTENT_TYPE_${type}`,
+      rendererContext: onTap ? { commandContext: { onTap: { innertubeCommand: onTap } } } : {}
+    }
+  };
+}
+
+const richItem = (content) => ({ richItemRenderer: { content } });
+const continuationItem = (token) => ({
+  continuationItemRenderer: {
+    trigger: 'CONTINUATION_TRIGGER_ON_ITEM_SHOWN',
+    continuationEndpoint: { continuationCommand: { token, request: 'CONTINUATION_REQUEST_TYPE_BROWSE' } }
+  }
+});
+const appendItems = (items) => ({
+  responseContext: {},
+  onResponseReceivedActions: [{ appendContinuationItemsAction: { targetId: 'browse-feed', continuationItems: items } }]
+});
+const browseTab = (content) => ({
+  responseContext: {},
+  contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { selected: true, content } }] } }
+});
 
 function shortLockup(id, title) {
   return {
@@ -367,45 +417,75 @@ function searchResponse() {
   };
 }
 
+const subscribedChannel = (id, name, subs) => ({
+  channelRenderer: {
+    channelId: id, title: simple(name),
+    thumbnail: thumbs(`//yt3.ggpht.com/${id}=s176-c-k-c0x00ffffff-no-rj`, 176, 176),
+    subscriberCountText: simple(subs),
+    navigationEndpoint: { browseEndpoint: { browseId: id } },
+    subscribeButton: { subscribeButtonRenderer: { buttonText: runs('Subscribed'), subscribed: true, enabled: true, channelId: id } }
+  }
+});
+
+const channelShelf = (...channels) => ({
+  itemSectionRenderer: {
+    contents: [{ shelfRenderer: { content: { expandedShelfContentsRenderer: { items: channels } } } }]
+  }
+});
+
 function channelsBrowse() {
-  const channel = (id, name, subs) => ({
-    channelRenderer: {
-      channelId: id, title: simple(name),
-      thumbnail: thumbs(`//yt3.ggpht.com/${id}=s176-c-k-c0x00ffffff-no-rj`, 176, 176),
-      subscriberCountText: simple(subs),
-      navigationEndpoint: { browseEndpoint: { browseId: id } },
-      subscribeButton: { subscribeButtonRenderer: { buttonText: runs('Subscribed'), subscribed: true, enabled: true, channelId: id } }
+  return browseTab({
+    sectionListRenderer: {
+      contents: [
+        channelShelf(subscribedChannel(CH1, 'Channel One', '1.1K subscribers'), subscribedChannel(CH2, 'Channel Two', '2.1M subscribers')),
+        continuationItem('CHANCONT1')
+      ]
     }
   });
-  return {
-    responseContext: {},
-    contents: {
-      twoColumnBrowseResultsRenderer: {
-        tabs: [{
-          tabRenderer: {
-            selected: true,
-            content: {
-              sectionListRenderer: {
-                contents: [{
-                  itemSectionRenderer: {
-                    contents: [{
-                      shelfRenderer: {
-                        content: {
-                          expandedShelfContentsRenderer: {
-                            items: [channel(CH1, 'Channel One', '1.1K subscribers'), channel(CH2, 'Channel Two', '2.1M subscribers')]
-                          }
-                        }
-                      }
-                    }]
-                  }
-                }]
-              }
-            }
-          }
-        }]
-      }
+}
+
+// Subscriptions: lockups only (2026), with an ended stream, a scheduled one and a live one.
+function subscriptionsBrowse() {
+  const by = (text, browseId) => ({ text, browseId });
+  return browseTab({
+    richGridRenderer: {
+      contents: [
+        richItem(lockupView({ id: 'SUBSVIDEO01', title: 'Subscribed video', rows: [[by('Channel Two', CH2)], ['5K views', '1 hour ago']] })),
+        richItem(lockupView({
+          id: 'STREAMVID01', title: 'Yesterday stream', badge: '2:01:15',
+          thumb: 'https://i.ytimg.com/vi/STREAMVID01/hq720_live.jpg?sqp=-oaymwEcCNAFEJQDSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLfake',
+          rows: [[by('Channel One', CH1)], ['20K views', 'Streamed 13 hours ago']]
+        })),
+        richItem(lockupView({
+          id: 'UPCOMINGV01', title: 'Scheduled stream', badge: 'Upcoming',
+          thumb: 'https://i.ytimg.com/vi/UPCOMINGV01/hqdefault_live.jpg',
+          rows: [[by('Channel One', CH1)], ['Scheduled for 10/1/26, 8:00 PM']]
+        })),
+        richItem(lockupView({
+          id: 'LIVENOWVID1', title: 'Live now', badge: 'LIVE', badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE',
+          thumb: 'https://i.ytimg.com/vi/LIVENOWVID1/hq720_live.jpg',
+          rows: [[by('Channel Two', CH2)], ['1.2K watching']]
+        })),
+        continuationItem('SUBSCONT1')
+      ]
     }
-  };
+  });
+}
+
+// Library → Playlists: playlist lockups whose first metadata part is not a channel.
+function playlistsBrowse() {
+  return browseTab({
+    richGridRenderer: {
+      contents: [
+        richItem(lockupView({ id: 'PLmine000001', type: 'PLAYLIST', title: 'My list', badge: '3 videos', rows: [['Private', 'Playlist'], ['View full playlist']] })),
+        richItem(lockupView({
+          id: 'PLother00001', type: 'PLAYLIST', title: 'Saved list', badge: '40 videos',
+          rows: [[{ text: 'Channel Two', browseId: CH2 }, 'Playlist'], ['View full playlist']]
+        })),
+        continuationItem('PLAGGCONT1')
+      ]
+    }
+  });
 }
 
 function guideResponse() {
@@ -484,11 +564,20 @@ export function createFakeYouTube(options = {}) {
     }
     if (path === '/youtubei/v1/browse') {
       if (body?.continuation === 'HOMECONT1') return { status: 200, body: homeContinuation() };
+      if (body?.continuation === 'SUBSCONT1') {
+        return { status: 200, body: appendItems([richItem(lockupView({ id: 'SUBSVIDEO02', title: 'Older subscribed video', rows: [[{ text: 'Channel One', browseId: CH1 }], ['7K views', '2 days ago']] }))]) };
+      }
+      if (body?.continuation === 'CHANCONT1') return { status: 200, body: appendItems([channelShelf(subscribedChannel(CH3, 'Channel Three', '300 subscribers'))]) };
+      if (body?.continuation === 'PLAGGCONT1') {
+        return { status: 200, body: appendItems([richItem(lockupView({ id: 'PLmine000002', type: 'PLAYLIST', title: 'Another list', badge: '1 video', rows: [['Unlisted', 'Playlist'], ['Updated today'], ['View full playlist']] }))]) };
+      }
       if (body?.browseId === 'FEwhat_to_watch') return { status: 200, body: homeBrowse() };
       if (body?.browseId === 'FEchannels') {
         if (options.channelsFeed === 'broken') return { status: 200, body: { responseContext: {} } };
         return { status: 200, body: channelsBrowse() };
       }
+      if (body?.browseId === 'FEsubscriptions') return { status: 200, body: subscriptionsBrowse() };
+      if (body?.browseId === 'FEplaylist_aggregation') return { status: 200, body: playlistsBrowse() };
       return { status: 404, body: { error: 'unknown browse' } };
     }
     if (path === '/youtubei/v1/guide') return { status: 200, body: guideResponse() };
