@@ -10,32 +10,37 @@ struct SetupView: View {
     @StateObject private var controller = SetupController()
 
     var body: some View {
-        HStack(alignment: .center, spacing: 80) {
+        HStack(alignment: .center, spacing: 64) {
             VStack(spacing: 24) {
                 if let url = controller.url, let image = QRCode.image(for: url) {
                     Image(uiImage: image)
                         .interpolation(.none)
                         .resizable()
-                        .frame(width: 440, height: 440)
+                        .frame(width: 400, height: 400)
                         .padding(24)
                         .background(Color.white, in: RoundedRectangle(cornerRadius: 24))
-                    Text(url).font(.title3.monospaced()).foregroundStyle(.secondary)
+                    // Always one line: shrink a long address rather than break it after "http://".
+                    Text(url)
+                        .font(.headline.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                 } else {
                     Image(systemName: "wifi.exclamationmark").font(.system(size: 140)).foregroundStyle(.secondary)
                     Text("No network address yet").font(.headline)
                 }
             }
-            .frame(width: 560)
+            .frame(width: 500)
 
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Connect your YouTube account").font(.largeTitle.bold())
-                VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 32) {
+                Text("Connect your YouTube account").font(.title2.bold())
+                VStack(alignment: .leading, spacing: 20) {
                     step(1, "On a computer or phone on the same Wi-Fi, scan the code or open the address shown.")
                     step(2, "In a private (incognito) browser window, sign in to youtube.com and export its cookies.")
                     step(3, "Paste them on the page and press “Send to TV”.")
                     step(4, "Close the private window afterwards. Don't sign out of YouTube there.")
                 }
-                .font(.title3)
+                .font(.headline.weight(.regular))
                 statusView
                 HStack(spacing: 30) {
                     if controller.serverProblem != nil {
@@ -47,9 +52,12 @@ struct SetupView: View {
                     }
                 }
             }
-            .frame(maxWidth: 1000, alignment: .leading)
+            // Every line at its full height: in a stack that's short of room, Text truncates with
+            // "…" instead of wrapping.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 1100, alignment: .leading)
         }
-        .padding(80)
+        .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .onAppear { controller.start(model: model) }
@@ -66,10 +74,11 @@ struct SetupView: View {
     }
 
     private func step(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            Text("\(number)").font(.title3.bold()).frame(width: 44, height: 44)
+        HStack(alignment: .firstTextBaseline, spacing: 20) {
+            Text("\(number)").font(.headline).frame(width: 52, height: 52)
                 .background(Color.red, in: Circle())
             Text(text)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
