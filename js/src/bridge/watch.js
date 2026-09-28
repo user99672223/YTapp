@@ -40,7 +40,8 @@ export function formatsOf(info) {
       loudnessDb: f.loudness_db,
       isDrc: !!f.is_drc,
       isHdr: HDR_TRANSFER.test(transfer) || /HDR/i.test(f.quality_label || ''),
-      isOtf: !!f.is_type_otf,
+      // Segmented: OTF, or live / post-live DVR segments (they carry a target segment duration).
+      isOtf: !!f.is_type_otf || f.target_duration_sec != null || f.max_dvr_duration_sec != null,
       isSuperResolution: !!f.is_sr,
       audioTrackId: f.audio_track?.id,
       audioTrackName: f.audio_track?.display_name,
@@ -239,6 +240,14 @@ async function streamProblem(yt, info, client) {
   return null;
 }
 
+// Live streams (and post-live DVR) are only offered as segments, whichever the client. They are
+// returned as they are, so the watch page can say so (their formats are marked isOtf), without
+// trying every client or judging this client by them.
+function isLiveInfo(info) {
+  const basic = info.basic_info || {};
+  return !!(basic.is_live || basic.is_post_live_dvr);
+}
+
 // YouTube.js throws a generic "This video is unavailable" for playability status ERROR (deleted,
 // removed or terminated videos); YouTube's own reason is only on the error's `info`.
 function withPlayabilityReason(e) {
@@ -263,6 +272,7 @@ export async function playerWithFallback(yt, id, preferred, load) {
       if (ytClient === 'TV') tvIdentity.current = c === 'TV_TIZEN' ? 'tizen' : 'cobalt';
       const info = await load(ytClient, poToken || undefined);
       checkPlayable(info);
+      if (isLiveInfo(info)) return { info, client: c, poToken: poToken || undefined };
       const problem = await streamProblem(yt, info, c);
       if (problem) fail('extraction', problem);
       state.goodClient = c;

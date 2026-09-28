@@ -44548,7 +44548,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         loudnessDb: f.loudness_db,
         isDrc: !!f.is_drc,
         isHdr: HDR_TRANSFER.test(transfer) || /HDR/i.test(f.quality_label || ""),
-        isOtf: !!f.is_type_otf,
+        // Segmented: OTF, or live / post-live DVR segments (they carry a target segment duration).
+        isOtf: !!f.is_type_otf || f.target_duration_sec != null || f.max_dvr_duration_sec != null,
         isSuperResolution: !!f.is_sr,
         audioTrackId: f.audio_track?.id,
         audioTrackName: f.audio_track?.display_name,
@@ -44731,6 +44732,11 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return null;
   }
   __name(streamProblem, "streamProblem");
+  function isLiveInfo(info2) {
+    const basic = info2.basic_info || {};
+    return !!(basic.is_live || basic.is_post_live_dvr);
+  }
+  __name(isLiveInfo, "isLiveInfo");
   function withPlayabilityReason(e) {
     const p = e && !(e instanceof BridgeError) ? e.info : null;
     if (!p || typeof p !== "object" || p.status !== "ERROR") return e;
@@ -44750,6 +44756,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
         if (ytClient === "TV") tvIdentity.current = c === "TV_TIZEN" ? "tizen" : "cobalt";
         const info2 = await load(ytClient, poToken || void 0);
         checkPlayable(info2);
+        if (isLiveInfo(info2)) return { info: info2, client: c, poToken: poToken || void 0 };
         const problem = await streamProblem(yt, info2, c);
         if (problem) fail("extraction", problem);
         state.goodClient = c;

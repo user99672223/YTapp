@@ -193,7 +193,31 @@ const NOT_PLAYABLE = {
   }
 };
 
+// A live stream: segment formats (targetDurationSec / maxDvrDurationSec), or only an HLS manifest.
+function livePlayerResponse(id) {
+  const segment = (itag, extra) => ({ itag, url: FORMAT_URL(itag), targetDurationSec: 5, maxDvrDurationSec: 43200, approxDurationMs: '0', ...extra });
+  return {
+    responseContext: {},
+    playabilityStatus: { status: 'OK', playableInEmbed: true },
+    streamingData: {
+      expiresInSeconds: '21540',
+      hlsManifestUrl: 'https://manifest.googlevideo.com/api/manifest/hls_variant/fake',
+      ...(id === 'LIVEHLSONLY' ? {} : {
+        adaptiveFormats: [
+          segment(137, { mimeType: 'video/mp4; codecs="avc1.640028"', bitrate: 4000000, width: 1920, height: 1080, fps: 30, qualityLabel: '1080p' }),
+          segment(140, { mimeType: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 130000, audioQuality: 'AUDIO_QUALITY_MEDIUM', audioSampleRate: '44100', audioChannels: 2 })
+        ]
+      })
+    },
+    videoDetails: {
+      videoId: id, title: 'Live now', lengthSeconds: '0', channelId: CH1, isLive: true, isLiveContent: true,
+      thumbnail: thumbs(`https://i.ytimg.com/vi/${id}/maxresdefault.jpg`), viewCount: '10', author: 'Channel One'
+    }
+  };
+}
+
 function playerResponse(id) {
+  if (id.startsWith('LIVE')) return livePlayerResponse(id);
   return {
     responseContext: {},
     playabilityStatus: { status: 'OK', playableInEmbed: true },

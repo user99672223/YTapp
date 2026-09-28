@@ -284,3 +284,19 @@ test('a deleted video stops at the first client with YouTube\'s reason', async (
     e.kind === 'unavailable' && /removed by the uploader/.test(e.message));
   assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 1);
 });
+
+test('live streams come back as segmented formats without trying other clients', async () => {
+  const { call, yt } = await connected();
+  const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player');
+  const live = await call('videoInfo', { id: 'LIVESTREAM1', client: 'AUTO' });
+  assert.equal(live.isLive, true);
+  assert.ok(live.formats.length > 0 && live.formats.every((f) => f.isOtf), 'live segments are not streamable');
+  const hlsOnly = await call('videoInfo', { id: 'LIVEHLSONLY', client: 'AUTO' });
+  assert.deepEqual(hlsOnly.formats, []);
+  assert.equal(players().length, 2);
+  // Neither marked the TV client as broken: the next video is still loaded through it first.
+  const next = await call('videoInfo', { id: 'VIDEOID0001', client: 'AUTO' });
+  assert.equal(next.playerClient, 'TV');
+  assert.equal(players().length, 3);
+  assert.equal(next.formats.some((f) => f.isOtf), false);
+});
