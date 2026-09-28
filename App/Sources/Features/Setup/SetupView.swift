@@ -6,6 +6,7 @@ import Core
 /// First run (and cookie re-entry): shows a QR code for the setup page served by the TV.
 struct SetupView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var controller = SetupController()
 
     var body: some View {
@@ -37,6 +38,9 @@ struct SetupView: View {
                 .font(.title3)
                 statusView
                 HStack(spacing: 30) {
+                    if controller.serverProblem != nil {
+                        Button("Retry") { controller.restartServer() }
+                    }
                     Button("Refresh address") { controller.refreshAddress() }
                     if model.isSignedIn {
                         Button("Cancel") { model.cancelCookieReentry() }
@@ -50,6 +54,15 @@ struct SetupView: View {
         .background(Color.black)
         .onAppear { controller.start(model: model) }
         .onDisappear { controller.stop() }
+        // tvOS tears down a suspended app's listening socket, and onAppear/onDisappear don't
+        // fire for the app going to the background and back.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: controller.stop()
+            case .active: controller.resume()
+            default: break
+            }
+        }
     }
 
     private func step(_ number: Int, _ text: String) -> some View {
@@ -62,6 +75,15 @@ struct SetupView: View {
 
     @ViewBuilder
     private var statusView: some View {
+        if let problem = controller.serverProblem {
+            Label(problem, systemImage: "xmark.octagon.fill").foregroundStyle(.red)
+        } else {
+            cookieStatus
+        }
+    }
+
+    @ViewBuilder
+    private var cookieStatus: some View {
         switch controller.phase {
         case .waiting:
             Label("Waiting for your cookies…", systemImage: "hourglass").foregroundStyle(.secondary)
@@ -89,6 +111,8 @@ final class SetupController: ObservableObject {
 
     @Published var url: String?
     @Published var phase: Phase = .waiting
+    /// Why the setup page isn't being served (shown with a Retry button).
+    @Published private(set) var serverProblem: String?
     private let server = SetupServer()
 
     func start(model: AppModel) {
@@ -96,8 +120,11 @@ final class SetupController: ObservableObject {
         server.onStatus = { [weak self] status in
             guard let self else { return }
             switch status {
-            case .failed(let message): self.phase = .error(message)
-            case .listening: if case .error = self.phase { self.phase = .waiting }
+            case .failed(let message): self.serverProblem = message
+            case .listening:
+                self.serverProblem = nil
+                // The TV may have had no address yet when the screen appeared.
+                self.refreshAddress()
             case .starting: break
             }
         }
@@ -119,6 +146,17 @@ final class SetupController: ObservableObject {
 
     func refreshAddress() {
         url = NetworkInfo.setupURL
+    }
+
+    func restartServer() {
+        server.restart()
+        refreshAddress()
+    }
+
+    /// Back from the background: serve the page again (no-op if it's still running).
+    func resume() {
+        server.start()
+        refreshAddress()
     }
 
     func stop() {
