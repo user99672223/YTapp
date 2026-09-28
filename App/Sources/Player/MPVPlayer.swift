@@ -75,6 +75,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var position: Double = 0
     private var duration: Double = 0
     private var paused = true  // mpv queue only
+    private var idleActive = true  // mpv queue only: no file loaded (before the first, after stop or a failure)
     /// mpv queue: the generation of the file mpv is loading or playing.
     private var loadGeneration = 0
     /// mpv queue: FILE_LOADED arrived for that file. Until then time-pos and eof-reached can
@@ -297,6 +298,7 @@ final class MPVPlayer: @unchecked Sendable {
     private func observe(_ mpv: OpaquePointer) {
         let properties: [(String, mpv_format)] = [
             ("time-pos", MPV_FORMAT_DOUBLE), ("duration", MPV_FORMAT_DOUBLE), ("pause", MPV_FORMAT_FLAG),
+            ("idle-active", MPV_FORMAT_FLAG),
             ("paused-for-cache", MPV_FORMAT_FLAG), ("cache-buffering-state", MPV_FORMAT_INT64),
             ("demuxer-cache-duration", MPV_FORMAT_DOUBLE), ("eof-reached", MPV_FORMAT_FLAG),
             ("speed", MPV_FORMAT_DOUBLE), ("container-fps", MPV_FORMAT_DOUBLE),
@@ -438,15 +440,16 @@ final class MPVPlayer: @unchecked Sendable {
         case "pause":
             let value = flag() ?? true
             paused = value
+            updateIdleTimer()
             let generation = loadGeneration
             DispatchQueue.main.async { [self] in
                 state.isPaused = value
-                guard !destroyedOnMain else { return }
-                MainActor.assumeIsolated {
-                    IdleTimer.set(self, playing: !value)
-                    if generation == generationOnMain { onPauseChanged?(value) }
-                }
+                guard !destroyedOnMain, generation == generationOnMain else { return }
+                MainActor.assumeIsolated { onPauseChanged?(value) }
             }
+        case "idle-active":
+            idleActive = flag() ?? false
+            updateIdleTimer()
         case "paused-for-cache":
             let value = flag() ?? false
             stats.pausedForCache = value
@@ -509,7 +512,20 @@ final class MPVPlayer: @unchecked Sendable {
             if let generation, generation != generationOnMain { return }
             state.errorMessage = error
             state.isBuffering = false
-            MainActor.assumeIsolated { onError?(error) }
+            MainActor.assumeIsolated {
+                IdleTimer.set(self, playing: false)
+                onError?(error)
+            }
+        }
+    }
+
+    /// The screensaver stays off only while a file really plays: not paused, and not idle. A
+    /// failed load or `stop` leaves mpv idle with `pause` unchanged.
+    private func updateIdleTimer() {
+        let playing = !paused && !idleActive
+        DispatchQueue.main.async { [self] in
+            guard !destroyedOnMain else { return }
+            MainActor.assumeIsolated { IdleTimer.set(self, playing: playing) }
         }
     }
 

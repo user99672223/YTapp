@@ -156,6 +156,8 @@ final class ShortsViewModel: ObservableObject {
             if position >= ids.count - 3 { Task { await loadMore() } }
         } catch {
             guard index == position, !closed else { return }
+            // Don't leave the previous Short loaded behind the error.
+            player.stop()
             phase = .failed(WatchViewModel.describe(error))
         }
     }
