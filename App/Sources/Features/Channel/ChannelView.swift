@@ -20,8 +20,13 @@ final class ChannelModel: ObservableObject {
         if !force, let loadedAt, RefreshPolicy.isFresh(fetchedAt: loadedAt, category: .channel), page != nil { return }
         if !force, page == nil, let cached = model.store.cachedPage("channel:\(channelId)", as: ChannelPage.self),
            RefreshPolicy.isFresh(fetchedAt: cached.fetchedAt, category: .channel) {
-            page = cached.value
-            isSubscribed = cached.value.channel.isSubscribed
+            // The key names a feed in the JS session that stored it; after a relaunch it's gone
+            // or points at another channel, so the tabs fetch the channel themselves until the
+            // fresh page (with a live key) arrives.
+            var restored = cached.value
+            restored.key = nil
+            page = restored
+            isSubscribed = restored.channel.isSubscribed
         }
         do {
             let fresh = try await model.api { [channelId] in try await $0.channel(channelId) }
@@ -31,7 +36,8 @@ final class ChannelModel: ObservableObject {
             loadedAt = Date()
             model.store.storePage("channel:\(channelId)", fresh)
             if !fresh.tabs.isEmpty, !fresh.tabs.contains(tab) { tab = fresh.tabs[0] }
-            feeds = [:]
+            // Keep the tab feeds already on screen; drop only tabs the channel no longer has.
+            feeds = feeds.filter { fresh.tabs.isEmpty || fresh.tabs.contains($0.key) }
         } catch {
             if page == nil { self.error = BridgeError.wrap(error) }
         }
@@ -40,9 +46,10 @@ final class ChannelModel: ObservableObject {
     func feed(for tab: ChannelTab) -> FeedModel {
         if let existing = feeds[tab] { return existing }
         let id = channelId
-        let key = page?.key
-        let feed = FeedModel(cacheKey: "channel:\(id):\(tab.rawValue)", category: .channel) {
-            try await $0.channelTab(channelId: id, tab: tab, key: key)
+        let feed = FeedModel(cacheKey: "channel:\(id):\(tab.rawValue)", category: .channel) { [weak self] service in
+            // Read the key when the tab loads: the channel page may have been refreshed since.
+            let key = await MainActor.run { self?.page?.key }
+            return try await service.channelTab(channelId: id, tab: tab, key: key)
         }
         feeds[tab] = feed
         return feed
@@ -80,10 +87,11 @@ struct ChannelView: View {
     var body: some View {
         Group {
             if let page = channel.page {
+                // No .id(tab): FeedView loads whichever tab's model it's given, and the header
+                // with the tab picker stays in place, so focus stays on the picker.
                 FeedView(feed: channel.feed(for: channel.tab), emptyText: "This channel has nothing here.") {
                     header(page)
                 }
-                .id(channel.tab)
             } else if let error = channel.error {
                 ErrorStateView(error: error) { Task { await channel.load(model, force: true) } }
             } else {
