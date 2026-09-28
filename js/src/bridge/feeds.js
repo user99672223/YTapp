@@ -292,16 +292,15 @@ export async function playlists() {
   const yt = await requireSession();
   requireLogin(yt);
   const feed = await yt.getPlaylists();
-  const key = register('playlists', 'feed', feed);
-  let sections = sectionsFromNodes(pageNodes(feed));
-  const lists = sections.flatMap((s) => s.items).filter((i) => i.type === 'playlist');
-  if (!lists.length) {
-    const fallback = (feed.playlists || []).map(toItem).filter((i) => i && i.type === 'playlist');
-    sections = fallback.length ? [{ id: `pls-${key}`, style: 'grid', items: fallback }] : [];
-  } else {
-    sections = [{ id: `pls-${key}`, style: 'grid', items: lists }];
-  }
-  return toPage(key, feed, sections);
+  const key = register('playlists', 'feed', feed, { playlistsOnly: true });
+  return toPage(key, feed, onlyPlaylists(sectionsFromNodes(pageNodes(feed)), feed, `pls-${key}`));
+}
+
+// Library → Playlists keeps only playlists (a saved Mix is a video card elsewhere), on every page.
+function onlyPlaylists(sections, feed, id) {
+  let lists = sections.flatMap((s) => s.items).filter((i) => i.type === 'playlist');
+  if (!lists.length) lists = (feed.playlists || []).map(toItem).filter((i) => i && i.type === 'playlist');
+  return lists.length ? [{ id, style: 'grid', items: lists }] : [];
 }
 
 // ---------------------------------------------------------------- Continuations
@@ -340,6 +339,7 @@ export async function more({ key }) {
     default:
       sections = sectionsFromNodes(pageNodes(next));
       if (entry.channelsOnly) sections = onlyChannels(sections, next);
+      if (entry.playlistsOnly) sections = onlyPlaylists(sections, next, `pls-${key}-${Date.now()}`);
   }
   // Only move on once this page was read, so a failure (and its Retry) does not skip a page.
   entry.feed = next;

@@ -43950,10 +43950,10 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     }
     if (type !== "VIDEO" && type !== "SHORT" && type !== "MOVIE" && type !== "CLIP") return null;
     const channel2 = lockupChannel(lockup, parts);
-    const flat = parts.flat().map((p) => p.text).filter(Boolean);
-    const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel2.channelName));
-    const isLive = overlay.isLive || flat.some((t) => /watching/i.test(t));
-    const isUpcoming = overlay.isUpcoming || flat.some((t) => UPCOMING_RE.test(t));
+    const stats = parts.flat().map((p) => p.text).filter((t) => t && t !== channel2.channelName);
+    const { viewCountText, publishedText } = viewsAndAge(stats);
+    const isLive = overlay.isLive || stats.some((t) => /\bwatching\b/i.test(t));
+    const isUpcoming = overlay.isUpcoming || stats.some((t) => UPCOMING_RE.test(t));
     let thumbnail = bestThumb(thumbs);
     if (!isLive && !isUpcoming) thumbnail = notLiveThumb(thumbnail, id);
     return {
@@ -44546,18 +44546,16 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const yt = await requireSession();
     requireLogin(yt);
     const feed = await yt.getPlaylists();
-    const key = register("playlists", "feed", feed);
-    let sections = sectionsFromNodes(pageNodes(feed));
-    const lists = sections.flatMap((s) => s.items).filter((i2) => i2.type === "playlist");
-    if (!lists.length) {
-      const fallback = (feed.playlists || []).map(toItem).filter((i2) => i2 && i2.type === "playlist");
-      sections = fallback.length ? [{ id: `pls-${key}`, style: "grid", items: fallback }] : [];
-    } else {
-      sections = [{ id: `pls-${key}`, style: "grid", items: lists }];
-    }
-    return toPage(key, feed, sections);
+    const key = register("playlists", "feed", feed, { playlistsOnly: true });
+    return toPage(key, feed, onlyPlaylists(sectionsFromNodes(pageNodes(feed)), feed, `pls-${key}`));
   }
   __name(playlists, "playlists");
+  function onlyPlaylists(sections, feed, id) {
+    let lists = sections.flatMap((s) => s.items).filter((i2) => i2.type === "playlist");
+    if (!lists.length) lists = (feed.playlists || []).map(toItem).filter((i2) => i2 && i2.type === "playlist");
+    return lists.length ? [{ id, style: "grid", items: lists }] : [];
+  }
+  __name(onlyPlaylists, "onlyPlaylists");
   function mergeGrids(sections) {
     const out = [];
     for (const s of sections) {
@@ -44592,6 +44590,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
       default:
         sections = sectionsFromNodes(pageNodes(next));
         if (entry.channelsOnly) sections = onlyChannels(sections, next);
+        if (entry.playlistsOnly) sections = onlyPlaylists(sections, next, `pls-${key}-${Date.now()}`);
     }
     entry.feed = next;
     return page(sections, hasMore(next) ? key : void 0);
@@ -44698,7 +44697,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   function upNextOf(info2) {
     const feed = info2.watch_next_feed || [];
     const items = [];
-    const seen = /* @__PURE__ */ new Set();
+    const seen = new Set([info2.basic_info?.id].filter(Boolean));
     for (const node of feed) {
       const item = toItem(node);
       if (item && item.type === "video" && !item.isShort && !item.isLive && !seen.has(item.id)) {
@@ -45058,10 +45057,12 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (add) {
       await yt.playlist.addVideos("WL", [id]);
     } else {
-      ensureOk(await yt.actions.execute("/browse/edit_playlist", {
+      const result = ensureOk(await yt.actions.execute("/browse/edit_playlist", {
         playlistId: "WL",
         actions: [{ action: "ACTION_REMOVE_VIDEO_BY_VIDEO_ID", removedVideoId: id }]
       }), "Remove from Watch Later");
+      const status = result?.data?.status;
+      if (typeof status === "string" && !/SUCCEEDED/.test(status)) fail("action", "Remove from Watch Later failed.");
     }
     return { inWatchLater: !!add };
   }

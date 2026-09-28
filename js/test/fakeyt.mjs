@@ -322,6 +322,11 @@ function nextResponse(id) {
         secondaryResults: {
           secondaryResults: {
             results: [
+              // The Mix of this video: it starts with the video being watched.
+              lockupView({
+                id: `RD${id}`, type: 'PLAYLIST', title: 'Mix – First video', badge: 'Mix', rows: [['Channel One, Channel Two and more'], ['Updated today']],
+                onTap: { watchEndpoint: { videoId: id, playlistId: `RD${id}`, params: 'OAHyAQIIAQ%3D%3D' } }
+              }),
               lockup('RELATEDVID1', 'Related one', CH2, 'Channel Two'),
               lockup('RELATEDVID2', 'Related two', CH2, 'Channel Two')
             ]
@@ -682,11 +687,28 @@ export function createFakeYouTube(options = {}) {
     if (path === '/youtubei/v1/browse') {
       if (body?.continuation === 'HOMECONT1') return { status: 200, body: homeContinuation() };
       if (body?.continuation === 'SUBSCONT1') {
-        return { status: 200, body: appendItems([richItem(lockupView({ id: 'SUBSVIDEO02', title: 'Older subscribed video', rows: [[{ text: 'Channel One', browseId: CH1 }], ['7K views', '2 days ago']] }))]) };
+        return {
+          status: 200,
+          body: appendItems([
+            richItem(lockupView({ id: 'SUBSVIDEO02', title: 'Older subscribed video', rows: [[{ text: 'Channel One', browseId: CH1 }], ['7K views', '2 days ago']] })),
+            // A channel whose name reads like a live or upcoming stat.
+            richItem(lockupView({ id: 'SUBSVIDEO03', title: 'Owls at dusk', rows: [[{ text: 'Bird Watching', browseId: CH3 }], ['300 views', '5 days ago']] }))
+          ])
+        };
       }
       if (body?.continuation === 'CHANCONT1') return { status: 200, body: appendItems([channelShelf(subscribedChannel(CH3, 'Channel Three', '300 subscribers'))]) };
       if (body?.continuation === 'PLAGGCONT1') {
-        return { status: 200, body: appendItems([richItem(lockupView({ id: 'PLmine000002', type: 'PLAYLIST', title: 'Another list', badge: '1 video', rows: [['Unlisted', 'Playlist'], ['Updated today'], ['View full playlist']] }))]) };
+        return {
+          status: 200,
+          body: appendItems([
+            richItem(lockupView({ id: 'PLmine000002', type: 'PLAYLIST', title: 'Another list', badge: '1 video', rows: [['Unlisted', 'Playlist'], ['Updated today'], ['View full playlist']] })),
+            // A saved Mix: not a playlist page, so Library → Playlists leaves it out.
+            richItem(lockupView({
+              id: 'RDMIXSAVED01', type: 'PLAYLIST', title: 'Mix – Channel Two', badge: 'Mix', rows: [['Channel Two and more'], ['Updated today']],
+              onTap: { watchEndpoint: { videoId: 'MIXSAVEDVID', playlistId: 'RDMIXSAVED01' } }
+            }))
+          ])
+        };
       }
       if (body?.browseId === 'FEwhat_to_watch') return { status: 200, body: homeBrowse() };
       if (body?.browseId === 'FEchannels') {
@@ -720,7 +742,10 @@ export function createFakeYouTube(options = {}) {
     if (path.startsWith('/api/stats/')) return { status: 204, body: '' };
     if (path === '/youtubei/v1/like/like' || path === '/youtubei/v1/like/dislike' || path === '/youtubei/v1/like/removelike') return { status: 200, body: { responseContext: {} } };
     if (path === '/youtubei/v1/subscription/subscribe' || path === '/youtubei/v1/subscription/unsubscribe') return { status: 200, body: { responseContext: {} } };
-    if (path === '/youtubei/v1/browse/edit_playlist') return { status: 200, body: { responseContext: {}, status: 'STATUS_SUCCEEDED', actions: [] } };
+    if (path === '/youtubei/v1/browse/edit_playlist') {
+      // options.editPlaylist 'failed': YouTube answers 200 but did not apply the edit.
+      return { status: 200, body: { responseContext: {}, status: options.editPlaylist === 'failed' ? 'STATUS_FAILED' : 'STATUS_SUCCEEDED', actions: [] } };
+    }
     return { status: 404, body: { error: `unmocked ${path}` } };
   };
   return { router, hits };

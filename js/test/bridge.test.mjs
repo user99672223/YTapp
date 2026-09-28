@@ -90,6 +90,7 @@ test('video info, deciphering, history and watch-time pings', async () => {
   assert.equal(details.captions.length, 2);
   assert.match(details.captions[0].url, /[?&]fmt=vtt(&|$)/);
   assert.equal(details.captions[1].isAuto, true);
+  // The Mix of this video opens this very video: it is not "up next" and not the autoplay pick.
   assert.deepEqual(details.upNext.map((v) => v.id), ['RELATEDVID1', 'RELATEDVID2']);
   assert.equal(details.autoplayNextId, 'RELATEDVID1');
   assert.equal(details.playerClient, 'TV');
@@ -182,7 +183,8 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
   assert.deepEqual(subs.sections.flatMap((s) => s.items).map((i) => i.id), ['SUBSVIDEO01', 'STREAMVID01', 'UPCOMINGV01', 'LIVENOWVID1']);
   assert.ok(subs.continuation);
   const moreSubs = await call('more', { key: subs.continuation });
-  assert.deepEqual(moreSubs.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText]), [['SUBSVIDEO02', 'Channel One', '7K views']]);
+  assert.deepEqual(moreSubs.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText, i.isLive, i.isUpcoming]),
+    [['SUBSVIDEO02', 'Channel One', '7K views', false, false], ['SUBSVIDEO03', 'Bird Watching', '300 views', false, false]]);
   assert.equal(moreSubs.continuation, undefined);
 
   const channels = await call('subscribedChannels');
@@ -197,6 +199,7 @@ test('Subscriptions, subscribed channels and Library playlists load past the fir
     [['playlist', 'PLmine000001', undefined, '3 videos'], ['playlist', 'PLother00001', 'Channel Two', '40 videos']]);
   assert.ok(lists.continuation);
   const moreLists = await call('more', { key: lists.continuation });
+  // Later pages keep only playlists too (the saved Mix is left out).
   assert.deepEqual(moreLists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName]), [['playlist', 'PLmine000002', undefined]]);
   assert.equal(moreLists.continuation, undefined);
 });
@@ -264,6 +267,12 @@ test('Watch Later rows show views and age; removing a video is one request', asy
   assert.deepEqual(hits.map((h) => h.path), ['/youtubei/v1/browse/edit_playlist'], 'no paging through the list');
   assert.equal(hits[0].body.playlistId, 'WL');
   assert.deepEqual(hits[0].body.actions, [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: 'VIDEOID0002' }]);
+
+  // A 200 answer whose status is not STATUS_SUCCEEDED is a failure, not a silent success.
+  const failing = createFakeYouTube({ editPlaylist: 'failed' });
+  const bundle = loadBundle({ router: failing.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  await assert.rejects(bundle.call('watchLater', { id: 'VIDEOID0002', add: false }), (e) => e.kind === 'action' && /Remove from Watch Later failed/.test(e.message));
 });
 
 test('Shorts feed seeds from Home and resolves a short', async () => {

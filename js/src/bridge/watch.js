@@ -108,7 +108,8 @@ export function chaptersOf(info) {
 function upNextOf(info) {
   const feed = info.watch_next_feed || [];
   const items = [];
-  const seen = new Set();
+  // The video being watched never comes next (the watch page's "Mix – …" card opens it again).
+  const seen = new Set([info.basic_info?.id].filter(Boolean));
   for (const node of feed) {
     const item = toItem(node);
     if (item && item.type === 'video' && !item.isShort && !item.isLive && !seen.has(item.id)) {

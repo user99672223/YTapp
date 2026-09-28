@@ -188,10 +188,11 @@ function fromLockup(lockup) {
   }
   if (type !== 'VIDEO' && type !== 'SHORT' && type !== 'MOVIE' && type !== 'CLIP') return null;
   const channel = lockupChannel(lockup, parts);
-  const flat = parts.flat().map((p) => p.text).filter(Boolean);
-  const { viewCountText, publishedText } = viewsAndAge(flat.filter((t) => t !== channel.channelName));
-  const isLive = overlay.isLive || flat.some((t) => /watching/i.test(t));
-  const isUpcoming = overlay.isUpcoming || flat.some((t) => UPCOMING_RE.test(t));
+  // The stats and dates, without the channel name ("Bird Watching" is not a live stream).
+  const stats = parts.flat().map((p) => p.text).filter((t) => t && t !== channel.channelName);
+  const { viewCountText, publishedText } = viewsAndAge(stats);
+  const isLive = overlay.isLive || stats.some((t) => /\bwatching\b/i.test(t));
+  const isUpcoming = overlay.isUpcoming || stats.some((t) => UPCOMING_RE.test(t));
   let thumbnail = bestThumb(thumbs);
   if (!isLive && !isUpcoming) thumbnail = notLiveThumb(thumbnail, id);
   return {
