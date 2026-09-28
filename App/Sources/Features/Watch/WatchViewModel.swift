@@ -15,7 +15,12 @@ final class WatchViewModel: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .loading("Loading video…")
-    @Published private(set) var details: VideoDetails?
+    @Published private(set) var details: VideoDetails? = nil {
+        didSet { chapters = details?.effectiveChapters ?? [] }
+    }
+    /// `details.effectiveChapters`, worked out once per video: parsing them from the description
+    /// runs a regex, and the controls read them on every player update.
+    private(set) var chapters: [Chapter] = []
     @Published private(set) var selection: StreamSelection?
     @Published private(set) var likeStatus: LikeStatus = .none
     @Published private(set) var isSubscribed: Bool?
@@ -221,7 +226,7 @@ final class WatchViewModel: ObservableObject {
             lastSavedPosition = position
             saveResume(position)
         }
-        if let reporter { historyStatus = reporter.lastStatus }
+        if let reporter, historyStatus != reporter.lastStatus { historyStatus = reporter.lastStatus }
         PlaybackDiagnostics.shared.update(videoId: videoId, title: details?.title, client: details?.playerClient,
                                           selection: selection, state: player.state,
                                           refreshRate: appliedRefreshRate, history: historyStatus)

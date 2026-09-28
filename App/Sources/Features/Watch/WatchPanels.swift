@@ -55,7 +55,7 @@ struct PanelView: View {
     }
 
     private var chaptersList: some View {
-        let chapters = vm.details?.effectiveChapters ?? []
+        let chapters = vm.chapters
         let current = ChapterParser.index(of: player.position, in: chapters)
         return ForEach(Array(chapters.enumerated()), id: \.offset) { index, chapter in
             Button {

@@ -310,7 +310,7 @@ private struct ControlsOverlay: View {
     let onPanel: (WatchPanel) -> Void
     let onActivity: () -> Void
 
-    private var chapters: [Chapter] { vm.details?.effectiveChapters ?? [] }
+    private var chapters: [Chapter] { vm.chapters }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {

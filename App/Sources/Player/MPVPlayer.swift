@@ -66,6 +66,7 @@ final class MPVPlayer: @unchecked Sendable {
     private var lastErrorLog: String?
     private var stats = Stats()
     private var lastPublish = Date.distantPast
+    private var lastStatsPublish = Date.distantPast
     private var position: Double = 0
     private var duration: Double = 0
     private var paused = true
@@ -449,11 +450,23 @@ final class MPVPlayer: @unchecked Sendable {
         case "demuxer-cache-state/total-bytes": stats.demuxerCacheBytes = int() ?? 0
         default: break
         }
-        if name != "time-pos" {
-            let snapshot = stats
-            DispatchQueue.main.async { [state] in
-                if state.stats != snapshot { state.stats = snapshot }
-            }
+        publishStats(immediately: Self.immediateStats.contains(name))
+    }
+
+    /// Stats that change once per file and are needed right away (frame-rate matching reads
+    /// `containerFps`). The rest (avsync, drop counts, cache) change with every frame and are
+    /// published at most once a second, so the player views don't redraw at the frame rate.
+    private static let immediateStats: Set<String> = [
+        "container-fps", "video-codec", "audio-codec-name", "hwdec-current", "video-params/w", "video-params/h"
+    ]
+
+    private func publishStats(immediately: Bool) {
+        let now = Date()
+        guard immediately || now.timeIntervalSince(lastStatsPublish) >= 1 else { return }
+        lastStatsPublish = now
+        let snapshot = stats
+        DispatchQueue.main.async { [state] in
+            if state.stats != snapshot { state.stats = snapshot }
         }
     }
 
