@@ -283,6 +283,9 @@ test('a deleted video stops at the first client with YouTube\'s reason', async (
   await assert.rejects(call('videoInfo', { id: 'DELETED0001', client: 'TV' }), (e) =>
     e.kind === 'unavailable' && /removed by the uploader/.test(e.message));
   assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 1);
+  await assert.rejects(call('videoInfo', { id: 'DELETED0002', client: 'TV' }), (e) =>
+    e.kind === 'unavailable' && e.message === 'This video isn’t available anymore');
+  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 2);
 });
 
 test('live streams come back as segmented formats without trying other clients', async () => {

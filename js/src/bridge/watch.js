@@ -212,7 +212,7 @@ export function detailsOf(info, client) {
 export const FALLBACK_CLIENTS = ['TV', 'TV_TIZEN', 'WEB_EMBEDDED', 'MWEB'];
 
 // Reasons that mean the video itself can't be played, so other clients won't help.
-const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn't available any ?more|no longer available|copyright|account associated/i;
+const VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn['’]t available any ?more|no longer available|copyright|account associated/i;
 // Failures that are about the client, not the video: skip that client for the rest of the session.
 const CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
 

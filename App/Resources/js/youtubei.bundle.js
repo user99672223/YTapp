@@ -44717,7 +44717,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(detailsOf, "detailsOf");
   var FALLBACK_CLIENTS = ["TV", "TV_TIZEN", "WEB_EMBEDDED", "MWEB"];
-  var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn't available any ?more|no longer available|copyright|account associated/i;
+  var VIDEO_GONE = /private|removed|terminated|deleted|does not exist|isn['’]t available any ?more|no longer available|copyright|account associated/i;
   var CLIENT_BROKEN = /page needs to be reloaded|no longer supported|SABR|could not be deciphered|no adaptive formats/i;
   function preferenceOf(preferred) {
     return String(preferred || state.options.client || "AUTO").toUpperCase();

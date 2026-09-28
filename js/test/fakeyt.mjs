@@ -190,7 +190,8 @@ const NOT_PLAYABLE = {
     status: 'ERROR',
     reason: 'Video unavailable',
     errorScreen: { playerErrorMessageRenderer: { reason: simple('Video unavailable'), subreason: simple('This video has been removed by the uploader') } }
-  }
+  },
+  DELETED0002: { status: 'ERROR', reason: 'This video isn’t available anymore' }
 };
 
 // A live stream: segment formats (targetDurationSec / maxDvrDurationSec), or only an HLS manifest.
