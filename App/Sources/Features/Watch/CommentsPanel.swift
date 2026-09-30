@@ -19,9 +19,10 @@ struct CommentsPanel: View {
     /// Focus moves wait this long (60 ms), so the target is laid out and enabled when it's asked for.
     static let focusDelay: UInt64 = 60_000_000
 
-    /// `margins`: `CommentsLayout.floating` on a sheet inside the safe area,
-    /// `CommentsLayout.screenEdge` when the panel's material reaches the screen's edges.
-    init(comments: CommentsModel, margins: CommentsMargins = CommentsLayout.screenEdge, close: @escaping () -> Void) {
+    /// `margins`: `CommentsLayout.floating` (the default) on a sheet inside the safe area, like
+    /// the watch page's panels; `CommentsLayout.screenEdge` when the host lets the panel's
+    /// material reach the screen's edges.
+    init(comments: CommentsModel, margins: CommentsMargins = CommentsLayout.floating, close: @escaping () -> Void) {
         _comments = ObservedObject(wrappedValue: comments)
         self.margins = margins
         self.close = close
