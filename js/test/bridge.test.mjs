@@ -290,6 +290,21 @@ test('Shorts feed seeds from Home and resolves a short', async () => {
   assert.ok(yt.hits.some((h) => h.path === '/api/stats/playback' && h.url.includes('docid=SHORTID0001')));
 });
 
+test('Shorts feed leaves out ad Shorts and logs the entry keys, not their ids', async () => {
+  const { call, logs } = await connected();
+  const feed = await call('shortsFeed', {});
+  assert.ok(!feed.ids.some((id) => id.startsWith('SHORTAD')), JSON.stringify(feed.ids));
+  const more = await call('shortsMore', { key: feed.continuation });
+  assert.deepEqual(more.ids, ['SHORTID0002', 'SHORTID0004']);
+  const lines = logs.filter((l) => l.message.startsWith('shorts sequence'));
+  assert.equal(lines.length, 2, 'one line per page');
+  assert.match(lines[0].message, /^shorts sequence \(first page\): 2 Shorts, 2 ads left out; entries: /);
+  assert.match(lines[1].message, /^shorts sequence \(more\): 2 Shorts, 2 ads left out; /);
+  assert.match(lines[0].message, /adClientParams/);
+  assert.match(lines[0].message, /adSlotLoggingData/);
+  assert.ok(!lines.some((l) => /SHORT(ID|AD)\d/.test(l.message)), 'no video ids in the log');
+});
+
 test('Shorts show like and comment counts and the channel avatar from the reel overlay', async () => {
   const { call, logs } = await connected();
   // Renderers: the like count as a number (formatted like the watch page's), the comment count

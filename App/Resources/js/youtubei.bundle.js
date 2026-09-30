@@ -45244,12 +45244,69 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     console.info(`short ${id}: the reel answer has no ${missing}; the Shorts buttons show their labels instead`);
   }
   __name(reportMissing, "reportMissing");
-  function sequenceIds(info2) {
+  var AD_KEYS = /* @__PURE__ */ new Set([
+    "adClientParams",
+    "adSlotRenderer",
+    "adSlotLoggingData",
+    "adLayoutLoggingData",
+    "adBadgeRenderer",
+    "adBadgeViewModel",
+    "adInfoRenderer",
+    "adHoverTextButtonRenderer",
+    "adDurationRemaining"
+  ]);
+  function hasAdMarker(node, depth = 0) {
+    if (!node || typeof node !== "object" || depth > 12) return false;
+    if (Array.isArray(node)) return node.some((item) => hasAdMarker(item, depth + 1));
+    for (const [key, value] of Object.entries(node)) {
+      if (AD_KEYS.has(key) || key === "isAd" && (value === true || value === "true")) return true;
+      if (value && typeof value === "object" && hasAdMarker(value, depth + 1)) return true;
+    }
+    return false;
+  }
+  __name(hasAdMarker, "hasAdMarker");
+  var rawEntries = /* @__PURE__ */ new Map();
+  var MAX_RAW_ENTRIES = 200;
+  addJSONResponseHook((url, json) => {
+    if (!url.includes("/reel/reel_watch_sequence") || !json || !Array.isArray(json.entries)) return;
+    for (const entry of json.entries) {
+      const id = entry?.command?.reelWatchEndpoint?.videoId || findKey(entry, "videoId");
+      if (typeof id !== "string") continue;
+      const command = entry.command && typeof entry.command === "object" ? entry.command : {};
+      rawEntries.delete(id);
+      rawEntries.set(id, {
+        keys: `${keyList(entry)} / command: ${keyList(command)}`,
+        ad: hasAdMarker(entry)
+      });
+    }
+    while (rawEntries.size > MAX_RAW_ENTRIES) rawEntries.delete(rawEntries.keys().next().value);
+  });
+  function keyList(node) {
+    return node && typeof node === "object" ? Object.keys(node).sort().join(",") : "-";
+  }
+  __name(keyList, "keyList");
+  function logSequence(page2, kept, ads, shapes) {
+    const summary = [...shapes].map(([shape, count]) => `${shape} ×${count}`).join(" | ");
+    console.info(`shorts sequence (${page2}): ${kept} Shorts, ${ads} ad${ads === 1 ? "" : "s"} left out; entries: ${summary}`);
+  }
+  __name(logSequence, "logSequence");
+  function sequenceIds(info2, page2) {
     const ids = [];
+    let ads = 0;
+    const shapes = /* @__PURE__ */ new Map();
     for (const endpoint of info2.watch_next_feed || []) {
       const id = endpointVideoId(endpoint);
-      if (id && !ids.includes(id)) ids.push(id);
+      const raw = id ? rawEntries.get(id) : void 0;
+      const shape = `${raw ? raw.keys : "?"} / ${endpoint?.name || "?"}: ${keyList(endpoint?.payload)}`;
+      shapes.set(shape, (shapes.get(shape) || 0) + 1);
+      if (!id) continue;
+      if (hasAdMarker(endpoint.payload) || raw && raw.ad) {
+        ads += 1;
+        continue;
+      }
+      if (!ids.includes(id)) ids.push(id);
     }
+    logSequence(page2, ids.length, ads, shapes);
     return ids;
   }
   __name(sequenceIds, "sequenceIds");
@@ -45270,7 +45327,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     const info2 = await yt.getShortsVideoInfo(seed);
     const key = newKey("shorts");
     putFeed(key, { kind: "shorts", feed: info2 });
-    const ids = [seed, ...sequenceIds(info2).filter((id) => id !== seed)];
+    const ids = [seed, ...sequenceIds(info2, "first page").filter((id) => id !== seed)];
     return { ids, continuation: info2.wn_has_continuation ? key : void 0 };
   }
   __name(shortsFeed, "shortsFeed");
@@ -45279,7 +45336,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (!entry.feed.wn_has_continuation) return { ids: [], continuation: void 0 };
     const info2 = await entry.feed.getWatchNextContinuation();
     entry.feed = info2;
-    return { ids: sequenceIds(info2), continuation: info2.wn_has_continuation ? key : void 0 };
+    return { ids: sequenceIds(info2, "more"), continuation: info2.wn_has_continuation ? key : void 0 };
   }
   __name(shortsMore, "shortsMore");
   async function shortInfo({ id, client }) {

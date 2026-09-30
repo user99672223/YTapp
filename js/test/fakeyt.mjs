@@ -834,12 +834,21 @@ function reelWatch(id) {
   };
 }
 
+// Two ad Shorts between the Shorts: one marked on its endpoint (adClientParams, which YouTube.js
+// keeps in the endpoint's payload), one only next to its command (which YouTube.js drops).
 function reelSequence() {
+  const reel = (videoId, extra = {}) => ({
+    clickTrackingParams: 'CLICK',
+    commandMetadata: { webCommandMetadata: { url: `/shorts/${videoId}`, webPageType: 'WEB_PAGE_TYPE_SHORTS', rootVe: 37414 } },
+    reelWatchEndpoint: { videoId, playerParams: 'PARAMS', params: 'CAUwAg%3D%3D', sequenceProvider: 'REEL_WATCH_SEQUENCE_PROVIDER_RPC', ...extra }
+  });
   return {
     responseContext: {},
     entries: [
-      { command: { reelWatchEndpoint: { videoId: 'SHORTID0002' } } },
-      { command: { reelWatchEndpoint: { videoId: 'SHORTID0004' } } }
+      { command: reel('SHORTID0002') },
+      { command: reel('SHORTAD0001', { adClientParams: { isAd: true } }) },
+      { command: reel('SHORTID0004') },
+      { command: reel('SHORTAD0002'), adSlotLoggingData: { serializedSlotAdServingDataEntry: 'AD' } }
     ],
     continuationEndpoint: { continuationCommand: { token: 'REELCONT', request: 'CONTINUATION_REQUEST_TYPE_REEL_WATCH_SEQUENCE' } }
   };

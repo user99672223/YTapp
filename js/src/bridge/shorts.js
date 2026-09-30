@@ -140,14 +140,80 @@ function reportMissing(id, extras) {
   console.info(`short ${id}: the reel answer has no ${missing}; the Shorts buttons show their labels instead`);
 }
 
+// ---------------------------------------------------------------- ads in the sequence
+
+// Ad Shorts come in the reel watch sequence like any other Short, and are never played
+// (CLAUDE.md: never ad placements). YouTube marks them on the entry's reelWatchEndpoint
+// (`adClientParams: { isAd: true }`), and ad layouts carry ad renderers and ad logging data. These
+// keys only ever appear on ads; `adPlacements`/`adSlots` are left out, since a player response of
+// an ordinary video can have them.
+const AD_KEYS = new Set([
+  'adClientParams', 'adSlotRenderer', 'adSlotLoggingData', 'adLayoutLoggingData', 'adBadgeRenderer',
+  'adBadgeViewModel', 'adInfoRenderer', 'adHoverTextButtonRenderer', 'adDurationRemaining'
+]);
+
+// Whether `node` (a sequence entry, or its endpoint's payload) has an ad marker anywhere in it.
+function hasAdMarker(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 12) return false;
+  if (Array.isArray(node)) return node.some((item) => hasAdMarker(item, depth + 1));
+  for (const [key, value] of Object.entries(node)) {
+    if (AD_KEYS.has(key) || (key === 'isAd' && (value === true || value === 'true'))) return true;
+    if (value && typeof value === 'object' && hasAdMarker(value, depth + 1)) return true;
+  }
+  return false;
+}
+
+// YouTube.js keeps only the command of each sequence entry, so the raw entries are read as they
+// arrive: whether they are ads (a marker next to the command) and their keys, for the log below.
+const rawEntries = new Map();
+const MAX_RAW_ENTRIES = 200;
+
+addJSONResponseHook((url, json) => {
+  if (!url.includes('/reel/reel_watch_sequence') || !json || !Array.isArray(json.entries)) return;
+  for (const entry of json.entries) {
+    const id = entry?.command?.reelWatchEndpoint?.videoId || findKey(entry, 'videoId');
+    if (typeof id !== 'string') continue;
+    const command = entry.command && typeof entry.command === 'object' ? entry.command : {};
+    rawEntries.delete(id);
+    rawEntries.set(id, {
+      keys: `${keyList(entry)} / command: ${keyList(command)}`,
+      ad: hasAdMarker(entry)
+    });
+  }
+  while (rawEntries.size > MAX_RAW_ENTRIES) rawEntries.delete(rawEntries.keys().next().value);
+});
+
+function keyList(node) {
+  return node && typeof node === 'object' ? Object.keys(node).sort().join(',') : '-';
+}
+
+// One line per sequence page, with the entries' keys (never their ids), so a new ad shape can be
+// spotted in the TV's log: which keys the entries, their commands and their endpoints have, and
+// how many entries were left out as ads.
+function logSequence(page, kept, ads, shapes) {
+  const summary = [...shapes].map(([shape, count]) => `${shape} ×${count}`).join(' | ');
+  console.info(`shorts sequence (${page}): ${kept} Shorts, ${ads} ad${ads === 1 ? '' : 's'} left out; entries: ${summary}`);
+}
+
 // ---------------------------------------------------------------- feed
 
-function sequenceIds(info) {
+function sequenceIds(info, page) {
   const ids = [];
+  let ads = 0;
+  const shapes = new Map();
   for (const endpoint of info.watch_next_feed || []) {
     const id = endpointVideoId(endpoint);
-    if (id && !ids.includes(id)) ids.push(id);
+    const raw = id ? rawEntries.get(id) : undefined;
+    const shape = `${raw ? raw.keys : '?'} / ${endpoint?.name || '?'}: ${keyList(endpoint?.payload)}`;
+    shapes.set(shape, (shapes.get(shape) || 0) + 1);
+    if (!id) continue;
+    if (hasAdMarker(endpoint.payload) || (raw && raw.ad)) {
+      ads += 1;
+      continue;
+    }
+    if (!ids.includes(id)) ids.push(id);
   }
+  logSequence(page, ids.length, ads, shapes);
   return ids;
 }
 
@@ -168,7 +234,7 @@ export async function shortsFeed({ seedId } = {}) {
   const info = await yt.getShortsVideoInfo(seed);
   const key = newKey('shorts');
   putFeed(key, { kind: 'shorts', feed: info });
-  const ids = [seed, ...sequenceIds(info).filter((id) => id !== seed)];
+  const ids = [seed, ...sequenceIds(info, 'first page').filter((id) => id !== seed)];
   return { ids, continuation: info.wn_has_continuation ? key : undefined };
 }
 
@@ -177,7 +243,7 @@ export async function shortsMore({ key }) {
   if (!entry.feed.wn_has_continuation) return { ids: [], continuation: undefined };
   const info = await entry.feed.getWatchNextContinuation();
   entry.feed = info;
-  return { ids: sequenceIds(info), continuation: info.wn_has_continuation ? key : undefined };
+  return { ids: sequenceIds(info, 'more'), continuation: info.wn_has_continuation ? key : undefined };
 }
 
 export async function shortInfo({ id, client }) {
