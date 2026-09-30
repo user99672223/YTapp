@@ -10,15 +10,17 @@ struct SetupView: View {
     @StateObject private var controller = SetupController()
 
     var body: some View {
-        HStack(alignment: .center, spacing: 64) {
-            VStack(spacing: 24) {
+        // Inside tvOS's own safe area, which already keeps it off the edges of the TV.
+        HStack(alignment: .center, spacing: Theme.Spacing.section) {
+            VStack(spacing: Theme.Spacing.titleToContent) {
                 if let url = controller.url, let image = QRCode.image(for: url) {
                     Image(uiImage: image)
                         .interpolation(.none)
                         .resizable()
                         .frame(width: 400, height: 400)
+                        // The white margin a phone camera needs around the code to find it.
                         .padding(24)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 24))
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
                     // Always one line: shrink a long address rather than break it after "http://".
                     Text(url)
                         .font(.headline.monospaced())
@@ -32,9 +34,9 @@ struct SetupView: View {
             }
             .frame(width: 500)
 
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
                 Text("Connect your YouTube account").font(.title2.bold())
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.row) {
                     step(1, "On a computer or phone on the same Wi-Fi, scan the code or open the address shown.")
                     step(2, "In a private (incognito) browser window, sign in to youtube.com and export its cookies.")
                     step(3, "Paste them on the page and press “Send to TV”.")
@@ -42,7 +44,7 @@ struct SetupView: View {
                 }
                 .font(.headline.weight(.regular))
                 statusView
-                HStack(spacing: 30) {
+                HStack(spacing: Theme.Spacing.titleToContent) {
                     if controller.serverProblem != nil {
                         Button("Retry") { controller.restartServer() }
                     }
@@ -51,13 +53,14 @@ struct SetupView: View {
                         Button("Cancel") { model.cancelCookieReentry() }
                     }
                 }
+                // Room above for the focused button to grow into.
+                .padding(.top, Theme.Spacing.row)
             }
             // Every line at its full height: in a stack that's short of room, Text truncates with
             // "…" instead of wrapping.
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: 1100, alignment: .leading)
         }
-        .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .onAppear { controller.start(model: model) }
@@ -74,7 +77,7 @@ struct SetupView: View {
     }
 
     private func step(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 20) {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.row) {
             Text("\(number)").font(.headline).frame(width: 52, height: 52)
                 .background(Color.red, in: Circle())
             Text(text)
