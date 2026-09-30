@@ -299,7 +299,7 @@ private struct WatchContent: View {
         controlsVisible = true
         switch closing {
         case .chapters where vm.chapters.isEmpty:
-            // The video changed under the panel and the new one has no Chapters button.
+            // No Chapters button to go back to (the details changed and have none).
             focus = .playPause
         default:
             focus = .opener(closing)
@@ -437,7 +437,9 @@ private struct ControlsOverlay: View {
     let onPanel: (WatchPanel) -> Void
     let onActivity: () -> Void
 
-    private var chapters: [Chapter] { vm.chapters }
+    /// None while the next video loads: the previous one's details, and so its chapters, stay
+    /// until the next one's arrive, like the title and Up next (which also wait for them).
+    private var chapters: [Chapter] { vm.details?.id == vm.videoId ? vm.chapters : [] }
     /// The scrub preview while there is one, else where the video is.
     private var shownPosition: Double { scrubTarget ?? player.position }
 
