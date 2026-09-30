@@ -1,8 +1,14 @@
 import SwiftUI
 import Core
 
-/// Search with live suggestions, filters and paged results.
+/// Search with live suggestions, filters and paged results. The filter chips and the results
+/// start at the lists' margin (`Layout.horizontalPadding` inside tvOS's safe area), like every
+/// other screen; with no margin of its own that is also where the system puts the search field's
+/// suggestion chips, so the whole screen shares one leading edge.
 struct SearchView: View {
+    /// The filter menus, so focus can be put back on one.
+    private enum Filter: Hashable { case uploadDate, type, duration, sort }
+
     @EnvironmentObject private var model: AppModel
     @State private var text = ""
     @State private var suggestions: [String] = []
@@ -13,18 +19,22 @@ struct SearchView: View {
     @State private var searchedFilters: SearchFilters?
     @State private var suggestionTask: Task<Void, Never>?
     @State private var searchTask: Task<Void, Never>?
+    @FocusState private var focusedFilter: Filter?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let results, let query = submitted {
                 // Outside the results so a new search doesn't rebuild the focused filter menu.
+                // Full width, so Up from any column of results comes back to the filters.
                 filterBar
                     .padding(.horizontal, Layout.horizontalPadding)
-                    .padding(.top, 20)
+                    .padding(.top, Theme.Spacing.row)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .focusSection()
-                // Its own focus section, so Down from any filter reaches the results.
-                FeedView(feed: results, emptyText: "No results for “\(query)”.", autoRefresh: false)
+                // Its own focus section, so Down from any filter reaches the results. FeedView
+                // shows the loading, no-results and error (with Retry) states, and lays channels,
+                // videos and playlists out in the same grid as every other list.
+                FeedView(feed: results, emptyText: noResultsText(for: query), autoRefresh: false)
                     .id(ObjectIdentifier(results))
                     .focusSection()
             } else {
@@ -32,6 +42,8 @@ struct SearchView: View {
             }
         }
         .searchable(text: $text, prompt: "Videos, channels, playlists")
+        // tvOS shows these as its own row of chips under the keyboard; picking one fills in the
+        // field and searches at once.
         .searchSuggestions {
             ForEach(suggestions, id: \.self) { suggestion in
                 Text(suggestion).searchCompletion(suggestion)
@@ -47,8 +59,19 @@ struct SearchView: View {
         }
     }
 
+    /// A search that found nothing says whether filters narrowed it (Clear filters is right above).
+    private func noResultsText(for query: String) -> String {
+        if let searchedFilters, !searchedFilters.isDefault {
+            return "No results for “\(query)” with these filters."
+        }
+        return "No results for “\(query)”."
+    }
+
+    /// Every filter is a capsule in the system's button look (it lifts and turns white when
+    /// focused) that names its current choice; Select opens the choices, with a checkmark on the
+    /// current one.
     private var filterBar: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: Theme.Spacing.row) {
             Menu {
                 Picker("Upload date", selection: $filters.uploadDate) {
                     Text("Any time").tag(SearchFilters.UploadDate.all)
@@ -60,17 +83,19 @@ struct SearchView: View {
             } label: {
                 Label(label(for: filters.uploadDate), systemImage: "calendar")
             }
+            .focused($focusedFilter, equals: .uploadDate)
             Menu {
                 Picker("Type", selection: $filters.type) {
-                    Text("All").tag(SearchFilters.ResultType.all)
+                    Text("All types").tag(SearchFilters.ResultType.all)
                     Text("Videos").tag(SearchFilters.ResultType.video)
                     Text("Shorts").tag(SearchFilters.ResultType.shorts)
                     Text("Channels").tag(SearchFilters.ResultType.channel)
                     Text("Playlists").tag(SearchFilters.ResultType.playlist)
                 }
             } label: {
-                Label(filters.type == .all ? "All types" : filters.type.rawValue.capitalized, systemImage: "square.grid.2x2")
+                Label(label(for: filters.type), systemImage: "square.grid.2x2")
             }
+            .focused($focusedFilter, equals: .type)
             Menu {
                 Picker("Duration", selection: $filters.duration) {
                     Text("Any length").tag(SearchFilters.Duration.all)
@@ -81,17 +106,41 @@ struct SearchView: View {
             } label: {
                 Label(label(for: filters.duration), systemImage: "clock")
             }
+            .focused($focusedFilter, equals: .duration)
             Menu {
-                Picker("Sort", selection: $filters.prioritize) {
+                Picker("Sort by", selection: $filters.prioritize) {
                     Text("Relevance").tag(SearchFilters.Prioritize.relevance)
                     Text("Popularity").tag(SearchFilters.Prioritize.popularity)
                 }
             } label: {
                 Label(filters.prioritize == .relevance ? "Relevance" : "Popularity", systemImage: "arrow.up.arrow.down")
             }
+            .focused($focusedFilter, equals: .sort)
             if !filters.isDefault {
-                Button("Clear filters") { filters = SearchFilters() }
+                Button {
+                    filters = SearchFilters()
+                    // The button goes away with the filters it cleared: hand focus to the menu
+                    // next to it rather than letting it jump somewhere else on the screen.
+                    focusedFilter = .sort
+                } label: {
+                    Label("Clear filters", systemImage: "xmark")
+                }
             }
+        }
+        .lineLimit(1)
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+    }
+
+    private func label(for type: SearchFilters.ResultType) -> String {
+        switch type {
+        case .all: return "All types"
+        case .video: return "Videos"
+        case .shorts: return "Shorts"
+        case .channel: return "Channels"
+        case .playlist: return "Playlists"
+        case .movie: return "Movies"
         }
     }
 
