@@ -6,7 +6,20 @@ import Core
 /// navigation).
 @MainActor
 final class FeedModel: ObservableObject {
-    @Published private(set) var page: FeedPage?
+    @Published private(set) var page: FeedPage? {
+        didSet { rebuildSections() }
+    }
+    /// The page as FeedView draws it, worked out once per change of `page` instead of in every
+    /// body of every section (which also re-ran whenever a loading flag changed).
+    private(set) var sections: [FeedSectionModel] = []
+    /// Cards in `page`.
+    private(set) var itemCount = 0
+    /// Every card in the order it's drawn (a grid, then its Shorts shelf, then the next
+    /// section), and whether it's drawn in a grid column or at a shelf's own card size.
+    private var drawOrder: [(item: FeedItem, inGrid: Bool)] = []
+    /// Goes up when `page` is replaced by a different first page (a refresh, "Show the latest"),
+    /// so sections whose card count didn't change still redraw.
+    private var generation = 0
     /// A newer first page that a background refresh fetched while the list was on screen. It's
     /// shown when the user picks "Show the latest", so a refresh never swaps the cards (and the
     /// focused one) out from under them.
@@ -26,6 +39,14 @@ final class FeedModel: ObservableObject {
     @Published private(set) var listVersion = 0
     /// Pages in a row that added nothing (every card already shown).
     private var pagesWithNothingNew = 0
+    /// An automatic next page was asked for while a refresh ran.
+    private var resumeAfterRefresh = false
+    /// Cards of `page` on screen now, by their position in the page.
+    private var cardsOnScreen: Set<Int> = []
+    /// The list scrolled since it came on screen: a card left while others stayed. When the last
+    /// one leaves, the list itself left (another tab, a pushed page, another channel tab), and it
+    /// starts over when it's back.
+    private var hasScrolled = false
     private(set) var fetchedAt: Date?
     private var lastMoreFailure: Date?
 
@@ -62,6 +83,69 @@ final class FeedModel: ObservableObject {
 
     var canLoadMore: Bool {
         page?.continuation != nil || hasStaleContinuation
+    }
+
+    /// The next page loads by itself (when the last cards or the footer come on screen); false
+    /// once a load failed or pages stopped bringing anything new, which leaves it to the footer's
+    /// button.
+    var loadsMoreByItself: Bool {
+        canLoadMore && moreError == nil && pagesWithNothingNew < Self.pagesWithNothingNewLimit
+    }
+
+    private static let pagesWithNothingNewLimit = 5
+
+    /// How many cards before the end of the list the next page starts loading once the list
+    /// scrolls: five grid rows, about two screens. With only the last two rows (as before) a
+    /// remote pressed every half second reached the end before the page arrived, and the cards
+    /// appeared under the focus.
+    static let loadAheadCount = Layout.gridColumns * 5
+
+    /// The same before the list has scrolled: the last two grid rows, as before (the footer
+    /// coming on screen loads it too). The longer lead reached back into the first screen of a
+    /// page of up to about 30 cards, so just opening a list loaded its next page: a list restored
+    /// from a fresh cache fetched its first page again to resume it, and a search or a channel
+    /// tab fetched page 2 on every visit, scrolled or not.
+    static let loadAtEndCount = Layout.gridColumns * 2
+
+    /// Cards fetched ahead of a card that comes on screen: two grid rows, or the start of the
+    /// shelf or section after it.
+    static let artworkAheadCount = Layout.gridColumns * 2
+
+    /// A card came on screen. Close enough to the end, the next page starts loading; and the
+    /// artwork of the cards drawn after it is fetched now. A lazy grid or shelf only makes a
+    /// card as it scrolls into view, so its image used to start downloading when the focus was
+    /// already landing on it (a grey card under the focus, then a fade).
+    /// `generation` is the one of the section that drew the card; `gridCardWidth` and `scale`
+    /// give the size the cards draw their artwork at.
+    func cardAppeared(_ entry: KeyedFeedItem, generation: Int, _ model: AppModel, gridCardWidth: CGFloat, scale: CGFloat) {
+        guard generation == self.generation else { return }
+        cardsOnScreen.insert(entry.offset)
+        let lead = hasScrolled ? Self.loadAheadCount : Self.loadAtEndCount
+        if entry.offset >= itemCount - lead, loadsMoreByItself, !isLoadingMore {
+            Task { await loadMore(model, automatic: true) }
+        }
+        let next = drawOrder.dropFirst(entry.slot + 1).prefix(Self.artworkAheadCount)
+        for upcoming in next {
+            guard let artwork = upcoming.item.artwork(cardWidth: upcoming.inGrid ? gridCardWidth : Layout.cardWidth) else { continue }
+            ImagePipeline.shared.prefetch(artwork.url, pixels: CGSize(
+                width: (artwork.size.width * scale).rounded(.up),
+                height: (artwork.size.height * scale).rounded(.up)))
+        }
+    }
+
+    /// A card left the screen: the list scrolled, unless it was the last one (the list left).
+    func cardDisappeared(_ entry: KeyedFeedItem, generation: Int) {
+        guard generation == self.generation else { return }
+        cardsOnScreen.remove(entry.offset)
+        hasScrolled = !cardsOnScreen.isEmpty
+    }
+
+    /// A new first page (or none) starts with nothing on screen and nothing scrolled; the cards
+    /// of the old one that leave now don't count (their sections have the old generation).
+    private func startGeneration() {
+        generation += 1
+        cardsOnScreen = []
+        hasScrolled = false
     }
 
     /// First appearance: show cache, fetch if missing or stale. With `keepPlace` (FeedView,
@@ -127,6 +211,12 @@ final class FeedModel: ObservableObject {
                 model.logs.append(.warn, "Background refresh failed: \(BridgeError.wrap(error).message)")
             }
         }
+        if resumeAfterRefresh {
+            // An automatic next page waited for this refresh: the footer (if it's still on
+            // screen) asks again, instead of showing a spinner with nothing loading.
+            resumeAfterRefresh = false
+            listVersion += 1
+        }
     }
 
     /// "Show the latest": swaps in the page a background refresh kept aside.
@@ -136,6 +226,7 @@ final class FeedModel: ObservableObject {
     }
 
     private func show(_ fresh: FeedPage) {
+        startGeneration()
         page = fresh
         pendingPage = nil
         refreshError = nil
@@ -154,7 +245,12 @@ final class FeedModel: ObservableObject {
             if moreError != nil { return }
             if let lastMoreFailure, Date().timeIntervalSince(lastMoreFailure) < 5 { return }
         }
-        guard !isLoadingMore, !isLoading, canLoadMore else { return }
+        if isLoading {
+            // A refresh (the first fetch, or a timer's) is running; see the end of `refresh`.
+            if automatic { resumeAfterRefresh = true }
+            return
+        }
+        guard !isLoadingMore, canLoadMore else { return }
         isLoadingMore = true
         moreError = nil
         defer { isLoadingMore = false }
@@ -177,7 +273,7 @@ final class FeedModel: ObservableObject {
             // catches up with what it shows), but a run of pages with nothing new stops at its
             // Load more button instead of requesting page after page.
             pagesWithNothingNew = added > 0 ? 0 : pagesWithNothingNew + 1
-            if pagesWithNothingNew < 5 { listVersion += 1 }
+            if pagesWithNothingNew < Self.pagesWithNothingNewLimit { listVersion += 1 }
         } catch {
             moreError = BridgeError.wrap(error)
             lastMoreFailure = Date()
@@ -214,6 +310,7 @@ final class FeedModel: ObservableObject {
     }
 
     func clear() {
+        startGeneration()
         page = nil
         pendingPage = nil
         error = nil
@@ -221,6 +318,98 @@ final class FeedModel: ObservableObject {
         moreError = nil
         hasStaleContinuation = false
         fetchedAt = nil
+    }
+
+    /// Rebuilds `sections` from `page`. A section whose cards didn't change keeps its model (and
+    /// so its views skip their bodies); appending a page only rebuilds the sections it touched.
+    private func rebuildSections() {
+        guard let page else {
+            sections = []
+            itemCount = 0
+            drawOrder = []
+            return
+        }
+        var start = 0
+        var rebuilt: [FeedSectionModel] = []
+        rebuilt.reserveCapacity(page.sections.count)
+        for (position, section) in page.sections.enumerated() {
+            if position < sections.count, sections[position].isCurrent(for: section, start: start, generation: generation) {
+                rebuilt.append(sections[position])
+            } else {
+                rebuilt.append(FeedSectionModel(position: position, section: section, start: start, generation: generation))
+            }
+            start += section.items.count
+        }
+        sections = rebuilt
+        itemCount = start
+        var order: [(item: FeedItem, inGrid: Bool)] = []
+        order.reserveCapacity(start)
+        for section in rebuilt {
+            for card in section.cards { order.append((item: card.item, inGrid: section.style == .grid)) }
+            for card in section.shelf { order.append((item: card.item, inGrid: false)) }
+        }
+        drawOrder = order
+    }
+}
+
+/// A section as FeedView draws it: its cards keyed once, a grid's Shorts split out into the shelf
+/// under it, and each card's position in the whole page.
+struct FeedSectionModel: Identifiable, Equatable {
+    /// Position in the page, not the section's id: the bridge numbers sections anew on every
+    /// fetch, so its ids would tear down every section (and the focused card) on each new page.
+    let id: Int
+    let title: String?
+    let style: SectionStyle
+    /// Grid sections: the cards of the grid. Rows and Shorts shelves: every card.
+    let cards: [KeyedFeedItem]
+    /// Grid sections: their Shorts, shown as a shelf under the grid.
+    let shelf: [KeyedFeedItem]
+    /// Index of the section's first item in the page.
+    let start: Int
+    /// Items in the section (cards and shelf).
+    let count: Int
+    let generation: Int
+
+    init(position: Int, section: FeedSection, start: Int, generation: Int) {
+        id = position
+        title = section.title
+        style = section.style
+        self.start = start
+        count = section.items.count
+        self.generation = generation
+        // Keys come from the whole section (a video listed twice is numbered as before);
+        // `offset` becomes the position in the page and `slot` the position in the order the
+        // feed is drawn (the grid, then its shelf), which starts at `start` too.
+        let keyed = section.items.keyed.map { entry in
+            KeyedFeedItem(id: entry.id, offset: start + entry.offset, item: entry.item)
+        }
+        switch section.style {
+        case .grid:
+            let gridCards = keyed.filter { !$0.item.isShortVideo }
+            cards = Self.slotted(gridCards, from: start)
+            shelf = Self.slotted(keyed.filter { $0.item.isShortVideo }, from: start + gridCards.count)
+        case .row, .shorts:
+            cards = Self.slotted(keyed, from: start)
+            shelf = []
+        }
+    }
+
+    private static func slotted(_ entries: [KeyedFeedItem], from first: Int) -> [KeyedFeedItem] {
+        entries.enumerated().map { index, entry in
+            KeyedFeedItem(id: entry.id, offset: entry.offset, item: entry.item, slot: first + index)
+        }
+    }
+
+    /// Still shows `section`: same place in the page, same first page, same number of items
+    /// (pages are only ever appended to a section).
+    func isCurrent(for section: FeedSection, start: Int, generation: Int) -> Bool {
+        self.generation == generation && self.start == start && count == section.items.count
+            && title == section.title && style == section.style
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.generation == rhs.generation && lhs.start == rhs.start && lhs.count == rhs.count
+            && lhs.title == rhs.title && lhs.style == rhs.style
     }
 }
 
@@ -233,6 +422,7 @@ struct FeedView<Header: View>: View {
     var autoRefresh = true
     let header: Header
     @State private var contentWidth: CGFloat = Layout.defaultContentWidth
+    @FocusState private var footerFocused: Bool
 
     init(feed: FeedModel, emptyText: String = "Nothing here yet.", autoRefresh: Bool = true, @ViewBuilder header: () -> Header) {
         self.feed = feed
@@ -245,7 +435,7 @@ struct FeedView<Header: View>: View {
         // One scroll view for every state, so the header (a channel's tab picker, for example)
         // keeps its identity and focus while the list below loads, fails or changes.
         ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 60) {
+            LazyVStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 header
                 if let page = feed.page {
                     content(page)
@@ -291,12 +481,11 @@ struct FeedView<Header: View>: View {
                 EmptyStateView(systemImage: "tray", text: emptyText)
             }
         }
-        // Keyed by position, not by the section ids (the bridge numbers sections anew on every
-        // fetch), so a new page doesn't tear down every section and the focused card with it.
-        ForEach(Array(page.sections.enumerated()), id: \.offset) { index, section in
-            FeedSectionView(section: section, isLastSection: index == page.sections.count - 1, contentWidth: contentWidth) {
-                Task { await feed.loadMore(model, automatic: true) }
-            }
+        // Equatable: a loading flag or a new page redraws only the sections that changed, not
+        // every grid (whose cards were rebuilt and re-diffed on each change before).
+        ForEach(feed.sections) { section in
+            FeedSectionView(section: section, contentWidth: contentWidth, feed: feed, model: model)
+                .equatable()
         }
         if !page.isEmpty || feed.error == nil {
             footer
@@ -309,28 +498,40 @@ struct FeedView<Header: View>: View {
         }
     }
 
-    /// One button whose label follows the state: replacing it with a spinner while loading would
-    /// remove the focused view and send focus back to the top.
+    /// While pages load by themselves the footer is only a spinner that focus can't land on: a
+    /// focused footer button was pushed down by each page that arrived above it, and the list
+    /// followed it past the new cards to the bottom, again and again while it stayed on screen.
+    /// The button (Load more, Retry, Refresh) shows when loading needs a press, and stays while
+    /// it's focused whatever it says, so focus never loses the view it's on and jumps to the top.
     private var footer: some View {
         VStack(spacing: 16) {
             if let error = feed.moreError ?? feed.refreshError {
                 Text(error.userMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            Button {
-                if feed.canLoadMore {
-                    Task { await feed.loadMore(model) }
-                } else {
-                    Task { await feed.refresh(model, userInitiated: true) }
+            if feed.loadsMoreByItself, !footerFocused {
+                HStack(spacing: 16) {
+                    ProgressView()
+                    Text("Loading…").foregroundStyle(.secondary)
                 }
-            } label: {
-                footerLabel
+                .padding(.vertical, 10)
+            } else {
+                Button {
+                    if feed.canLoadMore {
+                        Task { await feed.loadMore(model) }
+                    } else {
+                        Task { await feed.refresh(model, userInitiated: true) }
+                    }
+                } label: {
+                    footerLabel
+                }
+                .focused($footerFocused)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
         // Infinite scroll: load the next page when the footer comes on screen, and again after
-        // each page that brought new cards (the continuation key stays the same, so it can't be
-        // the trigger).
+        // each page that brought new cards while it stays there (the continuation key stays the
+        // same, so it can't be the trigger). The cards near the end usually start it earlier.
         .task(id: feed.listVersion) {
             await feed.loadMore(model, automatic: true)
         }
@@ -363,12 +564,27 @@ extension FeedView where Header == EmptyView {
     }
 }
 
-struct FeedSectionView: View {
-    let section: FeedSection
-    let isLastSection: Bool
+/// One section of a feed: a grid (with its Shorts in a shelf under it) or a horizontal shelf.
+/// Equatable on its model and width, so its body only runs when its own cards change.
+struct FeedSectionView: View, Equatable {
+    let section: FeedSectionModel
     /// Width between the list's side margins; the grid's columns fill exactly this.
     var contentWidth: CGFloat = Layout.defaultContentWidth
-    let onNearEnd: () -> Void
+    /// For the cards' "near the end" and prefetch calls; not observed (the parent is).
+    let feed: FeedModel
+    let model: AppModel
+    @Environment(\.displayScale) private var displayScale
+
+    init(section: FeedSectionModel, contentWidth: CGFloat = Layout.defaultContentWidth, feed: FeedModel, model: AppModel) {
+        self.section = section
+        self.contentWidth = contentWidth
+        self.feed = feed
+        self.model = model
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.section == rhs.section && lhs.contentWidth == rhs.contentWidth && lhs.feed === rhs.feed
+    }
 
     private var cardWidth: CGFloat {
         Layout.columnWidth(in: contentWidth, count: Layout.gridColumns, spacing: Layout.cardSpacing)
@@ -379,7 +595,7 @@ struct FeedSectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
             if let title = section.title, !title.isEmpty {
                 Text(title).font(.title3.bold())
             }
@@ -387,48 +603,64 @@ struct FeedSectionView: View {
             case .grid:
                 grid
             case .row, .shorts:
-                row
+                ShelfRow(entries: section.cards, cardAppeared: cardAppeared, cardDisappeared: cardDisappeared)
             }
         }
     }
 
     private var grid: some View {
-        let items = section.items.keyed
-        let loose = items.filter { !isShort($0.item) }
-        let shorts = items.filter { isShort($0.item) }.map(\.item)
-        return VStack(alignment: .leading, spacing: 40) {
+        VStack(alignment: .leading, spacing: 40) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 56) {
-                ForEach(loose) { entry in
+                ForEach(section.cards) { entry in
                     FeedItemView(item: entry.item, width: cardWidth)
-                        .onAppear {
-                            if isLastSection, entry.offset >= section.items.count - Layout.gridColumns * 2 { onNearEnd() }
-                        }
+                        .onAppear { cardAppeared(entry) }
+                        .onDisappear { cardDisappeared(entry) }
                 }
             }
-            if !shorts.isEmpty {
-                ShelfRow(items: shorts)
+            if !section.shelf.isEmpty {
+                ShelfRow(entries: section.shelf, cardAppeared: cardAppeared, cardDisappeared: cardDisappeared)
             }
         }
     }
 
-    private var row: some View {
-        ShelfRow(items: section.items)
+    /// Loads the next page when the end is near and fetches the artwork of the next cards.
+    private func cardAppeared(_ entry: KeyedFeedItem) {
+        feed.cardAppeared(entry, generation: section.generation, model, gridCardWidth: cardWidth, scale: displayScale)
     }
 
-    private func isShort(_ item: FeedItem) -> Bool {
-        if case .video(let v) = item { return v.isShort }
-        return false
+    /// Tells the feed whether the list scrolled (see `FeedModel.cardDisappeared`).
+    private func cardDisappeared(_ entry: KeyedFeedItem) {
+        feed.cardDisappeared(entry, generation: section.generation)
     }
 }
 
 struct ShelfRow: View {
-    let items: [FeedItem]
+    let entries: [KeyedFeedItem]
+    /// A card came on screen (FeedView loads the next page near the end and fetches the artwork
+    /// of the cards after it).
+    let cardAppeared: @MainActor (KeyedFeedItem) -> Void
+    /// A card left the screen (FeedView tells from it whether the list scrolled).
+    let cardDisappeared: @MainActor (KeyedFeedItem) -> Void
+
+    init(entries: [KeyedFeedItem],
+         cardAppeared: @escaping @MainActor (KeyedFeedItem) -> Void = { _ in },
+         cardDisappeared: @escaping @MainActor (KeyedFeedItem) -> Void = { _ in }) {
+        self.entries = entries
+        self.cardAppeared = cardAppeared
+        self.cardDisappeared = cardDisappeared
+    }
+
+    init(items: [FeedItem]) {
+        self.init(entries: items.keyed)
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: Layout.cardSpacing) {
-                ForEach(items.keyed) { entry in
+                ForEach(entries) { entry in
                     FeedItemView(item: entry.item)
+                        .onAppear { cardAppeared(entry) }
+                        .onDisappear { cardDisappeared(entry) }
                 }
             }
             .padding(.vertical, 30)
@@ -445,9 +677,11 @@ struct ShelfRow: View {
 /// the item's id, numbered when it repeats in the same list (a playlist can hold a video twice).
 struct KeyedFeedItem: Identifiable {
     let id: String
-    /// Position in the list it came from.
+    /// Position in the list it came from (for FeedView's sections: in the whole page).
     let offset: Int
     let item: FeedItem
+    /// Position in the order the feed draws its cards (FeedView: a grid, then its Shorts shelf).
+    var slot = 0
 }
 
 extension Array where Element == FeedItem {
@@ -457,6 +691,35 @@ extension Array where Element == FeedItem {
             let n = counts[item.id, default: 0]
             counts[item.id] = n + 1
             return KeyedFeedItem(id: n == 0 ? item.id : "\(item.id)#\(n)", offset: offset, item: item)
+        }
+    }
+}
+
+extension FeedItem {
+    var isShortVideo: Bool {
+        if case .video(let v) = self { return v.isShort }
+        return false
+    }
+
+    /// The artwork a card shows for this item and its size in points, as the cards in
+    /// Components.swift draw it (VideoCard and PlaylistCard: 16:9 at the grid's card width;
+    /// ShortCard: 9:16 at `Layout.shortWidth`; ChannelCard: a circle 62% of
+    /// `Layout.channelWidth`), so a prefetched image is the one the card asks for.
+    func artwork(cardWidth: CGFloat) -> (url: URL, size: CGSize)? {
+        switch self {
+        case .video(let video):
+            guard let url = video.thumbnailURL else { return nil }
+            if video.isShort {
+                return (url, CGSize(width: Layout.shortWidth, height: Layout.shortWidth * 16 / 9))
+            }
+            return (url, CGSize(width: cardWidth, height: cardWidth * 9 / 16))
+        case .playlist(let playlist):
+            guard let url = playlist.thumbnail.flatMap(URL.init(string:)) else { return nil }
+            return (url, CGSize(width: cardWidth, height: cardWidth * 9 / 16))
+        case .channel(let channel):
+            guard let url = channel.avatar.flatMap(URL.init(string:)) else { return nil }
+            let side = Layout.channelWidth * 0.62
+            return (url, CGSize(width: side, height: side))
         }
     }
 }

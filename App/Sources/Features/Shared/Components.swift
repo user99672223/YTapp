@@ -120,25 +120,6 @@ struct EmptyStateView: View {
     }
 }
 
-/// Remote image with a neutral placeholder. Uses URLCache (configured in AppModel).
-struct RemoteImage: View {
-    let url: URL?
-    var contentMode: ContentMode = .fill
-
-    var body: some View {
-        AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().aspectRatio(contentMode: contentMode)
-            case .failure:
-                Color.white.opacity(0.08).overlay(Image(systemName: "photo").foregroundStyle(.secondary))
-            default:
-                Color.white.opacity(0.08)
-            }
-        }
-    }
-}
-
 struct Badge: View {
     let text: String
     var color: Color = .black.opacity(0.8)

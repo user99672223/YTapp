@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import Core
 
 /// App-wide state: the JS runtime + YouTube session, settings, account and error banners.
@@ -61,9 +62,20 @@ final class AppModel: ObservableObject {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
         fileCache = FileCache(directory: caches.appendingPathComponent("youtubei", isDirectory: true))
         settings = store.loadSettings()
-        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024, diskCapacity: 300 * 1024 * 1024,
-                                   directory: caches.appendingPathComponent("images", isDirectory: true))
+        // Artwork is kept on disk by this cache (Caches/images) and decoded by ImagePipeline;
+        // the few other URLSession.shared requests share it. Its memory part used to be 64 MB of
+        // undecoded JPEGs that every re-appearing card decoded again; now it's small.
+        URLCache.shared = .images
+        // The decoded thumbnails are the app's largest cache that can be rebuilt (from disk).
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [logs] _ in
+            let freed = ImagePipeline.shared.removeAll()
+            logs.append(.warn, "Memory warning: dropped \(freed / 1_048_576) MB of decoded thumbnails.")
+        }
     }
+
+    private var memoryWarningObserver: NSObjectProtocol?
 
     var isSignedIn: Bool { cookies.hasCookies }
 
@@ -301,6 +313,7 @@ final class AppModel: ObservableObject {
         store.clearFeedCache()
         fileCache.clear()
         URLCache.shared.removeAllCachedResponses()
+        ImagePipeline.shared.removeAll()
         await connect(showProgress: true)
     }
 
