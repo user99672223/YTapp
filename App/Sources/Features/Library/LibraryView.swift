@@ -131,7 +131,9 @@ private struct PlaylistHeader: View {
     private static let artworkWidth: CGFloat = 560
 
     var body: some View {
-        let first = feed.page?.allItems.compactMap(\.video).first
+        // Lazily: this runs on every change of the feed (each loading flag while pages load), and
+        // `allItems` would copy the whole playlist each time to read its first video.
+        let first = feed.page?.sections.lazy.flatMap(\.items).compactMap(\.video).first
         HStack(alignment: .top, spacing: Theme.Spacing.section) {
             // Watch Later and Liked have no artwork of their own: their first video's stands in.
             RemoteImage(url: playlist.info?.thumbnail.flatMap(URL.init(string:)) ?? first?.thumbnailURL)
