@@ -41,6 +41,12 @@ final class FeedModel: ObservableObject {
     private var pagesWithNothingNew = 0
     /// An automatic next page was asked for while a refresh ran.
     private var resumeAfterRefresh = false
+    /// Cards of `page` on screen now, by their position in the page.
+    private var cardsOnScreen: Set<Int> = []
+    /// The list scrolled since it came on screen: a card left while others stayed. When the last
+    /// one leaves, the list itself left (another tab, a pushed page, another channel tab), and it
+    /// starts over when it's back.
+    private var hasScrolled = false
     private(set) var fetchedAt: Date?
     private var lastMoreFailure: Date?
 
@@ -88,10 +94,18 @@ final class FeedModel: ObservableObject {
 
     private static let pagesWithNothingNewLimit = 5
 
-    /// How many cards before the end of the list the next page starts loading: five grid rows,
-    /// about two screens. With only the last two rows (as before) a remote pressed every half
-    /// second reached the end before the page arrived, and the cards appeared under the focus.
+    /// How many cards before the end of the list the next page starts loading once the list
+    /// scrolls: five grid rows, about two screens. With only the last two rows (as before) a
+    /// remote pressed every half second reached the end before the page arrived, and the cards
+    /// appeared under the focus.
     static let loadAheadCount = Layout.gridColumns * 5
+
+    /// The same before the list has scrolled: the last two grid rows, as before (the footer
+    /// coming on screen loads it too). The longer lead reached back into the first screen of a
+    /// page of up to about 30 cards, so just opening a list loaded its next page: a list restored
+    /// from a fresh cache fetched its first page again to resume it, and a search or a channel
+    /// tab fetched page 2 on every visit, scrolled or not.
+    static let loadAtEndCount = Layout.gridColumns * 2
 
     /// Cards fetched ahead of a card that comes on screen: two grid rows, or the start of the
     /// shelf or section after it.
@@ -101,9 +115,13 @@ final class FeedModel: ObservableObject {
     /// artwork of the cards drawn after it is fetched now. A lazy grid or shelf only makes a
     /// card as it scrolls into view, so its image used to start downloading when the focus was
     /// already landing on it (a grey card under the focus, then a fade).
-    /// `gridCardWidth` and `scale` give the size the cards draw their artwork at.
-    func cardAppeared(_ entry: KeyedFeedItem, _ model: AppModel, gridCardWidth: CGFloat, scale: CGFloat) {
-        if entry.offset >= itemCount - Self.loadAheadCount, loadsMoreByItself, !isLoadingMore {
+    /// `generation` is the one of the section that drew the card; `gridCardWidth` and `scale`
+    /// give the size the cards draw their artwork at.
+    func cardAppeared(_ entry: KeyedFeedItem, generation: Int, _ model: AppModel, gridCardWidth: CGFloat, scale: CGFloat) {
+        guard generation == self.generation else { return }
+        cardsOnScreen.insert(entry.offset)
+        let lead = hasScrolled ? Self.loadAheadCount : Self.loadAtEndCount
+        if entry.offset >= itemCount - lead, loadsMoreByItself, !isLoadingMore {
             Task { await loadMore(model, automatic: true) }
         }
         let next = drawOrder.dropFirst(entry.slot + 1).prefix(Self.artworkAheadCount)
@@ -113,6 +131,21 @@ final class FeedModel: ObservableObject {
                 width: (artwork.size.width * scale).rounded(.up),
                 height: (artwork.size.height * scale).rounded(.up)))
         }
+    }
+
+    /// A card left the screen: the list scrolled, unless it was the last one (the list left).
+    func cardDisappeared(_ entry: KeyedFeedItem, generation: Int) {
+        guard generation == self.generation else { return }
+        cardsOnScreen.remove(entry.offset)
+        hasScrolled = !cardsOnScreen.isEmpty
+    }
+
+    /// A new first page (or none) starts with nothing on screen and nothing scrolled; the cards
+    /// of the old one that leave now don't count (their sections have the old generation).
+    private func startGeneration() {
+        generation += 1
+        cardsOnScreen = []
+        hasScrolled = false
     }
 
     /// First appearance: show cache, fetch if missing or stale. With `keepPlace` (FeedView,
@@ -193,7 +226,7 @@ final class FeedModel: ObservableObject {
     }
 
     private func show(_ fresh: FeedPage) {
-        generation += 1
+        startGeneration()
         page = fresh
         pendingPage = nil
         refreshError = nil
@@ -277,7 +310,7 @@ final class FeedModel: ObservableObject {
     }
 
     func clear() {
-        generation += 1
+        startGeneration()
         page = nil
         pendingPage = nil
         error = nil
@@ -570,7 +603,7 @@ struct FeedSectionView: View, Equatable {
             case .grid:
                 grid
             case .row, .shorts:
-                ShelfRow(entries: section.cards, cardAppeared: cardAppeared)
+                ShelfRow(entries: section.cards, cardAppeared: cardAppeared, cardDisappeared: cardDisappeared)
             }
         }
     }
@@ -581,17 +614,23 @@ struct FeedSectionView: View, Equatable {
                 ForEach(section.cards) { entry in
                     FeedItemView(item: entry.item, width: cardWidth)
                         .onAppear { cardAppeared(entry) }
+                        .onDisappear { cardDisappeared(entry) }
                 }
             }
             if !section.shelf.isEmpty {
-                ShelfRow(entries: section.shelf, cardAppeared: cardAppeared)
+                ShelfRow(entries: section.shelf, cardAppeared: cardAppeared, cardDisappeared: cardDisappeared)
             }
         }
     }
 
     /// Loads the next page when the end is near and fetches the artwork of the next cards.
     private func cardAppeared(_ entry: KeyedFeedItem) {
-        feed.cardAppeared(entry, model, gridCardWidth: cardWidth, scale: displayScale)
+        feed.cardAppeared(entry, generation: section.generation, model, gridCardWidth: cardWidth, scale: displayScale)
+    }
+
+    /// Tells the feed whether the list scrolled (see `FeedModel.cardDisappeared`).
+    private func cardDisappeared(_ entry: KeyedFeedItem) {
+        feed.cardDisappeared(entry, generation: section.generation)
     }
 }
 
@@ -600,10 +639,15 @@ struct ShelfRow: View {
     /// A card came on screen (FeedView loads the next page near the end and fetches the artwork
     /// of the cards after it).
     let cardAppeared: @MainActor (KeyedFeedItem) -> Void
+    /// A card left the screen (FeedView tells from it whether the list scrolled).
+    let cardDisappeared: @MainActor (KeyedFeedItem) -> Void
 
-    init(entries: [KeyedFeedItem], cardAppeared: @escaping @MainActor (KeyedFeedItem) -> Void = { _ in }) {
+    init(entries: [KeyedFeedItem],
+         cardAppeared: @escaping @MainActor (KeyedFeedItem) -> Void = { _ in },
+         cardDisappeared: @escaping @MainActor (KeyedFeedItem) -> Void = { _ in }) {
         self.entries = entries
         self.cardAppeared = cardAppeared
+        self.cardDisappeared = cardDisappeared
     }
 
     init(items: [FeedItem]) {
@@ -616,6 +660,7 @@ struct ShelfRow: View {
                 ForEach(entries) { entry in
                     FeedItemView(item: entry.item)
                         .onAppear { cardAppeared(entry) }
+                        .onDisappear { cardDisappeared(entry) }
                 }
             }
             .padding(.vertical, 30)
