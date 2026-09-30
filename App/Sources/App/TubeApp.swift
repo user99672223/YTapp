@@ -146,8 +146,7 @@ struct AuthBanner: View {
             Button("Re-enter cookies") { model.beginCookieReentry() }
             Button("Dismiss") { model.authProblem = nil }
         }
-        .padding(Theme.Spacing.floating)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+        .floatingBox()
         .padding(.bottom, Theme.Spacing.floating)
     }
 }

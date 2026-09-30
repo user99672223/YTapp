@@ -107,7 +107,8 @@ private struct WatchContent: View {
             // screen: at the top, beside an open panel rather than under it.
             VStack(spacing: Theme.Spacing.row) {
                 if let toast = vm.toast {
-                    WatchToast(text: toast)
+                    // Plain text: the watch page's messages report failures too.
+                    ToastView(text: toast)
                 }
                 if showsControls {
                     statusBox
@@ -246,10 +247,8 @@ private struct WatchContent: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 28)
-            .floatingBackground()
-            .frame(maxWidth: 900)
+            .floatingBox()
+            .frame(maxWidth: Theme.messageWidth)
         } else if isBuffering {
             HStack(spacing: Theme.Spacing.titleToContent) {
                 ProgressView()
@@ -266,9 +265,7 @@ private struct WatchContent: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 28)
-            .floatingBackground()
+            .floatingBox()
         }
     }
 
@@ -760,14 +757,9 @@ private struct ScrubberBar: View {
 }
 
 // MARK: - Floating boxes
-
-private extension View {
-    /// The watch page's floating boxes (loading, buffering, seek flash, toast, up-next countdown,
-    /// stats) share one look: the regular material with the floating corner radius.
-    func floatingBackground() -> some View {
-        background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
-    }
-}
+//
+// The watch page's floating boxes (loading, buffering, seek flash, toast, up-next countdown,
+// stats) are `floatingBox(compact:)`s, like the app's toast (Components.swift).
 
 /// A short sign over the video while the controls are hidden: a jump (±10 s) or play.
 private struct SeekFlash: Equatable {
@@ -786,23 +778,7 @@ private struct SeekFlashView: View {
             }
         }
         .font(.title3.weight(.semibold))
-        .padding(.horizontal, 32)
-        .padding(.vertical, 20)
-        .floatingBackground()
-    }
-}
-
-private struct WatchToast: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 18)
-            .floatingBackground()
-            .frame(maxWidth: 1000)
+        .floatingBox(compact: true)
     }
 }
 
@@ -837,8 +813,7 @@ private struct UpNextCountdown: View {
             }
             .frame(width: 560, alignment: .leading)
         }
-        .padding(40)
-        .floatingBackground()
+        .floatingBox()
         .focusSection()
         .onAppear { playNowFocused = true }
     }
@@ -866,8 +841,7 @@ struct StatsOverlay: View {
             if !vm.historyStatus.isEmpty { Text("history: \(vm.historyStatus)") }
         }
         .font(.caption2.monospaced())
-        .padding(20)
-        .floatingBackground()
+        .floatingBox()
         .task {
             while !Task.isCancelled {
                 cpu = ProcessStats.cpuPercent()

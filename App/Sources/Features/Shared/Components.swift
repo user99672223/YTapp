@@ -461,16 +461,56 @@ private struct ToastText: View {
         // A container that stays, so the toast slides in and out instead of popping.
         VStack {
             if let message = toasts.message {
-                Label(message, systemImage: "checkmark.circle.fill")
-                    .font(.callout)
-                    .padding(.horizontal, Theme.Spacing.floating)
-                    .padding(.vertical, Theme.Spacing.floating / 2)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+                ToastView(text: message, systemImage: "checkmark.circle.fill")
                     .padding(.top, Theme.Spacing.floating)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: toasts.message)
+    }
+}
+
+/// A short message over the screen: a confirmation ("Saved to Watch Later") or a note about an
+/// action that didn't work. The same box everywhere (the app's toast, the watch page's and
+/// Shorts'): `floatingBox(compact:)`, at most `Theme.messageWidth` wide.
+struct ToastView: View {
+    let text: String
+    /// A symbol before the text (a confirmation's checkmark); nil for plain text, as for messages
+    /// that can also report a failure.
+    var systemImage: String? = nil
+
+    var body: some View {
+        content
+            .font(.callout)
+            .multilineTextAlignment(.center)
+            .floatingBox(compact: true)
+            .frame(maxWidth: Theme.messageWidth)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let systemImage {
+            Label(text, systemImage: systemImage)
+        } else {
+            Text(text)
+        }
+    }
+}
+
+extension View {
+    /// The look of boxes that float over a screen (toasts, banners, the watch page's loading box,
+    /// seek sign, up-next countdown and stats): the regular material with the floating corner
+    /// radius.
+    func floatingBackground() -> some View {
+        background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+    }
+
+    /// A floating box: `Theme.Spacing.floating` padding inside `floatingBackground()`. `compact`
+    /// (one-line boxes such as toasts and the seek sign) halves the padding above and below.
+    func floatingBox(compact: Bool = false) -> some View {
+        padding(.horizontal, Theme.Spacing.floating)
+            .padding(.vertical, compact ? Theme.Spacing.floating / 2 : Theme.Spacing.floating)
+            .floatingBackground()
     }
 }
 
