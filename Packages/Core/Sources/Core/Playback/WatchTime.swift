@@ -142,14 +142,3 @@ public enum ResumePolicy {
         return position >= duration - endMargin || position / duration >= 0.95
     }
 }
-
-/// Snaps a stream frame rate to a display refresh rate for frame-rate matching.
-public enum RefreshRate {
-    public static let standard: [Double] = [23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60]
-
-    public static func match(fps: Double) -> Double? {
-        guard fps.isFinite, fps >= 10 else { return nil }
-        let best = standard.min(by: { abs($0 - fps) < abs($1 - fps) })!
-        return abs(best - fps) <= 0.6 ? best : fps
-    }
-}
