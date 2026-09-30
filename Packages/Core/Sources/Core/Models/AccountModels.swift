@@ -127,12 +127,17 @@ public struct Comment: Codable, Hashable, Sendable, Identifiable {
     @DefaultFalse public var isPinned: Bool = false
     @DefaultFalse public var isCreator: Bool = false
     @DefaultFalse public var isHearted: Bool = false
+    /// A top-level comment whose replies `YouTubeService.commentReplies` can load.
+    @DefaultFalse public var hasReplies: Bool = false
 }
 
 public struct CommentsPage: Codable, Hashable, Sendable {
+    /// The number of comments ("1,234").
     public var countText: String?
     @DefaultEmpty public var items: [Comment] = []
     public var continuation: String?
+    /// The bridge's handle on this comment section, for loading replies of its comments.
+    public var key: String?
 }
 
 public enum CommentSort: String, Codable, Sendable, CaseIterable {

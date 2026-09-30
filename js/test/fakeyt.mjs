@@ -879,6 +879,8 @@ function commentsRoute(token, options) {
   if (token === `REPLIES_${COMMENTS.pinned.id}`) return { status: 200, body: repliesResponse(COMMENTS.pinned.id, REPLIES[COMMENTS.pinned.id]) };
   if (token === `REPLIES_${COMMENTS.busy.id}`) return { status: 200, body: repliesResponse(COMMENTS.busy.id, REPLIES[COMMENTS.busy.id], 'REPLIESMORE_BUSY') };
   if (token === 'REPLIESMORE_BUSY') return { status: 200, body: repliesResponse(COMMENTS.busy.id, REPLIES.busyMore) };
+  // options.commentsOff: a video with comments turned off answers without a comment section.
+  if (options.commentsOff) return { status: 200, body: { responseContext: {} } };
   return { status: 200, body: commentsFirstPage() };
 }
 

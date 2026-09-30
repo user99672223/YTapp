@@ -45326,7 +45326,15 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   async function comments({ videoId, sort }) {
     const yt = await requireSession();
     if (!videoId) fail("invalid", "Missing video id.");
-    const result = await yt.getComments(videoId, sort === "newest" ? "NEWEST_FIRST" : "TOP_COMMENTS");
+    let result;
+    try {
+      result = await yt.getComments(videoId, sort === "newest" ? "NEWEST_FIRST" : "TOP_COMMENTS");
+    } catch (e) {
+      if (/did not have any content/i.test(String(e?.message || ""))) {
+        fail("notFound", "There are no comments to show. They may be turned off for this video.", e.message);
+      }
+      throw e;
+    }
     const key = newKey("comments");
     const entry = { kind: "comments", feed: result, videoId, threads: /* @__PURE__ */ new Map(), replies: /* @__PURE__ */ new Map() };
     putFeed(key, entry);

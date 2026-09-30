@@ -129,7 +129,16 @@ function commentsEntry(key) {
 export async function comments({ videoId, sort }) {
   const yt = await requireSession();
   if (!videoId) fail('invalid', 'Missing video id.');
-  const result = await yt.getComments(videoId, sort === 'newest' ? 'NEWEST_FIRST' : 'TOP_COMMENTS');
+  let result;
+  try {
+    result = await yt.getComments(videoId, sort === 'newest' ? 'NEWEST_FIRST' : 'TOP_COMMENTS');
+  } catch (e) {
+    // YouTube answers without a comment section when comments are turned off.
+    if (/did not have any content/i.test(String(e?.message || ''))) {
+      fail('notFound', 'There are no comments to show. They may be turned off for this video.', e.message);
+    }
+    throw e;
+  }
   const key = newKey('comments');
   const entry = { kind: 'comments', feed: result, videoId, threads: new Map(), replies: new Map() };
   putFeed(key, entry);

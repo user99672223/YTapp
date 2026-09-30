@@ -343,6 +343,14 @@ test('comments: pages with a count, markers and counts, and the section key for 
   assert.deepEqual(await call('commentsMore', { key: page.key }), { key: page.key, items: [] });
 });
 
+test('comments turned off give a plain message, not a parser error', async () => {
+  const yt = createFakeYouTube({ commentsOff: true });
+  const { call } = loadBundle({ router: yt.router });
+  await call('init', { cookie: COOKIE, client: 'TV' });
+  await assert.rejects(call('comments', { videoId: 'VIDEOID0001' }), (e) =>
+    e.kind === 'notFound' && /turned off/.test(e.message));
+});
+
 test('comment replies: first batch, continuation without repeats, prepopulated threads', async () => {
   const failTokens = ['REPLIESMORE_BUSY'];
   const yt = createFakeYouTube({ failTokens });
