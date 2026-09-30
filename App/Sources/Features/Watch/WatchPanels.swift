@@ -299,15 +299,22 @@ private struct InfoPanel: View {
             let paragraphs = Self.paragraphs(of: details.description)
             if !paragraphs.isEmpty {
                 PanelSectionTitle(title: "Description")
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    // Focusable only so the remote can scroll through the text; clicking does nothing.
-                    // The same focus look as the comments' text rows.
-                    Button {} label: {
-                        DescriptionParagraph(text: paragraph)
+                // Spaced like the comments' text rows: the rows' own padding keeps the text apart.
+                VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
+                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                        // Focusable only so the remote can scroll through the text; clicking does
+                        // nothing. The same focus look as the comments' text rows.
+                        Button {} label: {
+                            DescriptionParagraph(text: paragraph)
+                        }
+                        .buttonStyle(PanelTextRowStyle())
+                        .focused(focus, equals: .panelRow(RowID.paragraph(index)))
                     }
-                    .buttonStyle(PanelTextRowStyle())
-                    .focused(focus, equals: .panelRow(RowID.paragraph(index)))
                 }
+                // The style pads the text by `Theme.Spacing.row` for its platter: pull the rows
+                // out by as much, so the text lines up with the heading and the platter reaches
+                // into the panel's margin, as in the comments.
+                .padding(.horizontal, -Theme.Spacing.row)
             }
         }
     }
