@@ -167,9 +167,10 @@ private struct ShortsContent: View {
             }
 
             if let toast = vm.toast {
-                // At the top, like the watch page's toast; beside an open panel rather than under it.
+                // The app's toast, at the top like the watch page's (plain text: these messages
+                // report failures too); beside an open panel rather than under it.
                 VStack {
-                    ShortsToast(text: toast)
+                    ToastView(text: toast)
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity)
@@ -634,22 +635,6 @@ private struct CommentsActionButton: View {
         guard let first = comments.countText?.split(separator: " ").first,
               first.first?.isNumber == true else { return nil }
         return String(first)
-    }
-}
-
-/// A short message at the top (a rating or subscription change, the end of the feed), in the
-/// watch page's floating box: the regular material with the floating corner radius.
-private struct ShortsToast: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 18)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
-            .frame(maxWidth: Theme.messageWidth)
     }
 }
 
