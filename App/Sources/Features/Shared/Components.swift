@@ -14,8 +14,10 @@ enum Layout {
     static let shortSpacing: CGFloat = 40
     /// A channel in a sideways row (a six-column width); in a grid it takes the column's width.
     static let channelWidth: CGFloat = 260
-    /// Between the rows of a grid, from the last line of text to the next row's artwork (which
-    /// reaches up into it when focused).
+    /// Between the rows of a grid (the list's video grid, the Shorts tab), from the last line of
+    /// text to the next row's artwork. That artwork reaches up into the gap when focused
+    /// (`focusOverflow`: 12 points for a video, 24 for a Short), so this leaves a clear gap under
+    /// the text either way.
     static let rowSpacing: CGFloat = 60
     /// tvOS's own side safe area. The system insets every screen's content by it; lists don't add
     /// it themselves.
@@ -331,11 +333,15 @@ struct ChannelCard: View {
     let channel: ChannelItem
     var width: CGFloat = Layout.channelWidth
 
-    /// As tall as a video card's artwork, so a channel lines up with the videos next to it in
-    /// search results; smaller in a narrower column.
-    private var diameter: CGFloat {
+    /// The avatar of a card `width` points wide: as tall as a video card's artwork, so a channel
+    /// lines up with the videos next to it in search results; smaller in a narrower column.
+    /// Code that fetches artwork ahead asks for this size, so the image it caches is the one the
+    /// card draws.
+    static func avatarDiameter(forWidth width: CGFloat) -> CGFloat {
         min((width * 0.85).rounded(), (Layout.cardWidth * 9 / 16).rounded())
     }
+
+    private var diameter: CGFloat { Self.avatarDiameter(forWidth: width) }
 
     var body: some View {
         NavigationLink(value: Route.channel(channel.id)) {
