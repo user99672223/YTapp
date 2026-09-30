@@ -1,0 +1,28 @@
+{
+  "commentId": "UgxCOMMENT0003",
+  "items": [
+    {
+      "id": "UgxCOMMENT0003.REPLY1",
+      "author": "@replier1",
+      "authorAvatar": "https://yt3.ggpht.com/avatar-ugxcomment0003.reply1=s176-c-k-c0x00ffffff-no-rj",
+      "text": "Reply number 1",
+      "publishedText": "1 hour ago",
+      "isPinned": false,
+      "isCreator": false,
+      "isHearted": false,
+      "hasReplies": false
+    },
+    {
+      "id": "UgxCOMMENT0003.REPLY2",
+      "author": "@replier2",
+      "authorAvatar": "https://yt3.ggpht.com/avatar-ugxcomment0003.reply2=s176-c-k-c0x00ffffff-no-rj",
+      "text": "Reply number 2",
+      "publishedText": "2 hours ago",
+      "isPinned": false,
+      "isCreator": false,
+      "isHearted": false,
+      "hasReplies": false
+    }
+  ],
+  "continuation": "comments:1#UgxCOMMENT0003"
+}

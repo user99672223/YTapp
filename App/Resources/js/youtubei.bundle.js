@@ -44282,23 +44282,48 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return { sections, continuation: continuationKey || void 0 };
   }
   __name(page, "page");
+  function commentCount(value) {
+    const s = text(value);
+    return s && s !== "0" ? s : void 0;
+  }
+  __name(commentCount, "commentCount");
+  function commentAvatar(author) {
+    const url = bestThumb(author?.thumbnails, 176) || fixUrl(author?.avatar_thumbnail_url);
+    if (!url || !/\.(ggpht|googleusercontent)\.com\//.test(url)) return url;
+    return url.replace(/=s\d+-/, "=s176-");
+  }
+  __name(commentAvatar, "commentAvatar");
   function toComment(thread) {
     const c = thread?.comment || thread;
     if (!c || !c.comment_id) return null;
     return {
       id: c.comment_id,
       author: text(c.author?.name) || "",
-      authorAvatar: fixUrl(c.author?.thumbnails?.[0]?.url) || fixUrl(c.author?.avatar_thumbnail_url),
+      authorAvatar: commentAvatar(c.author),
       text: text(c.content) || "",
       publishedText: text(c.published_time),
-      likeCountText: text(c.like_count),
-      replyCountText: text(c.reply_count),
+      likeCountText: commentCount(c.like_count),
+      replyCountText: commentCount(c.reply_count),
       isPinned: !!c.is_pinned,
       isCreator: !!c.author_is_channel_owner,
-      isHearted: !!c.is_hearted
+      isHearted: !!c.is_hearted,
+      // Only a thread that came with replies data can load them; the toolbar count alone can't.
+      hasReplies: !!thread?.comment && !!thread.has_replies
     };
   }
   __name(toComment, "toComment");
+  function toCommentReplies(commentId, nodes, continuation, seen = /* @__PURE__ */ new Set()) {
+    const items = [];
+    for (const node of nodes || []) {
+      const reply2 = toComment(node);
+      if (!reply2 || reply2.id === commentId || seen.has(reply2.id)) continue;
+      seen.add(reply2.id);
+      reply2.hasReplies = false;
+      items.push(reply2);
+    }
+    return { commentId, items, continuation: continuation || void 0 };
+  }
+  __name(toCommentReplies, "toCommentReplies");
 
   // src/bridge/feeds.js
   function pageNodes(feed) {
@@ -45266,32 +45291,92 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return { inWatchLater: wl ? wl.contains : void 0 };
   }
   __name(watchLaterStatus, "watchLaterStatus");
-  function commentsPage(key, comments2) {
-    const items = (comments2.contents || []).map(toComment).filter(Boolean);
+  var MAX_THREADS = 600;
+  var MAX_REPLY_LISTS = 30;
+  function commentCountText(header) {
+    const first = text(header?.count?.runs?.[0]?.text);
+    if (first && /\d/.test(first)) return first;
+    return text(header?.comments_count) || text(header?.count);
+  }
+  __name(commentCountText, "commentCountText");
+  function commentsPage(key, entry, comments2) {
+    const items = [];
+    for (const thread of comments2.contents || []) {
+      const item = toComment(thread);
+      if (!item) continue;
+      entry.threads.delete(item.id);
+      entry.threads.set(item.id, thread);
+      items.push(item);
+    }
+    while (entry.threads.size > MAX_THREADS) entry.threads.delete(entry.threads.keys().next().value);
     return {
-      countText: text(comments2.header?.count) || text(comments2.header?.comments_count),
+      key,
+      countText: commentCountText(comments2.header),
       items,
       continuation: comments2.has_continuation ? key : void 0
     };
   }
   __name(commentsPage, "commentsPage");
+  function commentsEntry(key) {
+    const entry = getFeed(key);
+    if (entry.kind !== "comments") fail("expired", "These comments expired. Open them again.", key);
+    return entry;
+  }
+  __name(commentsEntry, "commentsEntry");
   async function comments({ videoId, sort }) {
     const yt = await requireSession();
     if (!videoId) fail("invalid", "Missing video id.");
     const result = await yt.getComments(videoId, sort === "newest" ? "NEWEST_FIRST" : "TOP_COMMENTS");
     const key = newKey("comments");
-    putFeed(key, { kind: "comments", feed: result, videoId });
-    return commentsPage(key, result);
+    const entry = { kind: "comments", feed: result, videoId, threads: /* @__PURE__ */ new Map(), replies: /* @__PURE__ */ new Map() };
+    putFeed(key, entry);
+    return commentsPage(key, entry, result);
   }
   __name(comments, "comments");
   async function commentsMore({ key }) {
-    const entry = getFeed(key);
-    if (!entry.feed.has_continuation) return { items: [], continuation: void 0 };
+    const entry = commentsEntry(key);
+    if (!entry.feed.has_continuation) return { key, items: [], continuation: void 0 };
     const next = await entry.feed.getContinuation();
     entry.feed = next;
-    return commentsPage(key, next);
+    return commentsPage(key, entry, next);
   }
   __name(commentsMore, "commentsMore");
+  var repliesKey = /* @__PURE__ */ __name((key, commentId) => `${key}#${commentId}`, "repliesKey");
+  function rememberReplies(entry, commentId, source, seen) {
+    entry.replies.delete(commentId);
+    entry.replies.set(commentId, { source, seen });
+    while (entry.replies.size > MAX_REPLY_LISTS) entry.replies.delete(entry.replies.keys().next().value);
+  }
+  __name(rememberReplies, "rememberReplies");
+  async function commentReplies({ key, commentId }) {
+    if (!commentId) fail("invalid", "Missing comment id.");
+    const entry = commentsEntry(key);
+    const thread = entry.threads.get(commentId);
+    if (!thread) fail("expired", "This comment is no longer loaded. Open the comments again.", commentId);
+    entry.replies.delete(commentId);
+    if (!thread.has_replies) return toCommentReplies(commentId, [], void 0);
+    await thread.getReplies();
+    const replies = thread.replies || [];
+    const more2 = !!thread.replies && thread.has_continuation;
+    const seen = /* @__PURE__ */ new Set();
+    if (more2) rememberReplies(entry, commentId, thread, seen);
+    return toCommentReplies(commentId, replies, more2 ? repliesKey(key, commentId) : void 0, seen);
+  }
+  __name(commentReplies, "commentReplies");
+  async function commentRepliesMore({ key }) {
+    const at = String(key || "").lastIndexOf("#");
+    if (at <= 0) fail("invalid", "Bad replies key.", key);
+    const commentId = key.slice(at + 1);
+    const entry = commentsEntry(key.slice(0, at));
+    const list = entry.replies.get(commentId);
+    if (!list) fail("expired", "These replies expired. Open the comment again.", key);
+    const next = await list.source.getContinuation();
+    const more2 = next.has_continuation;
+    if (more2) rememberReplies(entry, commentId, next, list.seen);
+    else entry.replies.delete(commentId);
+    return toCommentReplies(commentId, next.replies, more2 ? key : void 0, list.seen);
+  }
+  __name(commentRepliesMore, "commentRepliesMore");
   async function postComment({ videoId, text: body }) {
     const yt = await requireSession();
     requireLogin(yt);
@@ -45340,6 +45425,8 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     watchLaterStatus,
     comments,
     commentsMore,
+    commentReplies,
+    commentRepliesMore,
     postComment,
     bundleInfo: /* @__PURE__ */ __name(async () => bundleInfo, "bundleInfo"),
     ping: /* @__PURE__ */ __name(async () => ({ pong: true }), "ping")
