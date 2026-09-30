@@ -29,6 +29,7 @@ final class WatchViewModel: ObservableObject {
     @Published private(set) var countdown: Int?
     @Published var toast: String?
     @Published private(set) var historyStatus = ""
+    /// The refresh rate this session asked the TV for; nil while the TV is at its own rate.
     @Published private(set) var appliedRefreshRate: Double?
 
     let player = MPVPlayer()
@@ -58,6 +59,9 @@ final class WatchViewModel: ObservableObject {
     private var captionsApplied = false
     private var closed = false
     private var toastTask: Task<Void, Never>?
+    /// Settings → Match frame rate for this player session: when the TV changes its refresh
+    /// rate, at most once per video, and back when the page closes.
+    private var displaySwitcher = FrameRateSwitcher()
 
     init(videoId: String, model: AppModel) {
         self.videoId = videoId
@@ -230,27 +234,15 @@ final class WatchViewModel: ObservableObject {
         phase = .playing
     }
 
-    /// File is open (paused): match the display's frame rate, then start playing.
+    /// File is open (paused): match the display's refresh rate (Settings → Match frame rate), then
+    /// start playing.
     private func fileLoaded() {
         guard waitingForDisplay else { return }
         waitingForDisplay = false
         let token = playbackToken
         Task {
-            // Give mpv a moment to report the container frame rate.
-            var fps = player.state.stats.containerFps
-            for _ in 0..<10 where fps <= 0 {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                if closed || token != playbackToken { return }
-                fps = player.state.stats.containerFps
-            }
-            if fps <= 0 { fps = selection?.video.fps ?? 0 }
-            let width = selection?.video.width ?? 1920
-            let height = selection?.video.height ?? 1080
-            // Closing the page resets the display; a switch requested after that would leave the
-            // whole app at the video's refresh rate.
-            guard !closed, token == playbackToken else { return }
-            appliedRefreshRate = fps > 0 ? DisplayCriteriaController.apply(fps: fps, width: width, height: height) : nil
-            if appliedRefreshRate != nil {
+            if await matchDisplayRate(token: token) {
+                // The TV blanks while it changes modes; start the video once it shows again.
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 var waited = 0
                 while DisplayCriteriaController.isSwitching, waited < 50 {
@@ -264,6 +256,59 @@ final class WatchViewModel: ObservableObject {
             // leaving during playback) instead of playing on in the background.
             if !inBackground { player.setPaused(false) }
         }
+    }
+
+    /// Applies `FrameRateSwitcher`'s decision for the file that just opened. Returns whether the TV
+    /// was asked to change modes (the video then waits for the switch). Off never touches the
+    /// display; restarts of the same video (quality change, Retry, reconnect) keep the mode.
+    private func matchDisplayRate(token: Int) async -> Bool {
+        guard !closed, token == playbackToken, let id = playingDetails?.id else { return false }
+        let mode = model.settings.frameRateMatching
+        let firstFile = !displaySwitcher.hasDecided(id)
+        if mode != .off, firstFile, let reason = DisplayCriteriaController.unavailableReason {
+            noteDisplay("display: not switching: \(reason)")
+            return false
+        }
+        let listed = selection?.video.fps
+        var fps = RefreshRate.videoRate(container: player.state.stats.containerFps, listed: listed)
+        if mode != .off, firstFile, fps <= 0 {
+            // Without YouTube's frame rate, give mpv a moment to report the container's.
+            for _ in 0..<10 where fps <= 0 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if closed || token != playbackToken { return false }
+                fps = RefreshRate.videoRate(container: player.state.stats.containerFps, listed: listed)
+            }
+        }
+        // Closing the page resets the display; a switch requested after that would leave the
+        // whole app at the video's refresh rate.
+        guard !closed, token == playbackToken else { return false }
+        let before = displaySwitcher
+        let outcome = displaySwitcher.decide(videoId: id, fps: fps, mode: mode,
+                                             homeRate: mode == .off ? nil : DisplayCriteriaController.homeRate)
+        noteDisplay(outcome.message)
+        var changed = true
+        switch outcome.decision {
+        case .keep:
+            changed = false
+        case .switchTo(let rate):
+            let width = selection?.video.width ?? 1920
+            let height = selection?.video.height ?? 1080
+            if !DisplayCriteriaController.request(refreshRate: rate, width: width, height: height) {
+                displaySwitcher = before
+                noteDisplay("display: couldn't describe the video format → keeping \(RefreshRate.format(before.current)) Hz")
+                changed = false
+            }
+        case .resetToHome:
+            DisplayCriteriaController.reset()
+        }
+        if appliedRefreshRate != displaySwitcher.requested { appliedRefreshRate = displaySwitcher.requested }
+        return changed
+    }
+
+    /// Frame-rate lines go to the TV log (category "display") and the Debug screen's log.
+    private func noteDisplay(_ line: String) {
+        DisplayCriteriaController.note(line)
+        model.logs.append(.info, line)
     }
 
     /// A new file starts without captions. The first file of a video gets the default from
@@ -562,7 +607,11 @@ final class WatchViewModel: ObservableObject {
         closed = true
         countdownTask?.cancel()
         player.destroy()
-        DisplayCriteriaController.reset()
+        // Back to the TV's own rate, and only if this session changed it: with matching off, or
+        // when every video kept the mode, the display isn't touched.
+        let outcome = displaySwitcher.leave()
+        noteDisplay(outcome.message)
+        if outcome.decision == .resetToHome { DisplayCriteriaController.reset() }
     }
 
     /// A player failure, shown with mpv's actual reason (as a network error the screen would only
