@@ -122,6 +122,9 @@ private struct ShortsContent: View {
     /// A page change is sliding; the video stays hidden until it settled.
     @State private var isPaging = false
     @State private var pageSerial = 0
+    /// When Up/Down last paged from the video, or went back to it from the Subscribe pill: a move
+    /// into the action column right then came from that same press, and is undone.
+    @State private var verticalMoveAt = Date.distantPast
 
     /// 9:16, filling the 960-point safe area height but for room for the focus lift and shadow.
     static let stageSize = CGSize(width: 495, height: 880)
@@ -131,6 +134,11 @@ private struct ShortsContent: View {
     private static let panelInset = Theme.panelWidth + Theme.Spacing.row
     private static let pageAnimation = Animation.smooth(duration: 0.35)
     private static let panelAnimation = Animation.easeInOut(duration: 0.3)
+    /// The action column's buttons, which Up/Down on the video never lead to.
+    private static let columnFocus: Set<ShortsFocus> = [.like, .dislike, .comments, .channel]
+    /// How soon after an Up/Down a focus move into the column counts as coming from it: well
+    /// under the time between two presses.
+    private static let verticalMoveWindow: TimeInterval = 0.3
 
     var body: some View {
         ZStack {
@@ -195,7 +203,14 @@ private struct ShortsContent: View {
             }
         }
         .onChange(of: vm.index) { _, newIndex in page(to: newIndex) }
-        .onChange(of: focus) { _, newFocus in
+        .onChange(of: focus) { oldFocus, newFocus in
+            if let newFocus, Self.columnFocus.contains(newFocus), oldFocus == .video || oldFocus == .subscribe,
+               Date().timeIntervalSince(verticalMoveAt) < Self.verticalMoveWindow {
+                // Up/Down pages and stays on the video. The focus engine can still take the same
+                // press into the column (its buttons are above the Subscribe pill); that is undone.
+                focus = .video
+                return
+            }
             if let newFocus, newFocus != .subscribe { subscribeArmed = false }
         }
         .onChange(of: isFailed) { _, failed in
@@ -225,8 +240,8 @@ private struct ShortsContent: View {
 
     /// The video frame is one button: Select pauses. Its focus look is `ShortsStageStyle`'s lift
     /// rather than the card style's, which draws its label in a UIKit view of its own and tilts it
-    /// with the remote: no place for a live video and sliding pages. Up/Down page (nothing is
-    /// above or below it, so focus never moves away).
+    /// with the remote: no place for a live video and sliding pages. Up/Down page and keep focus
+    /// on the video.
     private var stage: some View {
         Button {
             vm.togglePlay()
@@ -239,13 +254,24 @@ private struct ShortsContent: View {
         .focused($focus, equals: .video)
         .onMoveCommand { direction in
             switch direction {
-            case .up: vm.previous()
-            case .down: vm.next()
-            case .left: armSubscribe()
-            default: break  // Right: the focus engine moves into the action column.
+            case .up: pageFromVideo { vm.previous() }
+            case .down: pageFromVideo { vm.next() }
+            case .left:
+                verticalMoveAt = .distantPast
+                armSubscribe()
+            default:
+                // Right: the focus engine moves into the action column.
+                verticalMoveAt = .distantPast
             }
         }
         .overlay { subscribeLayer }
+    }
+
+    /// Up/Down on the video: pages, and focus stays on the video.
+    private func pageFromVideo(_ move: () -> Void) {
+        verticalMoveAt = Date()
+        move()
+        focus = .video
     }
 
     /// The Subscribe pill inside the video can't be a button of its own there: the video frame is
@@ -268,7 +294,10 @@ private struct ShortsContent: View {
                 .buttonBorderShape(.capsule)
                 .focused($focus, equals: .subscribe)
                 .onMoveCommand { direction in
-                    if direction == .up { focus = .video }
+                    if direction == .up {
+                        verticalMoveAt = Date()
+                        focus = .video
+                    }
                 }
                 .onAppear {
                     // Once the button is in the focus system.
