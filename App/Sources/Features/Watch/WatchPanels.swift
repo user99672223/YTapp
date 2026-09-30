@@ -316,10 +316,11 @@ private struct InfoPanel: View {
                 PanelSectionTitle(title: "Description")
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
                     // Focusable only so the remote can scroll through the text; clicking does nothing.
+                    // The same focus look as the comments' text rows.
                     Button {} label: {
                         DescriptionParagraph(text: paragraph)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PanelTextRowStyle())
                     .focused(focus, equals: .panelRow(RowID.paragraph(index)))
                 }
             }
@@ -360,7 +361,8 @@ private struct InfoPanel: View {
     }
 }
 
-/// A paragraph of the description: dimmed like secondary text, full brightness while focused.
+/// A paragraph of the description: dimmed like secondary text, full brightness while focused (on
+/// the row's platter).
 private struct DescriptionParagraph: View {
     let text: String
     @Environment(\.isFocused) private var isFocused

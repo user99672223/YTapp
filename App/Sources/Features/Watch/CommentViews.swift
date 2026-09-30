@@ -212,7 +212,7 @@ struct CommentRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .buttonStyle(CommentRowButtonStyle())
+        .buttonStyle(PanelTextRowStyle())
     }
 
     private var avatarSize: CGFloat { isReply ? CommentsLayout.replyAvatar : CommentsLayout.avatar }
@@ -265,16 +265,17 @@ struct CommentRow: View {
     }
 }
 
-/// Focus look of comment rows: a rounded, continuous platter lights up behind the focused row, like
-/// the rows of tvOS' own lists. The row doesn't grow or tilt: a lifted block of text would reach
-/// past the panel's edges and blur while it scales.
-struct CommentRowButtonStyle: ButtonStyle {
+/// Focus look of rows of text in a side panel (comments, the description on the watch page's info
+/// panel): a rounded, continuous platter lights up behind the focused row, like the rows of tvOS'
+/// own lists. The row doesn't grow or tilt: a lifted block of text would reach past the panel's
+/// edges and blur while it scales. The platter reaches `Theme.Spacing.row` past the text.
+struct PanelTextRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        CommentRowButtonBody(configuration: configuration)
+        PanelTextRowBody(configuration: configuration)
     }
 }
 
-private struct CommentRowButtonBody: View {
+private struct PanelTextRowBody: View {
     let configuration: ButtonStyleConfiguration
     @Environment(\.isFocused) private var isFocused
 
@@ -308,7 +309,7 @@ struct CommentTextRow: View {
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(CommentRowButtonStyle())
+        .buttonStyle(PanelTextRowStyle())
         .padding(.leading, CommentsLayout.avatar + Theme.Spacing.row)
     }
 }
@@ -324,7 +325,7 @@ struct CommentNoteRow: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .buttonStyle(CommentRowButtonStyle())
+        .buttonStyle(PanelTextRowStyle())
     }
 }
 
