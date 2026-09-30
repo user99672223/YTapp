@@ -762,6 +762,7 @@ private enum WatchStatus: Equatable {
     /// The stream is opening, or refilling its buffer.
     case buffering(percent: Int, fileLoaded: Bool, bufferedSeconds: Double)
 
+    @MainActor
     init?(vm: WatchViewModel, player: MPVPlayer.State) {
         if case .loading(let message) = vm.phase {
             // The previous video's details stay until the next one's arrive; not its title.
