@@ -13,6 +13,9 @@ export function fail(kind, message, detail) {
   throw new BridgeError(kind, message, detail);
 }
 
+// "Sign in to confirm you're not a bot", but not "Sign in to confirm your age" (an age gate).
+export const BOT_CHECK = /not a bot|confirm you(?:'|’| a)re not/i;
+
 function extractStatus(message) {
   const m = /status(?: code)? (\d{3})/i.exec(message) || /failed: (\d{3})/i.exec(message);
   return m ? Number(m[1]) : undefined;
@@ -39,7 +42,7 @@ export function classify(error) {
   else if (status === 404) kind = 'notFound';
   else if (status && status >= 500) kind = 'network';
   else if (/Network request failed|timed out|offline|could not connect|NSURLErrorDomain|network connection/i.test(haystack)) kind = 'network';
-  else if (/not a bot|confirm you/i.test(haystack)) kind = 'botCheck';
+  else if (BOT_CHECK.test(haystack)) kind = 'botCheck';
   else if (/must be signed in|sign in|login|log in/i.test(haystack)) kind = 'loginRequired';
   else if (/po ?token|botguard|integrity token/i.test(haystack)) kind = 'poToken';
   else if (/decipher|nsig|n\/sig|signature|player script|player id|player data/i.test(haystack)) kind = 'extraction';

@@ -7,9 +7,15 @@ struct ShortsTabView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var router: Router
     @StateObject private var home = FeedModel(cacheKey: "home", category: .home) { try await $0.home() }
+    @State private var contentWidth: CGFloat = Layout.defaultContentWidth
+
+    /// The columns fill the width between the margins exactly, so both sides match.
+    private var shortWidth: CGFloat {
+        Layout.columnWidth(in: contentWidth, count: Layout.shortColumns, spacing: Layout.shortSpacing)
+    }
 
     private var columns: [GridItem] {
-        Array(repeating: GridItem(.fixed(Layout.shortWidth), spacing: 40, alignment: .top), count: 6)
+        Array(repeating: GridItem(.fixed(shortWidth), spacing: Layout.shortSpacing, alignment: .top), count: Layout.shortColumns)
     }
 
     var body: some View {
@@ -28,7 +34,7 @@ struct ShortsTabView: View {
                     Text("From your Home feed").font(.title3.bold())
                     LazyVGrid(columns: columns, alignment: .leading, spacing: 50) {
                         ForEach(Array(shorts.enumerated()), id: \.offset) { _, short in
-                            ShortCard(video: short)
+                            ShortCard(video: short, width: shortWidth)
                         }
                     }
                 } else if home.isLoading {
@@ -38,6 +44,8 @@ struct ShortsTabView: View {
                         .frame(height: 500)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ContentWidthReader(width: $contentWidth))
             .padding(.horizontal, Layout.horizontalPadding)
             .padding(.vertical, 40)
         }
@@ -224,6 +232,8 @@ private struct ShortsContent: View {
                         vm.toggleSubscription()
                     } label: {
                         Text(vm.isSubscribed == true ? "Subscribed" : "Subscribe")
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                     .tint(vm.isSubscribed == true ? .gray : .red)
                     .onMoveCommand(perform: move)

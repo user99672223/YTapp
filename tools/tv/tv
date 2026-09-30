@@ -1,0 +1,30 @@
+#!/bin/bash
+# tv — small front end for tvd (developer tunnel) and pyatv (remote buttons).
+#   tv status | shot NAME | launch | kill | pid | crash DIR | crashls | mark TEXT
+#   tv key up|down|left|right|select|menu|home|play_pause|... [N]   (pyatv atvremote)
+#   tv keys "down down select"                                       (several, 0.6 s apart)
+# atvloadly installs Tube as com.local.tube.<TEAMID>; found once with pyatv and cached.
+BUNDLE=${TV_BUNDLE:-$(cat "$HOME/tvtools/bundle-id" 2>/dev/null)}
+API=http://127.0.0.1:${TVD_PORT:-8777}
+SHOTS=${TV_SHOTS:-$HOME/tvtools/shots}
+ATV="${ATVREMOTE:-atvremote} ${TV_IP:+-s $TV_IP}"
+if [ -z "$BUNDLE" ]; then
+  mkdir -p "$HOME/tvtools"
+  BUNDLE=$(${ATVREMOTE:-atvremote} ${TV_IP:+-s $TV_IP} app_list 2>/dev/null | tr ',' '\n' | grep -o '(com\.local\.tube[^)]*)' | tr -d '()' | head -1)
+  [ -n "$BUNDLE" ] && echo "$BUNDLE" > "$HOME/tvtools/bundle-id"
+fi
+enc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+case "$1" in
+  status) curl -s -m 10 $API/status ;;
+  shot) mkdir -p "$SHOTS"; curl -s -m 70 "$API/shot?out=$(enc "$SHOTS/${2:-shot-$(date +%H%M%S)}.png")" ;;
+  launch) curl -s -m 70 -X POST "$API/launch?bundle=$BUNDLE" ;;
+  kill) curl -s -m 40 -X POST "$API/kill?bundle=$BUNDLE" ;;
+  pid) curl -s -m 40 "$API/pid?bundle=$BUNDLE" ;;
+  crash) curl -s -m 310 -X POST "$API/crash?out=$(enc "${2:-$HOME/tvtools/crash}")${3:+&match=$(enc "$3")}" ;;
+  crashls) curl -s -m 70 "$API/crashls" ;;
+  mark) curl -s -m 10 -X POST "$API/mark?text=$(enc "$2")" ;;
+  key) n=${3:-1}; for i in $(seq $n); do $ATV "$2" >/dev/null 2>&1 || echo "key $2 failed"; sleep 0.4; done; echo "{\"ok\":true,\"key\":\"$2\",\"n\":$n}" ;;
+  keys) for k in $2; do $ATV "$k" >/dev/null 2>&1 || echo "key $k failed"; sleep 0.6; done; echo "{\"ok\":true}" ;;
+  *) sed -n '2,5p' "$0"; exit 2 ;;
+esac
+echo

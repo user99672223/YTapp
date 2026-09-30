@@ -2,7 +2,7 @@
 // (Packages/Core/Sources/Core/Models). Every accessor is defensive: YouTube changes its
 // renderers often, so unknown shapes degrade to "skip this item" instead of throwing.
 import {
-  text, bestThumb, videoThumb, parseDuration, isDurationText, endpointBrowseId, endpointVideoId,
+  text, bestThumb, videoThumb, notLiveThumb, parseDuration, isDurationText, endpointBrowseId, endpointVideoId,
   isChannelId, nodeType, fixUrl
 } from './util.js';
 
@@ -10,6 +10,28 @@ let sectionSeq = 0;
 const nextSectionId = () => `s${++sectionSeq}`;
 
 // ------------------------------------------------------------------ items
+
+// English metadata wording: view counts, and the age or schedule of a video.
+const VIEWS_RE = /\bviews?\b|watching|waiting/i;
+const AGE_RE = /\bago\b|^streamed\b|^premiere|^scheduled\b/i;
+// Lockup metadata texts that are stats, dates or labels, never a channel name.
+const NOT_CHANNEL_RE = /^[\d.,]+\s*[KMB]?\s*(views?|watching|waiting|videos?|episodes?)\b|^no views$|\bago$|^(streamed|scheduled|premieres?|premiered|updated)\b|^view full playlist$|^(private|public|unlisted|playlist|mix|album|podcast)$/i;
+const UPCOMING_RE = /^(scheduled for|premieres)\b|\bwaiting$/i;
+
+// Picks the view count and the age out of a video's metadata texts. English wording is matched;
+// in other UI languages the texts are taken in YouTube's "<views> • <age>" order.
+function viewsAndAge(texts) {
+  const viewCountText = texts.find((t) => VIEWS_RE.test(t));
+  const publishedText = texts.find((t) => t !== viewCountText && AGE_RE.test(t));
+  if (viewCountText || publishedText) return { viewCountText, publishedText };
+  return { viewCountText: texts[0], publishedText: texts[1] };
+}
+
+// Mixes ("RD…" radio lists) have no playlist page (YouTube answers "This playlist type is
+// unviewable"), so they are shown as their first video. "RDCLAK…" lists are regular playlists.
+function isMixId(id) {
+  return typeof id === 'string' && id.startsWith('RD') && !id.startsWith('RDCLAK');
+}
 
 function overlaysInfo(overlays) {
   const info = { durationText: undefined, isLive: false, isShort: false, isUpcoming: false, watchedPercent: undefined };
@@ -20,7 +42,8 @@ function overlaysInfo(overlays) {
     if (isDurationText(t)) info.durationText = t;
     if (s.includes('LIVE') || t.toUpperCase() === 'LIVE') info.isLive = true;
     if (s.includes('SHORTS')) info.isShort = true;
-    if (s.includes('UPCOMING')) info.isUpcoming = true;
+    // Legacy overlays mark upcoming videos by style; lockup badges only say so in their text.
+    if (s.includes('UPCOMING') || t.toUpperCase() === 'UPCOMING') info.isUpcoming = true;
   };
   for (const o of list) {
     const type = nodeType(o);
@@ -51,7 +74,9 @@ function videoFromLegacy(node) {
   const id = node.video_id || node.id || endpointVideoId(node.endpoint);
   if (!id || typeof id !== 'string') return null;
   const overlay = overlaysInfo(node.thumbnail_overlays);
-  const durationText = text(node.length_text) || text(node.duration?.text ? node.duration.text : node.duration) || overlay.durationText;
+  // The duration getter falls back to the raw overlay label ("UPCOMING", "PREMIERE", "SHORTS").
+  const legacyDuration = text(node.duration?.text ?? node.duration);
+  const durationText = text(node.length_text) || (isDurationText(legacyDuration) ? legacyDuration : undefined) || overlay.durationText;
   const author = authorInfo(node.author);
   const badges = (node.badges || []).map((b) => (b.label || b.style || '').toUpperCase());
   const isLive = overlay.isLive || !!node.is_live || badges.some((b) => b.includes('LIVE'));
@@ -59,6 +84,17 @@ function videoFromLegacy(node) {
   let channelName = author.channelName;
   if (!channelName) channelName = text(node.short_byline_text) || text(node.long_byline_text);
   if (!channelName && typeof node.author === 'string') channelName = node.author;
+  let viewCountText = text(node.short_view_count) || text(node.view_count) || text(node.views);
+  let publishedText = text(node.published);
+  // Playlist rows (Watch Later, Liked, playlist pages) carry both in one "<views> • <age>" line.
+  const info = (text(node.video_info) || '').split(/\s*•\s*/).filter(Boolean);
+  if (info.length && (!viewCountText || !publishedText)) {
+    const parsed = viewsAndAge(info);
+    if (!viewCountText) viewCountText = parsed.viewCountText;
+    if (!publishedText) publishedText = parsed.publishedText;
+  }
+  let thumbnail = bestThumb(node.thumbnails || node.thumbnail);
+  if (!isLive && !upcoming) thumbnail = notLiveThumb(thumbnail, id);
   return {
     type: 'video',
     id,
@@ -66,11 +102,11 @@ function videoFromLegacy(node) {
     channelName,
     channelId: author.channelId,
     channelAvatar: author.channelAvatar,
-    thumbnail: bestThumb(node.thumbnails || node.thumbnail) || videoThumb(id),
+    thumbnail: thumbnail || videoThumb(id),
     durationText,
     durationSeconds: node.duration?.seconds || parseDuration(durationText),
-    viewCountText: text(node.short_view_count) || text(node.view_count) || text(node.views),
-    publishedText: text(node.published),
+    viewCountText,
+    publishedText,
     isLive,
     isShort: overlay.isShort,
     isUpcoming: upcoming,
@@ -81,20 +117,29 @@ function videoFromLegacy(node) {
 
 function lockupMetadataParts(lockup) {
   const rows = lockup.metadata?.metadata?.metadata_rows || [];
-  return rows.map((row) => (row.metadata_parts || []).map((part) => ({ text: text(part.text), endpoint: part.text?.endpoint })));
+  return rows.map((row) => (row.metadata_parts || []).map((part) => ({
+    text: text(part.text),
+    endpoint: part.text?.endpoint || part.text?.runs?.find((r) => r && r.endpoint)?.endpoint
+  })));
 }
 
+// Metadata rows are not positional: Home and Subscriptions put the author in the first row, but
+// a channel's own tabs show a single "views • date" row and playlists show labels like "Private".
+// The author is the part that links to a channel; without such a link the first row is taken
+// only when more rows follow it and it does not read like a stat or a label.
 function lockupChannel(lockup, parts) {
   const image = lockup.metadata?.image;
   let channelId = endpointBrowseId(image?.renderer_context?.command_context?.on_tap);
   let channelAvatar = bestThumb(image?.avatar?.image, 176);
-  for (const row of parts) {
-    for (const part of row) {
-      const id = endpointBrowseId(part.endpoint);
-      if (!channelId && isChannelId(id)) channelId = id;
-    }
+  let channelName;
+  for (const part of parts.flat()) {
+    const id = endpointBrowseId(part.endpoint);
+    if (!isChannelId(id)) continue;
+    if (!isChannelId(channelId)) channelId = id;
+    if (!channelName && part.text) channelName = part.text;
   }
-  const channelName = parts[0]?.[0]?.text;
+  const first = parts[0]?.[0]?.text;
+  if (!channelName && first && parts.length > 1 && !NOT_CHANNEL_RE.test(first)) channelName = first;
   return { channelName, channelId: isChannelId(channelId) ? channelId : undefined, channelAvatar };
 }
 
@@ -122,21 +167,34 @@ function fromLockup(lockup) {
       subscriberCountText: parts.flat().map((p) => p.text).find((t) => t && /subscriber/i.test(t))
     };
   }
+  if (type === 'PLAYLIST' && isMixId(id)) {
+    const videoId = endpointVideoId(lockup.renderer_context?.command_context?.on_tap);
+    if (!videoId) return null;
+    return {
+      type: 'video', id: videoId, title,
+      thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+      channelName: lockupChannel(lockup, parts).channelName,
+      isLive: false, isShort: false, isUpcoming: false
+    };
+  }
   if (type === 'PLAYLIST' || type === 'ALBUM' || type === 'PODCAST' || type === 'SHOW') {
     const countBadge = overlays.flatMap((o) => o.badges || []).map((b) => b.text).find((t) => t && /\d/.test(t));
     return {
       type: 'playlist', id, title,
       thumbnail: bestThumb(thumbs),
       videoCountText: countBadge,
-      channelName: parts[0]?.[0]?.text
+      channelName: lockupChannel(lockup, parts).channelName
     };
   }
   if (type !== 'VIDEO' && type !== 'SHORT' && type !== 'MOVIE' && type !== 'CLIP') return null;
   const channel = lockupChannel(lockup, parts);
-  const secondRow = parts[1] || [];
-  const flat = parts.flat().map((p) => p.text).filter(Boolean);
-  const viewCountText = secondRow[0]?.text || flat.find((t) => /view|watching/i.test(t));
-  const publishedText = secondRow[1]?.text || flat.find((t) => /ago|streamed|premiere/i.test(t));
+  // The stats and dates, without the channel name ("Bird Watching" is not a live stream).
+  const stats = parts.flat().map((p) => p.text).filter((t) => t && t !== channel.channelName);
+  const { viewCountText, publishedText } = viewsAndAge(stats);
+  const isLive = overlay.isLive || stats.some((t) => /\bwatching\b/i.test(t));
+  const isUpcoming = overlay.isUpcoming || stats.some((t) => UPCOMING_RE.test(t));
+  let thumbnail = bestThumb(thumbs);
+  if (!isLive && !isUpcoming) thumbnail = notLiveThumb(thumbnail, id);
   return {
     type: 'video',
     id,
@@ -144,14 +202,14 @@ function fromLockup(lockup) {
     channelName: channel.channelName,
     channelId: channel.channelId,
     channelAvatar: channel.channelAvatar,
-    thumbnail: bestThumb(thumbs) || videoThumb(id),
+    thumbnail: thumbnail || videoThumb(id),
     durationText: overlay.durationText,
     durationSeconds: parseDuration(overlay.durationText),
     viewCountText,
     publishedText,
-    isLive: overlay.isLive || flat.some((t) => /watching/i.test(t)),
+    isLive,
     isShort: type === 'SHORT' || overlay.isShort,
-    isUpcoming: overlay.isUpcoming,
+    isUpcoming,
     watchedPercent: overlay.watchedPercent
   };
 }
@@ -207,6 +265,16 @@ function fromPlaylist(node) {
   const id = node.id || node.endpoint?.payload?.playlistId;
   if (!id) return null;
   const thumbs = node.thumbnails?.length ? node.thumbnails : node.thumbnail_renderer?.thumbnail || node.thumbnail_renderer?.thumbnails;
+  if (isMixId(id)) {
+    const videoId = endpointVideoId(node.endpoint);
+    if (!videoId) return null;
+    return {
+      type: 'video', id: videoId,
+      title: text(node.title) || '',
+      thumbnail: bestThumb(thumbs) || videoThumb(videoId),
+      isLive: false, isShort: false, isUpcoming: false
+    };
+  }
   return {
     type: 'playlist', id,
     title: text(node.title) || '',
@@ -364,7 +432,8 @@ export function sectionsFromNodes(nodes, options = {}) {
       }
       case 'GridShelfView': {
         flushGrid();
-        const s = shelfSection(text(node.header?.title) || text(node.header?.text) || 'Shorts', node.contents);
+        // The header is a SectionHeaderView, whose title is its `headline`.
+        const s = shelfSection(text(node.header?.headline) || text(node.header?.title) || text(node.header?.text) || 'Shorts', node.contents);
         if (s) sections.push(s);
         return;
       }

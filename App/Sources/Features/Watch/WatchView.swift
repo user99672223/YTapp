@@ -140,7 +140,8 @@ private struct WatchContent: View {
                 .padding(.top, 60)
             }
 
-            if model.settings.showStatsOverlay {
+            // Not over a side panel, which it would cover.
+            if model.settings.showStatsOverlay, panel == nil {
                 VStack {
                     HStack {
                         Spacer()
@@ -164,7 +165,7 @@ private struct WatchContent: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the app (TV button) pauses, like the YouTube app.
-            if phase == .background { vm.player.setPaused(true) }
+            vm.setInBackground(phase == .background)
         }
         .onAppear {
             focus = .playPause
@@ -310,7 +311,7 @@ private struct ControlsOverlay: View {
     let onPanel: (WatchPanel) -> Void
     let onActivity: () -> Void
 
-    private var chapters: [Chapter] { vm.details?.effectiveChapters ?? [] }
+    private var chapters: [Chapter] { vm.chapters }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -345,8 +346,8 @@ private struct ControlsOverlay: View {
                     ControlButton(systemImage: "list.bullet.rectangle", title: "Chapters") { onPanel(.chapters) }
                 }
                 ControlButton(systemImage: vm.activeCaption == nil ? "captions.bubble" : "captions.bubble.fill", title: "Captions") { onPanel(.captions) }
-                ControlButton(systemImage: "speedometer", title: String(format: "%.2g×", player.speed)) { onPanel(.speed) }
-                ControlButton(systemImage: "slider.horizontal.3", title: vm.selection.map { "\($0.video.height ?? 0)p" } ?? "Quality") { onPanel(.quality) }
+                ControlButton(systemImage: "speedometer", title: String(format: "%g×", player.speed)) { onPanel(.speed) }
+                ControlButton(systemImage: "slider.horizontal.3", title: vm.selection.map { $0.video.qualityLabel ?? "\($0.video.shortSide)p" } ?? "Quality") { onPanel(.quality) }
                 ControlButton(systemImage: "info.circle", title: "Info") { onPanel(.info) }
                 ControlButton(systemImage: "text.bubble", title: "Comments") { onPanel(.comments) }
             }

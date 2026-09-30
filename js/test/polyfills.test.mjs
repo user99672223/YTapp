@@ -183,3 +183,12 @@ test('timers run in order and clearTimeout cancels', async () => {
   assert.ok(!order.includes('never'));
   assert.deepEqual(order.filter((x) => x.startsWith('i')), ['i0', 'i1', 'i2']);
 });
+
+test('performance.now counts from timeOrigin, not from device boot', () => {
+  // On the Apple TV the native clock is the system uptime (JSRuntime.swift).
+  const uptimeAtLoad = 3 * 24 * 3600 * 1000;
+  const { evaluate } = loadBundle({ overrides: { now: () => uptimeAtLoad + performance.now() } });
+  const now = evaluate('performance.now()');
+  assert.ok(now >= 0 && now < 5000, `performance.now() is ${now}`);
+  assert.ok(Math.abs(evaluate('performance.timeOrigin + performance.now()') - Date.now()) < 5000);
+});

@@ -3,6 +3,13 @@ import { state, createInnertube, requireSession, requireLogin, parseAccount, DEF
 import { resetPoToken, poTokenState } from './potoken.js';
 import { fail } from './errors.js';
 
+// YouTube.js keeps the analysed player script even when it could not find the n/sig decipher
+// function in it (it only logs a warning), so `player.data` alone says nothing.
+function decipherReady(player) {
+  const exported = player?.data?.exported;
+  return Array.isArray(exported) && exported.includes('nsigFunction');
+}
+
 function sessionSummary(yt, account, accountError) {
   const ctx = yt.session.context.client;
   return {
@@ -13,7 +20,7 @@ function sessionSummary(yt, account, accountError) {
     clientName: state.options.client,
     playerId: yt.session.player?.player_id,
     signatureTimestamp: yt.session.player?.signature_timestamp,
-    hasDecipher: !!yt.session.player?.data,
+    hasDecipher: decipherReady(yt.session.player),
     userAgent: yt.session.user_agent || DEFAULT_USER_AGENT
   };
 }
@@ -29,14 +36,21 @@ export async function init(options = {}) {
     playerId: options.playerId || '',
     poTokenMode: options.poTokenMode === 'off' ? 'off' : 'auto'
   };
+  // Only the latest init installs its session: an older one (previous cookies) that finishes
+  // late must not replace the new account's session.
+  state.initSeq = (state.initSeq || 0) + 1;
+  const seq = state.initSeq;
   const creating = (async () => {
     const yt = await createInnertube(opts, true);
+    if (seq !== state.initSeq) fail('noSession', 'A newer sign-in replaced this one.');
     state.yt = yt;
     state.options = opts;
     state.feeds.clear();
     state.infos.clear();
     state.goodClient = null;
     state.badClients.clear();
+    state.refusedClients.clear();
+    state.anon = null;
     resetPoToken();
     return yt;
   })();
@@ -45,7 +59,7 @@ export async function init(options = {}) {
   try {
     yt = await creating;
   } finally {
-    state.creating = null;
+    if (seq === state.initSeq) state.creating = null;
   }
   let account = null;
   let accountError = null;
@@ -57,8 +71,11 @@ export async function init(options = {}) {
       accountError = e && e.message ? e.message : String(e);
     }
   }
-  if (!yt.session.player?.data) {
+  if (!decipherReady(yt.session.player)) {
     console.warn('player script could not be analysed; deciphering will fail');
+  }
+  if (!(yt.session.player?.signature_timestamp > 0)) {
+    console.warn('player script has no signature timestamp; YouTube may refuse player requests');
   }
   return sessionSummary(yt, account, accountError);
 }
@@ -95,7 +112,7 @@ export async function sessionState() {
     loggedIn: !!yt?.session.logged_in,
     clientName: state.options.client,
     playerId: yt?.session.player?.player_id,
-    hasDecipher: !!yt?.session.player?.data,
+    hasDecipher: decipherReady(yt?.session.player),
     visitorData: yt?.session.context.client.visitorData,
     cachedFeeds: state.feeds.size,
     cachedInfos: state.infos.size,
@@ -104,10 +121,13 @@ export async function sessionState() {
 }
 
 export async function setClient({ client, poTokenMode }) {
-  if (client) {
-    state.options.client = String(client).toUpperCase();
+  if (client) state.options.client = String(client).toUpperCase();
+  if (poTokenMode) state.options.poTokenMode = poTokenMode === 'off' ? 'off' : 'auto';
+  if (client || poTokenMode) {
+    // A changed setting starts the automatic choice over: the client remembered as working may
+    // have been the old manual choice, or one that only worked with the old PO-token mode.
+    state.goodClient = null;
     state.badClients.clear();
   }
-  if (poTokenMode) state.options.poTokenMode = poTokenMode === 'off' ? 'off' : 'auto';
   return { clientName: state.options.client };
 }

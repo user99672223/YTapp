@@ -38,11 +38,15 @@ final class ShortsViewModel: ObservableObject {
         self.model = model
         comments = CommentsModel(model: model)
         let logs = model.logs
-        player.logSink = { line in logs.append(.info, line) }
+        player.logSink = { level, line in logs.append(level, line) }
         player.onTick = { [weak self] position, playing in self?.tick(position: position, playing: playing) }
+        player.onPauseChanged = { [weak self] paused in
+            guard let self else { return }
+            self.reporter?.setPlaying(!paused, position: self.player.state.position)
+        }
         player.onError = { [weak self] message in
             guard let self, !self.closed else { return }
-            self.phase = .failed(BridgeError(kind: .network, message: message))
+            self.phase = .failed(WatchViewModel.playbackError(message, stream: self.reporterSelection?.summary))
         }
     }
 
@@ -108,7 +112,8 @@ final class ShortsViewModel: ObservableObject {
         guard ids.indices.contains(position) else { return }
         reporter?.stop()
         reporter = nil
-        playbackStarted = false
+        // The previous Short would keep looping (with sound) while this one loads.
+        player.setPaused(true)
         let id = ids[position]
         comments.reset(videoId: id)
         phase = .loading("Loading Short…")
@@ -141,13 +146,18 @@ final class ShortsViewModel: ObservableObject {
                 loop: true,
                 startPaused: false
             ))
+            // Only ticks of this file reach the reporter (the player drops the previous file's).
             reporter = PlaybackReporter(videoId: id, model: model)
             reporterSelection = selection
+            playbackStarted = false
             phase = .playing
             prefetch(position + 1)
+            trimDetails(around: position)
             if position >= ids.count - 3 { Task { await loadMore() } }
         } catch {
             guard index == position, !closed else { return }
+            // Don't leave the previous Short loaded behind the error.
+            player.stop()
             phase = .failed(WatchViewModel.describe(error))
         }
     }
@@ -169,6 +179,15 @@ final class ShortsViewModel: ObservableObject {
         let fetched = try await model.api { try await $0.shortInfo(id, client: client) }
         details[id] = fetched
         return fetched
+    }
+
+    /// Keeps the details of the Shorts just before and after the current one. An endless feed
+    /// would otherwise hold every Short's formats for the whole session, and older entries are
+    /// fetched again anyway once the bridge has dropped their player data.
+    private func trimDetails(around position: Int) {
+        guard ids.indices.contains(position) else { return }
+        let keep = Set(ids[max(0, position - 5)...min(ids.count - 1, position + 2)])
+        details = details.filter { keep.contains($0.key) }
     }
 
     private func prefetch(_ position: Int) {
@@ -193,11 +212,14 @@ final class ShortsViewModel: ObservableObject {
     }
 
     private func tick(position: Double, playing: Bool) {
-        reporter?.tick(position: position, isPlaying: playing)
-        if playing, !playbackStarted, position > 0.3 {
-            playbackStarted = true
-            reporter?.playbackStarted(length: current?.durationSeconds, videoItag: reporterSelection?.video.itag,
-                                      audioItag: reporterSelection?.audio?.itag)
+        // No reporter while the next Short loads: a tick then must not use up its start.
+        if let reporter {
+            reporter.tick(position: position, isPlaying: playing)
+            if playing, !playbackStarted, position > 0.3 {
+                playbackStarted = true
+                reporter.playbackStarted(length: current?.durationSeconds, videoItag: reporterSelection?.video.itag,
+                                         audioItag: reporterSelection?.audio?.itag)
+            }
         }
         if let current {
             PlaybackDiagnostics.shared.update(videoId: current.id, title: current.title, client: current.playerClient,

@@ -128,4 +128,17 @@ final class CookieJarTests: XCTestCase {
         XCTAssertNotNil(update?.expires)
         XCTAssertEqual(CookieJar.parseSetCookie("X=1; Max-Age=0")?.maxAge, 0)
     }
+
+    func testParseSetCookieSkipsEmptyAttributes() {
+        let update = CookieJar.parseSetCookie("SIDCC=abc; ; Secure; =; =x; Domain=.youtube.com; Max-Age=60; ")
+        XCTAssertEqual(update?.name, "SIDCC")
+        XCTAssertEqual(update?.value, "abc")
+        XCTAssertEqual(update?.domain, ".youtube.com")
+        XCTAssertEqual(update?.maxAge, 60)
+        XCTAssertNotNil(CookieJar.parseSetCookie("A=1; = "))
+        let empty = CookieJar.parseSetCookie("A=1; Domain=; Max-Age=; Expires=")
+        XCTAssertNil(empty?.domain)
+        XCTAssertNil(empty?.maxAge)
+        XCTAssertNil(empty?.expires)
+    }
 }

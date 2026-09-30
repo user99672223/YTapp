@@ -9,15 +9,24 @@ struct SearchView: View {
     @State private var submitted: String?
     @State private var filters = SearchFilters()
     @State private var results: FeedModel?
+    /// The filters `results` was searched with.
+    @State private var searchedFilters: SearchFilters?
     @State private var suggestionTask: Task<Void, Never>?
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let results, let query = submitted {
-                FeedView(feed: results, emptyText: "No results for “\(query)”.", autoRefresh: false) {
-                    filterBar
-                }
-                .id(query + String(describing: filters))
+                // Outside the results so a new search doesn't rebuild the focused filter menu.
+                filterBar
+                    .padding(.horizontal, Layout.horizontalPadding)
+                    .padding(.top, 20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .focusSection()
+                // Its own focus section, so Down from any filter reaches the results.
+                FeedView(feed: results, emptyText: "No results for “\(query)”.", autoRefresh: false)
+                    .id(ObjectIdentifier(results))
+                    .focusSection()
             } else {
                 EmptyStateView(systemImage: "magnifyingglass", text: "Search YouTube")
             }
@@ -31,6 +40,10 @@ struct SearchView: View {
         .onSubmit(of: .search) { run(text) }
         .onChange(of: text) { _, newValue in
             scheduleSuggestions(for: newValue)
+            scheduleSearch(for: newValue)
+        }
+        .onChange(of: filters) { _, _ in
+            if let submitted { run(submitted) }
         }
     }
 
@@ -80,9 +93,6 @@ struct SearchView: View {
                 Button("Clear filters") { filters = SearchFilters() }
             }
         }
-        .onChange(of: filters) { _, _ in
-            if let submitted { run(submitted) }
-        }
     }
 
     private func label(for date: SearchFilters.UploadDate) -> String {
@@ -107,9 +117,33 @@ struct SearchView: View {
     private func run(_ query: String) {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
-        submitted = q
         let currentFilters = filters
+        // The same search again (picking a suggestion also changes the text) keeps the results
+        // and the user's place instead of starting over.
+        if results != nil, q == submitted, currentFilters == searchedFilters { return }
+        searchTask?.cancel()
+        submitted = q
+        searchedFilters = currentFilters
         results = FeedModel(cacheKey: nil, category: .search) { try await $0.search(q, filters: currentFilters) }
+    }
+
+    /// The Siri Remote's on-screen keyboard has no Search key, so typing searches by itself once
+    /// the text stops changing. (Return on a keyboard and picking a suggestion still search at once.)
+    private func scheduleSearch(for value: String) {
+        searchTask?.cancel()
+        let query = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty {
+            submitted = nil
+            results = nil
+            searchedFilters = nil
+            return
+        }
+        guard query.count >= 2 else { return }
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            run(query)
+        }
     }
 
     private func scheduleSuggestions(for value: String) {

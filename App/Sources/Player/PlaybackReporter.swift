@@ -57,6 +57,13 @@ final class PlaybackReporter {
         tracker.record(position: position, isPlaying: isPlaying)
     }
 
+    /// Paused or resumed. Ticks stop while paused, so without this the pings would say
+    /// 'playing' and keep the played range open for as long as the video stays paused.
+    func setPlaying(_ playing: Bool, position: Double) {
+        isPlaying = playing
+        tracker.record(position: position, isPlaying: playing)
+    }
+
     func seeked(to position: Double) {
         tracker.seeked(to: position, isPlaying: isPlaying)
         userActivity()

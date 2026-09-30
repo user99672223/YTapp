@@ -6,62 +6,93 @@ import Core
 /// First run (and cookie re-entry): shows a QR code for the setup page served by the TV.
 struct SetupView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var controller = SetupController()
 
     var body: some View {
-        HStack(alignment: .center, spacing: 80) {
+        HStack(alignment: .center, spacing: 64) {
             VStack(spacing: 24) {
                 if let url = controller.url, let image = QRCode.image(for: url) {
                     Image(uiImage: image)
                         .interpolation(.none)
                         .resizable()
-                        .frame(width: 440, height: 440)
+                        .frame(width: 400, height: 400)
                         .padding(24)
                         .background(Color.white, in: RoundedRectangle(cornerRadius: 24))
-                    Text(url).font(.title3.monospaced()).foregroundStyle(.secondary)
+                    // Always one line: shrink a long address rather than break it after "http://".
+                    Text(url)
+                        .font(.headline.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                 } else {
                     Image(systemName: "wifi.exclamationmark").font(.system(size: 140)).foregroundStyle(.secondary)
                     Text("No network address yet").font(.headline)
                 }
             }
-            .frame(width: 560)
+            .frame(width: 500)
 
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Connect your YouTube account").font(.largeTitle.bold())
-                VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 32) {
+                Text("Connect your YouTube account").font(.title2.bold())
+                VStack(alignment: .leading, spacing: 20) {
                     step(1, "On a computer or phone on the same Wi-Fi, scan the code or open the address shown.")
                     step(2, "In a private (incognito) browser window, sign in to youtube.com and export its cookies.")
                     step(3, "Paste them on the page and press “Send to TV”.")
                     step(4, "Close the private window afterwards. Don't sign out of YouTube there.")
                 }
-                .font(.title3)
+                .font(.headline.weight(.regular))
                 statusView
                 HStack(spacing: 30) {
+                    if controller.serverProblem != nil {
+                        Button("Retry") { controller.restartServer() }
+                    }
                     Button("Refresh address") { controller.refreshAddress() }
                     if model.isSignedIn {
                         Button("Cancel") { model.cancelCookieReentry() }
                     }
                 }
             }
-            .frame(maxWidth: 1000, alignment: .leading)
+            // Every line at its full height: in a stack that's short of room, Text truncates with
+            // "…" instead of wrapping.
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 1100, alignment: .leading)
         }
-        .padding(80)
+        .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .onAppear { controller.start(model: model) }
         .onDisappear { controller.stop() }
+        // tvOS tears down a suspended app's listening socket, and onAppear/onDisappear don't
+        // fire for the app going to the background and back.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: controller.stop()
+            case .active: controller.resume()
+            default: break
+            }
+        }
     }
 
     private func step(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            Text("\(number)").font(.title3.bold()).frame(width: 44, height: 44)
+        HStack(alignment: .firstTextBaseline, spacing: 20) {
+            Text("\(number)").font(.headline).frame(width: 52, height: 52)
                 .background(Color.red, in: Circle())
             Text(text)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     @ViewBuilder
     private var statusView: some View {
+        if let problem = controller.serverProblem {
+            Label(problem, systemImage: "xmark.octagon.fill").foregroundStyle(.red)
+        } else {
+            cookieStatus
+        }
+    }
+
+    @ViewBuilder
+    private var cookieStatus: some View {
         switch controller.phase {
         case .waiting:
             Label("Waiting for your cookies…", systemImage: "hourglass").foregroundStyle(.secondary)
@@ -89,6 +120,8 @@ final class SetupController: ObservableObject {
 
     @Published var url: String?
     @Published var phase: Phase = .waiting
+    /// Why the setup page isn't being served (shown with a Retry button).
+    @Published private(set) var serverProblem: String?
     private let server = SetupServer()
 
     func start(model: AppModel) {
@@ -96,8 +129,11 @@ final class SetupController: ObservableObject {
         server.onStatus = { [weak self] status in
             guard let self else { return }
             switch status {
-            case .failed(let message): self.phase = .error(message)
-            case .listening: if case .error = self.phase { self.phase = .waiting }
+            case .failed(let message): self.serverProblem = message
+            case .listening:
+                self.serverProblem = nil
+                // The TV may have had no address yet when the screen appeared.
+                self.refreshAddress()
             case .starting: break
             }
         }
@@ -119,6 +155,17 @@ final class SetupController: ObservableObject {
 
     func refreshAddress() {
         url = NetworkInfo.setupURL
+    }
+
+    func restartServer() {
+        server.restart()
+        refreshAddress()
+    }
+
+    /// Back from the background: serve the page again (no-op if it's still running).
+    func resume() {
+        server.start()
+        refreshAddress()
     }
 
     func stop() {

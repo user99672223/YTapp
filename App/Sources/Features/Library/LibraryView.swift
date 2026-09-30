@@ -45,18 +45,39 @@ struct LibraryView: View {
 final class PlaylistModel: ObservableObject {
     @Published var info: PlaylistInfo?
     private(set) var feed: FeedModel!
+    /// The feed cache holds only the videos; the title, channel and count are cached under this
+    /// key so a cache hit (which skips the loader) still has a header.
+    private let infoKey: String
+    private weak var store: Store?
 
     init(playlistId: String) {
+        infoKey = "playlist-info:\(playlistId)"
         feed = FeedModel(cacheKey: "playlist:\(playlistId)", category: .library) { [weak self] service in
             let page = try await service.playlist(playlistId)
-            await MainActor.run { self?.info = page.info }
+            await MainActor.run { self?.update(page.info) }
             return page.page
         }
+    }
+
+    /// Called when the view appears (the model is created before the environment exists).
+    func attach(_ store: Store) {
+        guard self.store == nil else { return }
+        self.store = store
+        if let info {
+            store.storePage(infoKey, info)
+        } else if let cached = store.cachedPage(infoKey, as: PlaylistInfo.self) {
+            info = cached.value
+        }
+    }
+
+    private func update(_ info: PlaylistInfo) {
+        self.info = info
+        store?.storePage(infoKey, info)
     }
 }
 
 struct PlaylistView: View {
-    @EnvironmentObject private var router: Router
+    @EnvironmentObject private var model: AppModel
     let title: String?
     @StateObject private var playlist: PlaylistModel
 
@@ -67,16 +88,30 @@ struct PlaylistView: View {
 
     var body: some View {
         FeedView(feed: playlist.feed, emptyText: "This playlist is empty.") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(playlist.info?.title ?? title ?? "Playlist").font(.title.bold())
-                Text([playlist.info?.channelName, playlist.info?.videoCountText].compactMap { $0 }.joined(separator: " • "))
-                    .foregroundStyle(.secondary)
-                if let first = playlist.feed.page?.allItems.compactMap(\.video).first {
-                    Button {
-                        router.play(first)
-                    } label: {
-                        Label("Play", systemImage: "play.fill")
-                    }
+            PlaylistHeader(playlist: playlist, feed: playlist.feed, title: title)
+        }
+        .onAppear { playlist.attach(model.store) }
+    }
+}
+
+/// Its own view observing the feed: FeedView keeps the header value it was built with, so the
+/// Play button has to redraw by itself when the videos arrive.
+private struct PlaylistHeader: View {
+    @EnvironmentObject private var router: Router
+    @ObservedObject var playlist: PlaylistModel
+    @ObservedObject var feed: FeedModel
+    let title: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(playlist.info?.title ?? title ?? "Playlist").font(.title.bold())
+            Text([playlist.info?.channelName, playlist.info?.videoCountText].compactMap { $0 }.joined(separator: " • "))
+                .foregroundStyle(.secondary)
+            if let first = feed.page?.allItems.compactMap(\.video).first {
+                Button {
+                    router.play(first)
+                } label: {
+                    Label("Play", systemImage: "play.fill")
                 }
             }
         }

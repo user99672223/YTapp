@@ -1,16 +1,38 @@
 import Foundation
 
+/// What the device decodes smoothly: formats of a `hardware` codec always, all others (decoded
+/// in software) only up to `softwarePixelsPerSecond` (width × height × frame rate).
+public struct DecodeBudget: Codable, Hashable, Sendable {
+    public var softwarePixelsPerSecond: Double
+    public var hardware: [CodecFamily]
+
+    public init(softwarePixelsPerSecond: Double, hardware: [CodecFamily] = [.avc]) {
+        self.softwarePixelsPerSecond = softwarePixelsPerSecond
+        self.hardware = hardware
+    }
+
+    public func allows(_ format: StreamFormat) -> Bool {
+        if hardware.contains(format.codecFamily) { return true }
+        let pixels = Double(format.width ?? 0) * Double(format.height ?? 0)
+        return pixels * max(format.fps ?? 30, 1) <= softwarePixelsPerSecond
+    }
+}
+
 /// The user's quality rule. Default: AV1 > VP9 > H.264, highest resolution up to 2160p,
-/// Opus audio (highest bitrate, itag 251) else AAC. No adaptive switching.
+/// Opus audio (highest bitrate, itag 251) else AAC. No adaptive switching. With a
+/// `decodeBudget`, formats the device can't decode in time are skipped (when anything else is left).
 public struct QualityPreferences: Codable, Hashable, Sendable {
     public var maxHeight: Int
     public var codecOrder: [CodecFamily]
     public var allowSuperResolution: Bool
+    public var decodeBudget: DecodeBudget?
 
-    public init(maxHeight: Int = 2160, codecOrder: [CodecFamily] = [.av1, .vp9, .avc], allowSuperResolution: Bool = false) {
+    public init(maxHeight: Int = 2160, codecOrder: [CodecFamily] = [.av1, .vp9, .avc], allowSuperResolution: Bool = false,
+                decodeBudget: DecodeBudget? = nil) {
         self.maxHeight = maxHeight
         self.codecOrder = codecOrder
         self.allowSuperResolution = allowSuperResolution
+        self.decodeBudget = decodeBudget
     }
 
     public static let `default` = QualityPreferences()
@@ -41,6 +63,16 @@ public enum QualityError: Error, Equatable, LocalizedError {
     }
 }
 
+public extension StreamFormat {
+    /// The resolution a video format is labelled with ("1080p"): its shorter side. YouTube
+    /// reports vertical videos at their real size, so a 1080p Short is 1080×1920.
+    var shortSide: Int {
+        let h = height ?? 0
+        guard let w = width, w > 0, h > 0 else { return h }
+        return min(w, h)
+    }
+}
+
 public enum QualitySelector {
     /// Formats that can be played as a single progressive file: have a URL (or cipher), are not
     /// DRM protected and not OTF/segmented (live).
@@ -48,12 +80,13 @@ public enum QualitySelector {
         f.hasUrl && !f.isDrm && !f.isOtf
     }
 
-    /// Video-only adaptive formats the TV can show (SDR only).
+    /// Video-only adaptive formats the TV can show (SDR only). The maximum quality applies to
+    /// the short side, so vertical videos are capped like landscape ones.
     public static func videoCandidates(_ formats: [StreamFormat], preferences: QualityPreferences = .default) -> [StreamFormat] {
         formats.filter { f in
             f.hasVideo && !f.hasAudio && isStreamable(f) && !f.isHdr &&
                 preferences.codecOrder.contains(f.codecFamily) &&
-                (f.height ?? 0) > 0 && (f.height ?? 0) <= preferences.maxHeight
+                f.shortSide > 0 && f.shortSide <= preferences.maxHeight
         }
     }
 
@@ -69,9 +102,13 @@ public enum QualitySelector {
             let native = candidates.filter { !$0.isSuperResolution }
             if !native.isEmpty { candidates = native }
         }
+        if let budget = preferences.decodeBudget {
+            let smooth = candidates.filter { budget.allows($0) }
+            if !smooth.isEmpty { candidates = smooth }
+        }
         func rank(_ family: CodecFamily) -> Int { preferences.codecOrder.firstIndex(of: family) ?? Int.max }
         return candidates.sorted { a, b in
-            let ha = a.height ?? 0, hb = b.height ?? 0
+            let ha = a.shortSide, hb = b.shortSide
             if ha != hb { return ha > hb }
             let ra = rank(a.codecFamily), rb = rank(b.codecFamily)
             if ra != rb { return ra < rb }
@@ -128,7 +165,7 @@ public enum QualitySelector {
     /// Every format for the manual override list, best first.
     public static func overrideList(_ formats: [StreamFormat]) -> (video: [StreamFormat], audio: [StreamFormat]) {
         let video = formats.filter { $0.hasVideo && !$0.hasAudio }.sorted {
-            if ($0.height ?? 0) != ($1.height ?? 0) { return ($0.height ?? 0) > ($1.height ?? 0) }
+            if $0.shortSide != $1.shortSide { return $0.shortSide > $1.shortSide }
             return ($0.bitrate ?? 0) > ($1.bitrate ?? 0)
         }
         let audio = formats.filter { $0.hasAudio && !$0.hasVideo }.sorted { ($0.bitrate ?? 0) > ($1.bitrate ?? 0) }

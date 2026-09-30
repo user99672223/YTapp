@@ -8,6 +8,12 @@ final class QualitySelectorTests: XCTestCase {
                      height: height, fps: fps, bitrate: bitrate, isHdr: hdr, isOtf: otf, isSuperResolution: sr, hasUrl: hasUrl)
     }
 
+    /// A vertical (Shorts) format: YouTube reports its real size, e.g. 1080×1920 for "1080p".
+    func vertical(_ index: Int, itag: Int, codecs: String, width: Int) -> StreamFormat {
+        StreamFormat(index: index, itag: itag, mimeType: "video/x", codecs: codecs, hasVideo: true, width: width,
+                     height: width * 16 / 9, fps: 30, bitrate: width * 1000)
+    }
+
     func audio(_ index: Int, itag: Int, codecs: String, bitrate: Int, drc: Bool = false, isDefault: Bool? = nil,
                autoDubbed: Bool? = nil) -> StreamFormat {
         StreamFormat(index: index, itag: itag, mimeType: "audio/x", codecs: codecs, hasAudio: true, bitrate: bitrate,
@@ -57,6 +63,48 @@ final class QualitySelectorTests: XCTestCase {
             video(3, itag: 313, codecs: "vp9", height: 2160)
         ]
         XCTAssertEqual(QualitySelector.selectVideo(formats)?.itag, 313)
+    }
+
+    func testVerticalVideosAreCappedOnTheShortSide() {
+        let formats = [
+            vertical(0, itag: 399, codecs: "av01.0.08M.08", width: 1080),
+            vertical(1, itag: 398, codecs: "av01.0.05M.08", width: 720),
+            vertical(2, itag: 397, codecs: "av01.0.04M.08", width: 480)
+        ]
+        XCTAssertEqual(formats[0].height, 1920)
+        XCTAssertEqual(formats[0].shortSide, 1080)
+        XCTAssertEqual(QualitySelector.selectVideo(formats, preferences: QualityPreferences(maxHeight: 1080))?.itag, 399,
+                       "a 1080×1920 Short is 1080p, not 1920p")
+        XCTAssertEqual(QualitySelector.selectVideo(formats, preferences: QualityPreferences(maxHeight: 1440))?.itag, 399)
+        XCTAssertEqual(QualitySelector.selectVideo(formats, preferences: QualityPreferences(maxHeight: 720))?.itag, 398)
+        XCTAssertEqual(QualitySelector.selectVideo(formats, preferences: QualityPreferences(maxHeight: 480))?.itag, 397)
+        XCTAssertEqual(QualitySelector.overrideList(formats).video.map(\.itag), [399, 398, 397])
+    }
+
+    func testShortSideFallsBackToHeight() {
+        let noWidth = StreamFormat(index: 0, itag: 137, mimeType: "video/x", codecs: "avc1.640028", hasVideo: true, height: 1080)
+        XCTAssertEqual(noWidth.shortSide, 1080)
+        XCTAssertEqual(video(0, itag: 137, codecs: "avc1.640028", height: 1080).shortSide, 1080)
+    }
+
+    func testDecodeBudgetSkipsFormatsTooHeavyForSoftwareDecoding() {
+        let prefs = QualityPreferences(decodeBudget: DecodeBudget(softwarePixelsPerSecond: 3840 * 2160 * 30, hardware: [.avc]))
+        let sixty = [
+            video(0, itag: 401, codecs: "av01.0.13M.08", height: 2160, fps: 60),
+            video(1, itag: 315, codecs: "vp9", height: 2160, fps: 60),
+            video(2, itag: 400, codecs: "av01.0.12M.08", height: 1440, fps: 60),
+            video(3, itag: 299, codecs: "avc1.64002a", height: 1080, fps: 60)
+        ]
+        XCTAssertEqual(QualitySelector.selectVideo(sixty, preferences: prefs)?.itag, 400, "2160p60 is over the budget; 1440p60 AV1 is the best within it")
+        XCTAssertEqual(QualitySelector.selectVideo(sixty)?.itag, 401, "without a budget the rule is unchanged")
+        let thirty = [
+            video(0, itag: 401, codecs: "av01.0.12M.08", height: 2160, fps: 30),
+            video(1, itag: 400, codecs: "av01.0.12M.08", height: 1440, fps: 30)
+        ]
+        XCTAssertEqual(QualitySelector.selectVideo(thirty, preferences: prefs)?.itag, 401, "2160p30 fits the budget")
+        let onlyHeavy = [video(0, itag: 401, codecs: "av01.0.13M.08", height: 2160, fps: 60)]
+        XCTAssertEqual(QualitySelector.selectVideo(onlyHeavy, preferences: prefs)?.itag, 401, "with nothing lighter, the rule's own pick is kept")
+        XCTAssertTrue(DecodeBudget(softwarePixelsPerSecond: 1, hardware: [.avc]).allows(sixty[3]), "hardware codecs are always allowed")
     }
 
     func testSuperResolutionAvoidedWhenNativeExists() {

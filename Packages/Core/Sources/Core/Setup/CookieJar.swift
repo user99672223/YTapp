@@ -65,11 +65,14 @@ public struct CookieJar: Equatable, Sendable {
         guard let first = parts.first, let eq = first.firstIndex(of: "=") else { return nil }
         var update = Update(name: String(first[..<eq]), value: String(first[first.index(after: eq)...]))
         for attribute in parts.dropFirst() {
-            let kv = attribute.split(separator: "=", maxSplits: 1).map(String.init)
-            switch kv[0].lowercased() {
-            case "domain": update.domain = kv.count > 1 ? kv[1] : nil
-            case "max-age": update.maxAge = kv.count > 1 ? Int(kv[1]) : nil
-            case "expires": update.expires = kv.count > 1 ? httpDate(kv[1]) : nil
+            let kv = attribute.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            // Empty pieces ("a=b; ; Secure", a trailing "; ") and nameless ones ("=x") are skipped.
+            guard let key = kv.first, !key.isEmpty else { continue }
+            let value: String? = kv.count > 1 && !kv[1].isEmpty ? kv[1] : nil
+            switch key.lowercased() {
+            case "domain": update.domain = value
+            case "max-age": update.maxAge = value.flatMap { Int($0) }
+            case "expires": update.expires = value.flatMap { httpDate($0) }
             default: break
             }
         }

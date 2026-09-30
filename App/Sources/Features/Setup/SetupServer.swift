@@ -18,6 +18,7 @@ final class SetupServer: @unchecked Sendable {
     /// Receives the raw textarea content; returns the page to show on the phone/computer.
     var onCookies: ((String) async -> SetupPage.State)?
 
+    /// Main thread only (start, stop and the failure handler).
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "tube.setup.server")
 
@@ -28,12 +29,15 @@ final class SetupServer: @unchecked Sendable {
             parameters.allowLocalEndpointReuse = true
             guard let port = NWEndpoint.Port(rawValue: Self.port) else { return }
             let listener = try NWListener(using: parameters, on: port)
-            listener.stateUpdateHandler = { [weak self] state in
+            listener.stateUpdateHandler = { [weak self, weak listener] state in
                 switch state {
                 case .ready:
                     self?.emit(.listening)
                 case .failed(let error):
-                    self?.emit(.failed("The setup page couldn't start: \(error.localizedDescription)"))
+                    let message = "The setup page couldn't start: \(error.localizedDescription)"
+                    DispatchQueue.main.async { [weak self, weak listener] in
+                        self?.listenerFailed(listener, message: message)
+                    }
                 case .waiting(let error):
                     self?.emit(.failed("Waiting for the network: \(error.localizedDescription). If the Apple TV asked about devices on your local network, allow it in Settings → Privacy."))
                 default:
@@ -54,6 +58,22 @@ final class SetupServer: @unchecked Sendable {
     func stop() {
         listener?.cancel()
         listener = nil
+    }
+
+    /// Retry after a failure, or after the app comes back from the background.
+    func restart() {
+        stop()
+        start()
+    }
+
+    /// Main thread. A failed listener never recovers (and a suspended app's listening socket is
+    /// torn down), so drop it; otherwise `start()` would keep returning early and the page could
+    /// never be served again.
+    private func listenerFailed(_ failed: NWListener?, message: String) {
+        guard let failed, failed === listener else { return }
+        failed.cancel()
+        listener = nil
+        onStatus?(.failed(message))
     }
 
     private func emit(_ status: Status) {

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { loadBundle } from './harness.mjs';
-import { createFakeYouTube, COOKIE, CH1, CH2, PLAYER_ID } from './fakeyt.mjs';
+import { createFakeYouTube, COOKIE, CH1, CH2, CH3, PLAYER_ID } from './fakeyt.mjs';
 
 const fixturesDir = new URL('../../Packages/Core/Tests/CoreTests/Fixtures/', import.meta.url);
 mkdirSync(fixturesDir, { recursive: true });
@@ -90,6 +90,7 @@ test('video info, deciphering, history and watch-time pings', async () => {
   assert.equal(details.captions.length, 2);
   assert.match(details.captions[0].url, /[?&]fmt=vtt(&|$)/);
   assert.equal(details.captions[1].isAuto, true);
+  // The Mix of this video opens this very video: it is not "up next" and not the autoplay pick.
   assert.deepEqual(details.upNext.map((v) => v.id), ['RELATEDVID1', 'RELATEDVID2']);
   assert.equal(details.autoplayNextId, 'RELATEDVID1');
   assert.equal(details.playerClient, 'TV');
@@ -103,7 +104,7 @@ test('video info, deciphering, history and watch-time pings', async () => {
   assert.equal(playerHit.body.playbackContext.contentPlaybackContext.signatureTimestamp, 20314);
 
   const idx = (itag) => details.formats.find((f) => f.itag === itag).index;
-  const resolved = await call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)] });
+  const resolved = await call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
   const videoUrl = new URL(resolved.urls[String(idx(401))]);
   assert.equal(videoUrl.hostname, 'rr1---sn-fake.googlevideo.com');
   assert.equal(videoUrl.searchParams.get('sig'), 'ZYXGIS');
@@ -155,6 +156,123 @@ test('search, suggestions and channel items', async () => {
   assert.equal(channel.isSubscribed, false);
   assert.ok(items.some((i) => i.id === 'SEARCHVID01'));
   assert.ok(results.sections.some((s) => s.style === 'shorts' && s.items[0].id === 'SHORTID0003'));
+
+  // A Mix has no playlist page: it opens its first video.
+  const mix = items.find((i) => i.title === 'Mix – Channel One');
+  assert.equal(mix.type, 'video');
+  assert.equal(mix.id, 'MIXSEEDVID1');
+  assert.ok(!items.some((i) => i.id === 'RDMIXSEEDVID1'));
+  const list = items.find((i) => i.id === 'PLsearchlist01');
+  assert.equal(list.type, 'playlist');
+  assert.equal(list.channelName, 'Channel Two');
+  assert.equal(list.videoCountText, '12 videos');
+  // A scheduled premiere is flagged upcoming and its "UPCOMING" label is not a duration.
+  const premiere = items.find((i) => i.id === 'UPCOMINGV02');
+  assert.equal(premiere.isUpcoming, true);
+  assert.equal(premiere.durationText, undefined);
+  assert.equal(premiere.durationSeconds, undefined);
+  // Grid shelves keep their own headline.
+  const grid = results.sections.find((s) => s.items.some((i) => i.id === 'SHORTID0005'));
+  assert.equal(grid.title, 'Latest Shorts from Channel One');
+  assert.equal(grid.style, 'shorts');
+});
+
+test('Subscriptions, subscribed channels and Library playlists load past the first page', async () => {
+  const { call } = await connected();
+  const subs = await call('subscriptions');
+  assert.deepEqual(subs.sections.flatMap((s) => s.items).map((i) => i.id), ['SUBSVIDEO01', 'STREAMVID01', 'UPCOMINGV01', 'LIVENOWVID1']);
+  assert.ok(subs.continuation);
+  const moreSubs = await call('more', { key: subs.continuation });
+  assert.deepEqual(moreSubs.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText, i.isLive, i.isUpcoming]),
+    [['SUBSVIDEO02', 'Channel One', '7K views', false, false], ['SUBSVIDEO03', 'Bird Watching', '300 views', false, false]]);
+  assert.equal(moreSubs.continuation, undefined);
+
+  const channels = await call('subscribedChannels');
+  assert.ok(channels.continuation);
+  const moreChannels = await call('more', { key: channels.continuation });
+  assert.deepEqual(moreChannels.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.name]), [['channel', CH3, 'Channel Three']]);
+  assert.equal(moreChannels.continuation, undefined);
+
+  const lists = await call('playlists');
+  // "Private" is a label, not the playlist's channel.
+  assert.deepEqual(lists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName, i.videoCountText]),
+    [['playlist', 'PLmine000001', undefined, '3 videos'], ['playlist', 'PLother00001', 'Channel Two', '40 videos']]);
+  assert.ok(lists.continuation);
+  const moreLists = await call('more', { key: lists.continuation });
+  // Later pages keep only playlists too (the saved Mix is left out).
+  assert.deepEqual(moreLists.sections.flatMap((s) => s.items).map((i) => [i.type, i.id, i.channelName]), [['playlist', 'PLmine000002', undefined]]);
+  assert.equal(moreLists.continuation, undefined);
+});
+
+test('lockups: ended streams lose the live thumbnail, upcoming and live ones are flagged', async () => {
+  const { call } = await connected();
+  const subs = await call('subscriptions');
+  const byId = Object.fromEntries(subs.sections.flatMap((s) => s.items).map((i) => [i.id, i]));
+  const video = byId.SUBSVIDEO01;
+  assert.equal(video.channelName, 'Channel Two');
+  assert.equal(video.channelId, CH2);
+  assert.equal(video.viewCountText, '5K views');
+  assert.equal(video.publishedText, '1 hour ago');
+
+  const ended = byId.STREAMVID01;
+  assert.equal(ended.isLive, false);
+  assert.equal(ended.thumbnail, 'https://i.ytimg.com/vi/STREAMVID01/hqdefault.jpg');
+  assert.equal(ended.publishedText, 'Streamed 13 hours ago');
+  assert.equal(ended.durationText, '2:01:15');
+
+  const upcoming = byId.UPCOMINGV01;
+  assert.equal(upcoming.isUpcoming, true);
+  assert.equal(upcoming.durationText, undefined);
+  assert.equal(upcoming.publishedText, 'Scheduled for 10/1/26, 8:00 PM');
+
+  const live = byId.LIVENOWVID1;
+  assert.equal(live.isLive, true);
+  assert.equal(live.viewCountText, '1.2K watching');
+  assert.equal(live.thumbnail, 'https://i.ytimg.com/vi/LIVENOWVID1/hq720_live.jpg');
+});
+
+test('channel header counts, author-less channel tab lockups and a key from another launch', async () => {
+  const { call, yt } = await connected();
+  const one = await call('channel', { id: CH1 });
+  // The handle contains "video"; the video count is the "321 videos" part.
+  assert.equal(one.channel.handle, '@videogamefan');
+  assert.equal(one.channel.subscriberCountText, '1.5M subscribers');
+  assert.equal(one.channel.videoCountText, '321 videos');
+  assert.deepEqual(one.tabs, ['videos']);
+
+  const videos = await call('channelTab', { key: one.key, id: CH1, tab: 'videos' });
+  assert.deepEqual(videos.sections.flatMap((s) => s.items).map((i) => [i.id, i.channelName, i.viewCountText, i.publishedText]),
+    [['ONEVIDEO01', undefined, '1.2M views', '3 days ago'], ['ONEVIDEO02', undefined, '900 views', '2 years ago']]);
+
+  // Keys restart with every JavaScript context, so a saved key can name another channel's entry.
+  const other = await call('channelTab', { key: one.key, id: CH2, tab: 'videos' });
+  assert.deepEqual(other.sections.flatMap((s) => s.items).map((i) => i.id), ['TWOVIDEO01', 'TWOVIDEO02']);
+  assert.ok(yt.hits.some((h) => h.path === '/youtubei/v1/browse' && h.body?.browseId === CH2));
+});
+
+test('Watch Later rows show views and age; removing a video is one request', async () => {
+  const { call, yt } = await connected();
+  const wl = await call('playlist', { id: 'WL' });
+  const row = wl.page.sections[0].items[0];
+  assert.equal(row.id, 'VIDEOID0001');
+  assert.equal(row.channelName, 'Channel One');
+  assert.equal(row.durationText, '4:20');
+  assert.equal(row.viewCountText, '1.2M views');
+  assert.equal(row.publishedText, '3 years ago');
+  assert.equal(row.setVideoId, 'SETVIDEOID0001');
+
+  const before = yt.hits.length;
+  assert.deepEqual(await call('watchLater', { id: 'VIDEOID0002', add: false }), { inWatchLater: false });
+  const hits = yt.hits.slice(before).filter((h) => h.path.startsWith('/youtubei/v1/browse'));
+  assert.deepEqual(hits.map((h) => h.path), ['/youtubei/v1/browse/edit_playlist'], 'no paging through the list');
+  assert.equal(hits[0].body.playlistId, 'WL');
+  assert.deepEqual(hits[0].body.actions, [{ action: 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID', removedVideoId: 'VIDEOID0002' }]);
+
+  // A 200 answer whose status is not STATUS_SUCCEEDED is a failure, not a silent success.
+  const failing = createFakeYouTube({ editPlaylist: 'failed' });
+  const bundle = loadBundle({ router: failing.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  await assert.rejects(bundle.call('watchLater', { id: 'VIDEOID0002', add: false }), (e) => e.kind === 'action' && /Remove from Watch Later failed/.test(e.message));
 });
 
 test('Shorts feed seeds from Home and resolves a short', async () => {
@@ -264,9 +382,163 @@ test('"The page needs to be reloaded" switches the TV client to the Samsung iden
   assert.equal(watched.ok, true);
 });
 
+test('a stream googlevideo refuses (403) is taken from a signed-out client; history stays signed in', async () => {
+  const yt = createFakeYouTube({ refuseStreams: ['TVHTML5'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  assert.equal(details.playerClient, 'TV');
+  const idx = (itag) => details.formats.find((f) => f.itag === itag).index;
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
+  const video = new URL(resolved.urls[String(idx(401))]);
+  const audio = new URL(resolved.urls[String(idx(251))]);
+  assert.equal(video.searchParams.get('fakeclient'), 'VISIONOS');
+  assert.equal(audio.searchParams.get('fakeclient'), 'VISIONOS');
+  assert.equal(video.searchParams.get('itag'), '401');
+  assert.match(resolved.userAgent, /Safari/);
+  assert.ok(bundle.logs.some((l) => l.level === 'info' && /googlevideo refused the TV stream \(itag 401, HTTP 403\)/.test(l.message)), 'a handled refusal is logged below the error level');
+  const probes = yt.hits.filter((h) => h.path === '/videoplayback');
+  assert.equal(probes.length, 2, 'one one-byte probe per stream source');
+  assert.equal(probes[0].headers.range, 'bytes=0-0');
+  const visionPlayer = yt.hits.find((h) => h.path === '/youtubei/v1/player' && h.body.context.client.clientName === 'VISIONOS');
+  assert.ok(visionPlayer, 'visionOS was asked');
+  assert.equal(visionPlayer.headers.cookie, undefined, 'the signed-out request carries no account cookies');
+  assert.equal(visionPlayer.headers.authorization, undefined);
+  // History still goes through the signed-in TV answer.
+  const watched = await bundle.call('markWatched', { id: 'VIDEOID0001' });
+  assert.equal(watched.ok, true);
+  const playback = yt.hits.find((h) => h.path === '/api/stats/playback');
+  assert.equal(new URL(playback.url).searchParams.get('c'), 'tvhtml5');
+  assert.ok(playback.headers.cookie, 'history ping carries the account cookies');
+});
+
+test('when signed-out clients are refused too, the next signed-in client provides the streams', async () => {
+  const yt = createFakeYouTube({ refuseStreams: ['TVHTML5', 'VISIONOS', 'TVHTML5_SIMPLY', 'iOS', 'ANDROID_VR'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  const idx = (itag) => details.formats.find((f) => f.itag === itag).index;
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [idx(401), idx(251)], itags: [401, 251] });
+  // TV (403) → four signed-out clients (403) → TV as a Samsung set (TVHTML5, 403) → Web embedded.
+  assert.equal(new URL(resolved.urls[String(idx(401))]).searchParams.get('fakeclient'), 'WEB_EMBEDDED_PLAYER');
+  const again = await bundle.call('videoInfo', { id: 'VIDEOID0001' });
+  assert.equal(again.playerClient, 'WEB_EMBEDDED');
+});
+
+test('an older init that finishes last does not replace the newer session', async () => {
+  const yt = createFakeYouTube();
+  const bundle = loadBundle({ router: yt.router });
+  const first = bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const second = bundle.call('init', { cookie: '', client: 'AUTO' });
+  const results = await Promise.allSettled([first, second]);
+  assert.equal(results[1].status, 'fulfilled');
+  assert.equal(results[1].value.loggedIn, false);
+  const state = await bundle.call('sessionState');
+  assert.equal(state.loggedIn, false, 'the signed-out (newer) session stays installed');
+});
+
 test('errors are classified for Swift', async () => {
   const { call } = await connected();
   await assert.rejects(call('resolveFormats', { id: 'NOTLOADED01', indices: [0] }), (e) => e.kind === 'expired');
   await assert.rejects(call('more', { key: 'nope:1' }), (e) => e.kind === 'expired');
   await assert.rejects(call('search', { query: '   ' }), (e) => e.kind === 'invalid');
+});
+
+test('an age gate is shown with YouTube\'s reason, not as a bot check', async () => {
+  const { call } = await connected();
+  await assert.rejects(call('videoInfo', { id: 'AGEGATED001', client: 'TV' }), (e) =>
+    e.kind === 'loginRequired' && /confirm your age/.test(e.message));
+  await assert.rejects(call('videoInfo', { id: 'BOTCHECK001', client: 'TV' }), (e) => e.kind === 'botCheck');
+});
+
+test('a deleted video stops at the first client with YouTube\'s reason', async () => {
+  const { call, yt } = await connected();
+  await assert.rejects(call('videoInfo', { id: 'DELETED0001', client: 'TV' }), (e) =>
+    e.kind === 'unavailable' && /removed by the uploader/.test(e.message));
+  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 1);
+  await assert.rejects(call('videoInfo', { id: 'DELETED0002', client: 'TV' }), (e) =>
+    e.kind === 'unavailable' && e.message === 'This video isn’t available anymore');
+  assert.equal(yt.hits.filter((h) => h.path === '/youtubei/v1/player').length, 2);
+});
+
+test('live streams come back as segmented formats without trying other clients', async () => {
+  const { call, yt } = await connected();
+  const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player');
+  const live = await call('videoInfo', { id: 'LIVESTREAM1', client: 'AUTO' });
+  assert.equal(live.isLive, true);
+  assert.ok(live.formats.length > 0 && live.formats.every((f) => f.isOtf), 'live segments are not streamable');
+  const hlsOnly = await call('videoInfo', { id: 'LIVEHLSONLY', client: 'AUTO' });
+  assert.deepEqual(hlsOnly.formats, []);
+  assert.equal(players().length, 2);
+  // Neither marked the TV client as broken: the next video is still loaded through it first.
+  const next = await call('videoInfo', { id: 'VIDEOID0001', client: 'AUTO' });
+  assert.equal(next.playerClient, 'TV');
+  assert.equal(players().length, 3);
+  assert.equal(next.formats.some((f) => f.isOtf), false);
+});
+
+test('changing the stream client setting starts the automatic choice over', async () => {
+  const yt = createFakeYouTube({ tvReload: true });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  assert.equal((await bundle.call('videoInfo', { id: 'VIDEOID0001' })).playerClient, 'TV_TIZEN');
+  await bundle.call('setClient', { client: 'WEB_EMBEDDED' });
+  assert.equal((await bundle.call('videoInfo', { id: 'VIDEOID0002', client: 'WEB_EMBEDDED' })).playerClient, 'WEB_EMBEDDED');
+  await bundle.call('setClient', { client: 'AUTO' });
+  const players = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player')
+    .map((h) => (h.body.context.client.deviceMake === 'Samsung' ? 'TV_TIZEN' : h.body.context.client.clientName));
+  const before = players().length;
+  assert.equal((await bundle.call('videoInfo', { id: 'VIDEOID0003', client: 'AUTO' })).playerClient, 'TV_TIZEN');
+  // The manual choice (Web embedded) is not kept as the automatic first choice.
+  assert.deepEqual(players().slice(before), ['TVHTML5', 'TV_TIZEN']);
+});
+
+test('Automatic skips Mobile web when PO tokens are off; picked by hand it is still tried', async () => {
+  const yt = createFakeYouTube({ rejectClients: ['TVHTML5', 'WEB_EMBEDDED_PLAYER'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO', poTokenMode: 'off' });
+  await assert.rejects(bundle.call('videoInfo', { id: 'VIDEOID0001' }), (e) =>
+    e.kind === 'extraction' && /MWEB: \[poToken\] .*PO tokens are turned off/.test(e.detail));
+  const mweb = () => yt.hits.filter((h) => h.path === '/youtubei/v1/player' && h.body.context.client.clientName === 'MWEB');
+  assert.equal(mweb().length, 0);
+  await bundle.call('setClient', { client: 'MWEB' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'MWEB' });
+  assert.equal(details.playerClient, 'MWEB');
+  assert.equal(mweb().length, 1);
+});
+
+test('stream links close to their expiry are not handed to the player', async () => {
+  const yt = createFakeYouTube({ expiresInSeconds: '900' });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  const details = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });
+  const audio = details.formats.find((f) => f.itag === 251);
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [audio.index], itags: [251] }), (e) => e.kind === 'expired');
+  assert.equal((await bundle.call('sessionState')).cachedInfos, 0, 'the stale player data is dropped');
+});
+
+test('format indices from an earlier load of the video are refused as expired', async () => {
+  const yt = createFakeYouTube({ reorderClients: ['WEB_EMBEDDED_PLAYER'] });
+  const bundle = loadBundle({ router: yt.router });
+  await bundle.call('init', { cookie: COOKIE, client: 'AUTO' });
+  const tv = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'AUTO' });
+  await bundle.call('setClient', { client: 'WEB_EMBEDDED' });
+  const embedded = await bundle.call('videoInfo', { id: 'VIDEOID0001', client: 'WEB_EMBEDDED' });
+  const uhd = (d) => d.formats.find((f) => f.itag === 401);
+  assert.notEqual(uhd(tv).index, uhd(embedded).index);
+  // Back on Automatic, Swift still holds the TV details (cached for 5 minutes).
+  await bundle.call('setClient', { client: 'AUTO' });
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [uhd(tv).index], itags: [401] }), (e) => e.kind === 'expired');
+  const resolved = await bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [uhd(embedded).index], itags: [401] });
+  assert.equal(new URL(resolved.urls[String(uhd(embedded).index)]).searchParams.get('itag'), '401');
+  await assert.rejects(bundle.call('resolveFormats', { id: 'VIDEOID0001', indices: [99] }), (e) => e.kind === 'expired');
+});
+
+test('a player script without the n/sig function is reported as not ready', async () => {
+  const yt = createFakeYouTube({ brokenPlayer: true });
+  const bundle = loadBundle({ router: yt.router });
+  const session = await bundle.call('init', { cookie: COOKIE, client: 'TV' });
+  assert.equal(session.hasDecipher, false);
+  assert.ok(bundle.logs.some((l) => /player script could not be analysed/.test(l.message)));
+  assert.equal((await bundle.call('sessionState')).hasDecipher, false);
 });

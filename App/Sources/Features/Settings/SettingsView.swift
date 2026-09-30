@@ -2,10 +2,19 @@ import SwiftUI
 import Core
 import Libmpv
 
+/// The result of the last bundle download or switch. Kept outside SettingsView: installing a
+/// bundle reconnects to YouTube, which rebuilds the whole tab view and this screen's state with
+/// it, so a result written to @State would never be seen.
+@MainActor
+final class BundleUpdateStatus: ObservableObject {
+    static let shared = BundleUpdateStatus()
+    @Published var message: String?
+    @Published var busy = false
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var bundleStatus: String?
-    @State private var bundleBusy = false
+    @ObservedObject private var bundleUpdate = BundleUpdateStatus.shared
     @State private var confirmSignOut = false
     @State private var confirmClear = false
     @State private var cacheSize: Int64 = 0
@@ -16,6 +25,19 @@ struct SettingsView: View {
         ("pt", "Portuguese"), ("nl", "Dutch"), ("pl", "Polish"), ("tr", "Turkish"), ("ru", "Russian"),
         ("hi", "Hindi"), ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese")
     ]
+
+    private var qualityOptions: [ChoiceOption<Int>] {
+        qualities.map { ChoiceOption(value: $0, label: label(forHeight: $0)) }
+    }
+    private var streamClientOptions: [ChoiceOption<String>] {
+        AppSettings.streamClients.map { ChoiceOption(value: $0.id, label: $0.label) }
+    }
+    private var poTokenOptions: [ChoiceOption<String>] {
+        [ChoiceOption(value: "auto", label: "Automatic"), ChoiceOption(value: "off", label: "Off")]
+    }
+    private var captionLanguageOptions: [ChoiceOption<String>] {
+        captionLanguages.map { ChoiceOption(value: $0.0, label: $0.1) }
+    }
 
     var body: some View {
         Form {
@@ -35,14 +57,12 @@ struct SettingsView: View {
                 }
                 Button("Re-enter cookies") { model.beginCookieReentry() }
                 if model.isSignedIn {
-                    Button("Sign out of this Apple TV", role: .destructive) { confirmSignOut = true }
+                    Button { confirmSignOut = true } label: { DestructiveRowLabel("Sign out of this Apple TV") }
                 }
             }
 
             Section {
-                Picker("Maximum quality", selection: $model.settings.maxHeight) {
-                    ForEach(qualities, id: \.self) { Text(label(forHeight: $0)).tag($0) }
-                }
+                ChoiceRow("Maximum quality", selection: $model.settings.maxHeight, options: qualityOptions)
                 LabeledContent("Codec order", value: "AV1 → VP9 → H.264")
                 LabeledContent("Audio", value: "Opus (highest bitrate), else AAC")
                 Toggle("Hardware decoding for H.264", isOn: $model.settings.hardwareDecodeH264)
@@ -53,27 +73,18 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Stream client", selection: $model.settings.streamClient) {
-                    ForEach(AppSettings.streamClients, id: \.id) { client in
-                        Text(client.label).tag(client.id)
-                    }
-                }
-                Picker("PO tokens (web clients)", selection: $model.settings.poTokenMode) {
-                    Text("Automatic").tag("auto")
-                    Text("Off").tag("off")
-                }
+                ChoiceRow("Stream client", selection: $model.settings.streamClient, options: streamClientOptions)
+                ChoiceRow("PO tokens (web clients)", selection: $model.settings.poTokenMode, options: poTokenOptions)
             } header: {
                 Text("YouTube stream client")
             } footer: {
-                Text("Automatic tries TV, TV as a Samsung set, Web embedded and Mobile web in turn, and keeps using the one that works. Only Mobile web needs a PO token.")
+                Text("Automatic tries TV, TV as a Samsung set, Web embedded and Mobile web in turn, and keeps using the one that works. Only Mobile web needs a PO token; with PO tokens off, Automatic skips it.")
             }
 
             Section("Playback") {
                 Toggle("Autoplay next video", isOn: $model.settings.autoplay)
                 Toggle("Captions on by default", isOn: $model.settings.captionsEnabled)
-                Picker("Caption language", selection: $model.settings.captionsLanguage) {
-                    ForEach(captionLanguages, id: \.0) { code, name in Text(name).tag(code) }
-                }
+                ChoiceRow("Caption language", selection: $model.settings.captionsLanguage, options: captionLanguageOptions)
                 Toggle("Show stats while playing", isOn: $model.settings.showStatsOverlay)
             }
 
@@ -82,22 +93,17 @@ struct SettingsView: View {
                 LabeledContent("Source", value: model.bundles.hasDownloadedBundle ? "Downloaded" : "Built into the app")
                 TextField("Bundle URL", text: $model.settings.bundleURL)
                     .textContentType(.URL)
-                Button(bundleBusy ? "Downloading…" : "Download newer bundle") {
+                Button(bundleUpdate.busy ? "Downloading…" : "Download newer bundle") {
                     Task { await downloadBundle() }
                 }
-                .disabled(bundleBusy)
+                .disabled(bundleUpdate.busy)
                 if model.bundles.hasDownloadedBundle {
                     Button("Use the built-in bundle") {
-                        Task {
-                            bundleBusy = true
-                            await model.useBuiltInBundle()
-                            bundleBusy = false
-                            bundleStatus = "Switched back to the built-in bundle."
-                        }
+                        Task { await useBuiltInBundle() }
                     }
                 }
-                if let bundleStatus {
-                    Text(bundleStatus).font(.caption).foregroundStyle(.secondary)
+                if let message = bundleUpdate.message {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
                 }
             } header: {
                 Text("YouTube bundle")
@@ -107,7 +113,7 @@ struct SettingsView: View {
 
             Section("Storage") {
                 LabeledContent("Player & session cache", value: Formatters.bytes(cacheSize))
-                Button("Clear cache", role: .destructive) { confirmClear = true }
+                Button { confirmClear = true } label: { DestructiveRowLabel("Clear cache") }
             }
 
             Section("Diagnostics") {
@@ -149,15 +155,37 @@ struct SettingsView: View {
         }
     }
 
+    // Both keep their own references: the view is torn down while they run.
     private func downloadBundle() async {
-        bundleBusy = true
-        bundleStatus = "Downloading…"
-        defer { bundleBusy = false }
+        let model = self.model
+        let status = bundleUpdate
+        status.busy = true
+        status.message = "Downloading…"
+        defer { status.busy = false }
         do {
             let info = try await model.updateBundle()
-            bundleStatus = "Installed \(info.bundleVersion) (YouTube.js \(info.youtubeiVersion))."
+            if model.bundles.hasDownloadedBundle {
+                status.message = "Installed \(info.bundleVersion) (YouTube.js \(info.youtubeiVersion))."
+            } else {
+                // The app falls back to the built-in bundle when the downloaded one doesn't start.
+                status.message = "Update failed: the downloaded bundle \(info.bundleVersion) didn't start, so the app is still using the built-in one."
+            }
         } catch {
-            bundleStatus = "Update failed: \(BridgeError.wrap(error).userMessage)"
+            status.message = "Update failed: \(BridgeError.wrap(error).userMessage)"
+        }
+    }
+
+    private func useBuiltInBundle() async {
+        let model = self.model
+        let status = bundleUpdate
+        status.busy = true
+        status.message = nil
+        defer { status.busy = false }
+        await model.useBuiltInBundle()
+        if case .failed(let error) = model.phase {
+            status.message = "The built-in bundle didn't start: \(error.userMessage)"
+        } else {
+            status.message = "Switched back to the built-in bundle."
         }
     }
 }

@@ -26,26 +26,33 @@ struct TubeApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        switch model.phase {
-        case .launching:
-            LaunchView(message: "Starting…")
-        case .connecting(let message):
-            LaunchView(message: message)
-        case .needsSetup:
-            SetupView()
-        case .failed(let error):
-            VStack(spacing: 40) {
-                ErrorStateView(error: error) {
-                    Task { await model.start() }
+        Group {
+            switch model.phase {
+            case .launching:
+                LaunchView(message: "Starting…")
+            case .connecting(let message):
+                LaunchView(message: message)
+            case .needsSetup:
+                SetupView()
+            case .failed(let error):
+                VStack(spacing: 40) {
+                    ErrorStateView(error: error) {
+                        Task { await model.start() }
+                    }
+                    if model.isSignedIn {
+                        Button("Re-enter cookies") { model.beginCookieReentry() }
+                    }
                 }
-                if model.isSignedIn {
-                    Button("Re-enter cookies") { model.beginCookieReentry() }
-                }
+            case .ready:
+                MainTabView()
             }
-        case .ready:
-            MainTabView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // tvOS may terminate the app once it's in the background: save rotated cookies now.
+            if phase != .active { model.cookies.flush() }
         }
     }
 }
@@ -71,25 +78,28 @@ struct MainTabView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var router: Router
 
+    // Six tabs with icon and text don't fit the tvOS tab bar at 1920 points: the last one was cut
+    // off, and focusing it cut off the first. Subscriptions is shortened, and Search and Settings
+    // show only their icon, as in Apple's own TV apps.
     var body: some View {
         TabView(selection: $router.selectedTab) {
             NavigationStack(path: router.path(for: .home)) { HomeView().withRoutes() }
                 .tabItem { Label("Home", systemImage: "house") }
                 .tag(AppTab.home)
             NavigationStack(path: router.path(for: .subscriptions)) { SubscriptionsView().withRoutes() }
-                .tabItem { Label("Subscriptions", systemImage: "rectangle.stack.badge.play") }
+                .tabItem { Label("Subs", systemImage: "rectangle.stack.badge.play") }
                 .tag(AppTab.subscriptions)
             ShortsTabView()
                 .tabItem { Label("Shorts", systemImage: "bolt.horizontal.fill") }
                 .tag(AppTab.shorts)
             NavigationStack(path: router.path(for: .search)) { SearchView().withRoutes() }
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tabItem { Image(systemName: "magnifyingglass") }
                 .tag(AppTab.search)
             NavigationStack(path: router.path(for: .library)) { LibraryView().withRoutes() }
                 .tabItem { Label("Library", systemImage: "books.vertical") }
                 .tag(AppTab.library)
             NavigationStack(path: router.path(for: .settings)) { SettingsView() }
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tabItem { Image(systemName: "gearshape") }
                 .tag(AppTab.settings)
         }
         .fullScreenCover(item: $router.watch) { request in

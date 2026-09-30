@@ -17,6 +17,12 @@ export const state = {
   // are not specific to one video (rejected request, SABR-only, no longer supported).
   goodClient: null,
   badClients: new Map(),
+  // Per video: clients whose stream URLs googlevideo refused (403) although the player request worked.
+  refusedClients: new Map(),
+  // Session without the account cookies, for stream URLs only (see watch.js signedOutStreams).
+  anon: null,
+  anonCreating: null,
+  initSeq: 0,
   feeds: new Map(),
   infos: new Map(),
   subscriptions: new Map(),
@@ -104,13 +110,13 @@ function cache() {
   return sharedCache;
 }
 
-export async function createInnertube(opts, retrievePlayer = true) {
+export async function createInnertube(opts, retrievePlayer = true, sessionCache = true) {
   loadPlatform();
   return Innertube.create({
     cookie: opts.cookie || undefined,
     retrieve_player: retrievePlayer,
     cache: cache(),
-    enable_session_cache: true,
+    enable_session_cache: sessionCache,
     generate_session_locally: false,
     visitor_data: opts.visitorData || undefined,
     user_agent: opts.userAgent || DEFAULT_USER_AGENT,
@@ -120,6 +126,25 @@ export async function createInnertube(opts, retrievePlayer = true) {
     po_token: opts.poToken || undefined,
     fail_fast: false
   });
+}
+
+// A session without the account cookies. YouTube refuses the signed-in TV client's streams for
+// some videos (HTTP 403) while clients that don't take cookies still get working ones; those are
+// asked through this session, for the streams only. Created on first use; no session cache, so
+// it never overwrites the signed-in session's cached data.
+export async function anonSession() {
+  if (state.anon) return state.anon;
+  if (!state.anonCreating) {
+    state.anonCreating = createInnertube({ userAgent: state.options.userAgent, lang: state.options.lang, location: state.options.location }, true, false)
+      .then((yt) => {
+        state.anon = yt;
+        return yt;
+      })
+      .finally(() => {
+        state.anonCreating = null;
+      });
+  }
+  return state.anonCreating;
 }
 
 export async function requireSession() {

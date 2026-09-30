@@ -11,6 +11,9 @@ final class CommentsModel: ObservableObject {
     @Published private(set) var status: String?
     private(set) var videoId: String?
     private let model: AppModel
+    /// Bumped whenever the list starts over; a request of an older one changes nothing.
+    private var generation = 0
+    private var loadTask: Task<Void, Never>?
 
     init(model: AppModel) {
         self.model = model
@@ -19,46 +22,60 @@ final class CommentsModel: ObservableObject {
     var canPost: Bool { model.isSignedIn }
 
     func reset(videoId: String?) {
+        cancelLoading()
         self.videoId = videoId
         page = nil
         error = nil
         status = nil
     }
 
+    /// Drops the running request, so the next video's (or a reload's) first page isn't blocked
+    /// by `isLoading` of a request whose result would be thrown away.
+    private func cancelLoading() {
+        generation += 1
+        loadTask?.cancel()
+        loadTask = nil
+        isLoading = false
+    }
+
     func load() {
         guard let id = videoId, page == nil, !isLoading else { return }
         isLoading = true
-        Task {
-            defer { isLoading = false }
+        let current = generation
+        loadTask = Task {
+            defer { if generation == current { isLoading = false } }
             do {
                 let result = try await model.api { try await $0.comments(videoId: id) }
-                guard videoId == id else { return }
+                guard generation == current else { return }
                 page = result
                 error = nil
             } catch {
-                guard videoId == id else { return }
+                guard generation == current else { return }
                 self.error = BridgeError.wrap(error)
             }
         }
     }
 
     func reload() {
+        cancelLoading()
         page = nil
         error = nil
         load()
     }
 
     func loadMore() {
-        guard let key = page?.continuation, !isLoading, let id = videoId else { return }
+        guard let key = page?.continuation, !isLoading else { return }
         isLoading = true
-        Task {
-            defer { isLoading = false }
+        let current = generation
+        loadTask = Task {
+            defer { if generation == current { isLoading = false } }
             do {
                 let next = try await model.api { try await $0.moreComments(key) }
-                guard videoId == id else { return }
+                guard generation == current else { return }
                 page?.items.append(contentsOf: next.items)
                 page?.continuation = next.continuation
             } catch {
+                guard generation == current else { return }
                 status = "Couldn't load more comments: \(BridgeError.wrap(error).userMessage)"
             }
         }
