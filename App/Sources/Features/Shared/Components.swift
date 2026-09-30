@@ -84,22 +84,25 @@ struct ErrorStateView: View {
     }
 
     var body: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: Theme.Spacing.titleToContent) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 80))
+                .font(.system(size: Theme.heroSymbolSize))
                 .foregroundStyle(.yellow)
-            Text(title).font(.title2.bold())
-            Text(message)
-                .font(.body)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 1100)
+            VStack(spacing: Theme.Spacing.textLines * 3) {
+                Text(title).font(.title3.bold())
+                Text(message)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: Theme.messageWidth)
             if let retry {
                 Button {
                     if !isRetrying { retry() }
                 } label: {
                     if isRetrying {
-                        HStack(spacing: 16) {
+                        HStack(spacing: Theme.Spacing.row) {
                             ProgressView()
                             Text("Retrying…")
                         }
@@ -107,10 +110,14 @@ struct ErrorStateView: View {
                         Label("Retry", systemImage: "arrow.clockwise")
                     }
                 }
+                .padding(.top, Theme.Spacing.row)
             }
         }
-        .padding(60)
+        .padding(Theme.Spacing.section)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The whole width is a focus target, so Down from a control at the side of the screen
+        // (a list's leading picker) still reaches the centred Retry.
+        .focusSection()
     }
 }
 
@@ -118,9 +125,9 @@ struct LoadingView: View {
     var message: String = "Loading…"
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: Theme.Spacing.titleToContent) {
             ProgressView()
-            Text(message).foregroundStyle(.secondary)
+            Text(message).font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -131,12 +138,19 @@ struct EmptyStateView: View {
     let text: String
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: systemImage).font(.system(size: 70)).foregroundStyle(.secondary)
-            Text(text).font(.headline).foregroundStyle(.secondary)
+        VStack(spacing: Theme.Spacing.titleToContent) {
+            Image(systemName: systemImage)
+                .font(.system(size: Theme.heroSymbolSize))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: Theme.messageWidth)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(80)
+        .padding(Theme.Spacing.section)
     }
 }
 
