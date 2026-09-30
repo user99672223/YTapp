@@ -713,6 +713,179 @@ function reelSequence() {
   };
 }
 
+// ---- comments: view models whose content arrives as frameworkUpdates entities, like YouTube's.
+
+const watchNextContinuation = (token) => ({ continuationCommand: { token, request: 'CONTINUATION_REQUEST_TYPE_WATCH_NEXT' } });
+
+function commentEntities(c) {
+  const avatar = `https://yt3.ggpht.com/avatar-${c.id.toLowerCase()}=s88-c-k-c0x00ffffff-no-rj`;
+  return [
+    {
+      entityKey: `ck-${c.id}`,
+      type: 'ENTITY_MUTATION_TYPE_REPLACE',
+      payload: {
+        commentEntityPayload: {
+          key: `ck-${c.id}`,
+          properties: { commentId: c.id, content: { content: c.text }, publishedTime: c.published, replyLevel: c.level || 0 },
+          author: { channelId: c.channelId || CH3, displayName: c.author, avatarThumbnailUrl: avatar, isCreator: !!c.creator, isVerified: false },
+          // YouTube leaves the counts empty when there are none.
+          toolbar: { likeCountNotliked: c.likes || '', likeCountLiked: c.likes || '1', replyCount: c.replies || '' },
+          avatar: { image: { sources: [{ url: avatar, width: 88, height: 88 }] } }
+        }
+      }
+    },
+    {
+      entityKey: `ts-${c.id}`,
+      type: 'ENTITY_MUTATION_TYPE_REPLACE',
+      payload: {
+        engagementToolbarStateEntityPayload: {
+          key: `ts-${c.id}`,
+          heartState: c.hearted ? 'TOOLBAR_HEART_STATE_HEARTED' : 'TOOLBAR_HEART_STATE_UNHEARTED',
+          likeState: 'TOOLBAR_LIKE_STATE_INDIFFERENT'
+        }
+      }
+    }
+  ];
+}
+
+// `replies`: a continuation token (the replies are loaded when the thread is opened) or an array of
+// comments sent along with the thread ("prepopulated").
+function commentThread(c, replies) {
+  const thread = {
+    commentViewModel: {
+      commentViewModel: {
+        commentId: c.id,
+        commentKey: `ck-${c.id}`,
+        toolbarStateKey: `ts-${c.id}`,
+        toolbarSurfaceKey: `tf-${c.id}`,
+        commentSurfaceKey: `cs-${c.id}`,
+        ...(c.pinned ? { pinnedText: 'Pinned by Channel One' } : {})
+      }
+    },
+    renderingPriority: c.level ? 'RENDERING_PRIORITY_UNKNOWN' : 'RENDERING_PRIORITY_LINKED_COMMENT',
+    isModeratedElqComment: false
+  };
+  if (replies) {
+    thread.replies = {
+      commentRepliesRenderer: {
+        subThreads: typeof replies === 'string'
+          ? [{ continuationItemRenderer: { trigger: 'CONTINUATION_TRIGGER_ON_ITEM_SHOWN', continuationEndpoint: watchNextContinuation(replies) } }]
+          : replies.map((r) => commentThread(r)),
+        viewReplies: { buttonRenderer: { text: runs(`${c.replies} replies`) } },
+        hideReplies: { buttonRenderer: { text: runs('Hide replies') } },
+        targetId: `comment-replies-item-${c.id}`
+      }
+    };
+  }
+  return { commentThreadRenderer: thread };
+}
+
+const reply = (parent, n, extra = {}) => ({
+  id: `${parent}.REPLY${n}`, author: `@replier${n}`, text: `Reply number ${n}`, published: n === 1 ? '1 hour ago' : `${n} hours ago`, level: 1, ...extra
+});
+
+const COMMENTS = {
+  pinned: {
+    id: 'UgxCOMMENT0001', author: '@channelone', channelId: CH1, creator: true, pinned: true, hearted: true,
+    text: 'Thanks for watching!\nChapters are in the description.', published: '1 day ago', likes: '1.2K', replies: '2'
+  },
+  plain: { id: 'UgxCOMMENT0002', author: '@viewer', text: 'First!', published: '1 day ago (edited)' },
+  busy: { id: 'UgxCOMMENT0003', author: '@talker', text: 'A question for everyone', published: '20 hours ago', likes: '31', replies: '3' },
+  later: { id: 'UgxCOMMENT0004', author: '@latecomer', text: 'Still here in 2026', published: '2 hours ago', likes: '2' },
+  answered: { id: 'UgxCOMMENT0005', author: '@asker', text: 'Which camera is this?', published: '1 hour ago', replies: '1' }
+};
+
+const REPLIES = {
+  [COMMENTS.pinned.id]: [reply(COMMENTS.pinned.id, 1, { likes: '12' }), reply(COMMENTS.pinned.id, 2, { author: '@channelone', channelId: CH1, creator: true })],
+  [COMMENTS.busy.id]: [reply(COMMENTS.busy.id, 1), reply(COMMENTS.busy.id, 2)],
+  // The next batch repeats the last reply of the first one, as YouTube does at batch edges.
+  busyMore: [reply(COMMENTS.busy.id, 2), reply(COMMENTS.busy.id, 3)],
+  [COMMENTS.answered.id]: [reply(COMMENTS.answered.id, 1, { author: '@channelone', channelId: CH1, creator: true })]
+};
+
+const commentsHeader = () => ({
+  commentsHeaderRenderer: {
+    countText: { runs: [{ text: '1,234' }, { text: ' Comments' }] },
+    commentsCount: simple('1.2K'),
+    titleText: runs('Comments')
+  }
+});
+
+function commentsFirstPage() {
+  const threads = [
+    commentThread(COMMENTS.pinned, `REPLIES_${COMMENTS.pinned.id}`),
+    commentThread(COMMENTS.plain),
+    commentThread(COMMENTS.busy, `REPLIES_${COMMENTS.busy.id}`)
+  ];
+  return {
+    responseContext: {},
+    onResponseReceivedEndpoints: [
+      { reloadContinuationItemsCommand: { targetId: 'comments-section', slot: 'RELOAD_CONTINUATION_SLOT_HEADER', continuationItems: [commentsHeader()] } },
+      {
+        reloadContinuationItemsCommand: {
+          targetId: 'comments-section',
+          slot: 'RELOAD_CONTINUATION_SLOT_BODY',
+          continuationItems: [...threads, { continuationItemRenderer: { trigger: 'CONTINUATION_TRIGGER_ON_ITEM_SHOWN', continuationEndpoint: watchNextContinuation('COMMENTSCONT2') } }]
+        }
+      }
+    ],
+    frameworkUpdates: { entityBatchUpdate: { mutations: [COMMENTS.pinned, COMMENTS.plain, COMMENTS.busy].flatMap(commentEntities) } }
+  };
+}
+
+function commentsSecondPage() {
+  return {
+    responseContext: {},
+    onResponseReceivedEndpoints: [{
+      appendContinuationItemsAction: {
+        targetId: 'comments-section',
+        // The pinned comment again (YouTube repeats it at page edges), and a thread whose reply
+        // came along.
+        continuationItems: [
+          commentThread(COMMENTS.pinned, `REPLIES_${COMMENTS.pinned.id}`),
+          commentThread(COMMENTS.later),
+          commentThread(COMMENTS.answered, REPLIES[COMMENTS.answered.id])
+        ]
+      }
+    }],
+    frameworkUpdates: {
+      entityBatchUpdate: { mutations: [COMMENTS.pinned, COMMENTS.later, COMMENTS.answered, ...REPLIES[COMMENTS.answered.id]].flatMap(commentEntities) }
+    }
+  };
+}
+
+function repliesResponse(parentId, replies, moreToken) {
+  const items = replies.map((r) => commentThread(r));
+  if (moreToken) {
+    items.push({
+      continuationItemRenderer: {
+        trigger: 'CONTINUATION_TRIGGER_ON_ITEM_SHOWN',
+        button: { buttonRenderer: { text: runs('Show more replies'), command: watchNextContinuation(moreToken) } }
+      }
+    });
+  }
+  return {
+    responseContext: {},
+    onResponseReceivedEndpoints: [{ appendContinuationItemsAction: { targetId: `comment-replies-item-${parentId}`, continuationItems: items } }],
+    frameworkUpdates: { entityBatchUpdate: { mutations: replies.flatMap(commentEntities) } }
+  };
+}
+
+// `/next` with a continuation token: the comment section (its first token is the protobuf YouTube.js
+// builds), its next page, and reply batches. options.failTokens answers those tokens with 500.
+function commentsRoute(token, options) {
+  if ((options.failTokens || []).includes(token)) return { status: 500, body: { error: { code: 500, message: 'Internal error' } } };
+  if (token === 'COMMENTSCONT2') return { status: 200, body: commentsSecondPage() };
+  if (token === `REPLIES_${COMMENTS.pinned.id}`) return { status: 200, body: repliesResponse(COMMENTS.pinned.id, REPLIES[COMMENTS.pinned.id]) };
+  if (token === `REPLIES_${COMMENTS.busy.id}`) return { status: 200, body: repliesResponse(COMMENTS.busy.id, REPLIES[COMMENTS.busy.id], 'REPLIESMORE_BUSY') };
+  if (token === 'REPLIESMORE_BUSY') return { status: 200, body: repliesResponse(COMMENTS.busy.id, REPLIES.busyMore) };
+  // options.commentsOff: a video with comments turned off answers without a comment section.
+  if (options.commentsOff) return { status: 200, body: { responseContext: {} } };
+  return { status: 200, body: commentsFirstPage() };
+}
+
+export const COMMENT_IDS = Object.fromEntries(Object.entries(COMMENTS).map(([name, c]) => [name, c.id]));
+
 export function createFakeYouTube(options = {}) {
   const hits = [];
   const router = (req) => {
@@ -797,6 +970,7 @@ export function createFakeYouTube(options = {}) {
       if ((options.refuseStreams || []).includes(url.searchParams.get('fakeclient'))) return { status: 403, body: '' };
       return { status: 206, body: 'x', headers: { 'content-type': 'video/webm' } };
     }
+    if (path === '/youtubei/v1/next' && body?.continuation) return commentsRoute(decodeURIComponent(body.continuation), options);
     if (path === '/youtubei/v1/next') return { status: 200, body: nextResponse(body.videoId) };
     if (path === '/youtubei/v1/search') return { status: 200, body: searchResponse() };
     if (path === '/complete/search') return { status: 200, body: 'window.google.ac.h(["q",[["query one",0],["query two",0,[512]]],{"k":1}])', headers: { 'content-type': 'text/javascript' } };

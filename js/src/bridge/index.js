@@ -9,7 +9,9 @@ import {
 } from './feeds.js';
 import { videoInfo, resolveFormats, markWatched, watchtime } from './watch.js';
 import { shortsFeed, shortsMore, shortInfo } from './shorts.js';
-import { rate, subscribe, watchLater, watchLaterStatus, comments, commentsMore, postComment } from './actions.js';
+import {
+  rate, subscribe, watchLater, watchLaterStatus, comments, commentsMore, commentReplies, commentRepliesMore, postComment
+} from './actions.js';
 import { classify } from './errors.js';
 import { clean } from './util.js';
 import { nativeFn } from '../polyfills/native.js';
@@ -52,6 +54,8 @@ const methods = {
   watchLaterStatus,
   comments,
   commentsMore,
+  commentReplies,
+  commentRepliesMore,
   postComment,
   bundleInfo: async () => bundleInfo,
   ping: async () => ({ pong: true })

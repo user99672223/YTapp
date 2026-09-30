@@ -1,0 +1,43 @@
+{
+  "key": "comments:1",
+  "countText": "1,234",
+  "items": [
+    {
+      "id": "UgxCOMMENT0001",
+      "author": "@channelone",
+      "authorAvatar": "https://yt3.ggpht.com/avatar-ugxcomment0001=s176-c-k-c0x00ffffff-no-rj",
+      "text": "Thanks for watching!\nChapters are in the description.",
+      "publishedText": "1 day ago",
+      "likeCountText": "1.2K",
+      "replyCountText": "2",
+      "isPinned": true,
+      "isCreator": true,
+      "isHearted": true,
+      "hasReplies": true
+    },
+    {
+      "id": "UgxCOMMENT0004",
+      "author": "@latecomer",
+      "authorAvatar": "https://yt3.ggpht.com/avatar-ugxcomment0004=s176-c-k-c0x00ffffff-no-rj",
+      "text": "Still here in 2026",
+      "publishedText": "2 hours ago",
+      "likeCountText": "2",
+      "isPinned": false,
+      "isCreator": false,
+      "isHearted": false,
+      "hasReplies": false
+    },
+    {
+      "id": "UgxCOMMENT0005",
+      "author": "@asker",
+      "authorAvatar": "https://yt3.ggpht.com/avatar-ugxcomment0005=s176-c-k-c0x00ffffff-no-rj",
+      "text": "Which camera is this?",
+      "publishedText": "1 hour ago",
+      "replyCountText": "1",
+      "isPinned": false,
+      "isCreator": false,
+      "isHearted": false,
+      "hasReplies": true
+    }
+  ]
+}

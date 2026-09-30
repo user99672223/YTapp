@@ -168,6 +168,15 @@ public final class YouTubeService: @unchecked Sendable {
         try await call("commentsMore", ["key": key])
     }
 
+    /// The first replies to a top-level comment; `key` is the section's `CommentsPage.key`.
+    public func commentReplies(key: String, commentId: String) async throws -> CommentRepliesPage {
+        try await call("commentReplies", ["key": key, "commentId": commentId])
+    }
+
+    public func moreCommentReplies(_ key: String) async throws -> CommentRepliesPage {
+        try await call("commentRepliesMore", ["key": key])
+    }
+
     public func postComment(videoId: String, text: String) async throws {
         let _: PostCommentResult = try await call("postComment", ["videoId": videoId, "text": text])
     }

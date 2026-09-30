@@ -489,19 +489,53 @@ export function page(sections, continuationKey) {
 
 // ------------------------------------------------------------------ comments
 
+// YouTube.js fills in "0" when a comment's toolbar has no like or reply count; the app shows
+// nothing then.
+function commentCount(value) {
+  const s = text(value);
+  return s && s !== '0' ? s : undefined;
+}
+
+// Comment avatars come at 88 px (`=s88-…`), which is blurry on a 4K TV: ask for 176.
+function commentAvatar(author) {
+  const url = bestThumb(author?.thumbnails, 176) || fixUrl(author?.avatar_thumbnail_url);
+  if (!url || !/\.(ggpht|googleusercontent)\.com\//.test(url)) return url;
+  return url.replace(/=s\d+-/, '=s176-');
+}
+
+// A top-level comment (a CommentThread, whose `comment` is the CommentView) or a reply (a
+// CommentThread or a bare CommentView, depending on YouTube's answer).
 export function toComment(thread) {
   const c = thread?.comment || thread;
   if (!c || !c.comment_id) return null;
   return {
     id: c.comment_id,
     author: text(c.author?.name) || '',
-    authorAvatar: fixUrl(c.author?.thumbnails?.[0]?.url) || fixUrl(c.author?.avatar_thumbnail_url),
+    authorAvatar: commentAvatar(c.author),
     text: text(c.content) || '',
     publishedText: text(c.published_time),
-    likeCountText: text(c.like_count),
-    replyCountText: text(c.reply_count),
+    likeCountText: commentCount(c.like_count),
+    replyCountText: commentCount(c.reply_count),
     isPinned: !!c.is_pinned,
     isCreator: !!c.author_is_channel_owner,
-    isHearted: !!c.is_hearted
+    isHearted: !!c.is_hearted,
+    // Only a thread that came with replies data can load them; the toolbar count alone can't.
+    hasReplies: !!thread?.comment && !!thread.has_replies
   };
+}
+
+// One batch of replies to `commentId` (bridge methods `commentReplies` / `commentRepliesMore`).
+// `seen` is kept by the caller across batches: YouTube repeats replies at batch edges, and the app
+// keys its rows by comment id.
+export function toCommentReplies(commentId, nodes, continuation, seen = new Set()) {
+  const items = [];
+  for (const node of nodes || []) {
+    const reply = toComment(node);
+    if (!reply || reply.id === commentId || seen.has(reply.id)) continue;
+    seen.add(reply.id);
+    // YouTube lists every answer in the thread flat, so a reply never opens replies of its own.
+    reply.hasReplies = false;
+    items.push(reply);
+  }
+  return { commentId, items, continuation: continuation || undefined };
 }

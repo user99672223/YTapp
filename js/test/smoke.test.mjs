@@ -8,7 +8,8 @@ const REQUIRED_METHODS = [
   'init', 'validateCookie', 'accountInfo', 'home', 'subscriptions', 'subscribedChannels', 'search',
   'searchSuggestions', 'channel', 'channelTab', 'playlist', 'history', 'playlists', 'more', 'videoInfo',
   'resolveFormats', 'markWatched', 'watchtime', 'shortsFeed', 'shortsMore', 'shortInfo', 'rate', 'subscribe',
-  'watchLater', 'watchLaterStatus', 'comments', 'commentsMore', 'postComment', 'bundleInfo', 'sessionState'
+  'watchLater', 'watchLaterStatus', 'comments', 'commentsMore', 'commentReplies', 'commentRepliesMore', 'postComment',
+  'bundleInfo', 'sessionState'
 ];
 
 test('bundle loads without any host natives', () => {

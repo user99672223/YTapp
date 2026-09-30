@@ -1,6 +1,6 @@
 // Account actions: rating, subscriptions, Watch Later, comments.
 import { state, requireSession, requireLogin, newKey, putFeed, getFeed } from './state.js';
-import { toComment } from './normalize.js';
+import { toComment, toCommentReplies } from './normalize.js';
 import { text } from './util.js';
 import { fail } from './errors.js';
 
@@ -90,30 +90,112 @@ export async function watchLaterStatus({ id }) {
   return { inWatchLater: wl ? wl.contains : undefined };
 }
 
-function commentsPage(key, comments) {
-  const items = (comments.contents || []).map(toComment).filter(Boolean);
+// Threads loaded per comment section, for their replies. A section is one feed entry (so it counts
+// once against the feed cache however many threads are opened); its reply lists live inside it.
+const MAX_THREADS = 600;
+const MAX_REPLY_LISTS = 30;
+
+// "1,234" out of the header's "1,234 Comments" (its first run), else the short "1.2K" count.
+function commentCountText(header) {
+  const first = text(header?.count?.runs?.[0]?.text);
+  if (first && /\d/.test(first)) return first;
+  return text(header?.comments_count) || text(header?.count);
+}
+
+function commentsPage(key, entry, comments) {
+  const items = [];
+  for (const thread of comments.contents || []) {
+    const item = toComment(thread);
+    if (!item) continue;
+    entry.threads.delete(item.id);
+    entry.threads.set(item.id, thread);
+    items.push(item);
+  }
+  while (entry.threads.size > MAX_THREADS) entry.threads.delete(entry.threads.keys().next().value);
   return {
-    countText: text(comments.header?.count) || text(comments.header?.comments_count),
+    key,
+    countText: commentCountText(comments.header),
     items,
     continuation: comments.has_continuation ? key : undefined
   };
 }
 
+// Using a section moves it to the recent end of the feed cache, so the one being read outlives
+// feeds loaded meanwhile.
+function commentsEntry(key) {
+  const entry = getFeed(key);
+  if (entry.kind !== 'comments') fail('expired', 'These comments expired. Open them again.', key);
+  putFeed(key, entry);
+  return entry;
+}
+
 export async function comments({ videoId, sort }) {
   const yt = await requireSession();
   if (!videoId) fail('invalid', 'Missing video id.');
-  const result = await yt.getComments(videoId, sort === 'newest' ? 'NEWEST_FIRST' : 'TOP_COMMENTS');
+  let result;
+  try {
+    result = await yt.getComments(videoId, sort === 'newest' ? 'NEWEST_FIRST' : 'TOP_COMMENTS');
+  } catch (e) {
+    // YouTube answers without a comment section when comments are turned off.
+    if (/did not have any content/i.test(String(e?.message || ''))) {
+      fail('notFound', 'There are no comments to show. They may be turned off for this video.', e.message);
+    }
+    throw e;
+  }
   const key = newKey('comments');
-  putFeed(key, { kind: 'comments', feed: result, videoId });
-  return commentsPage(key, result);
+  const entry = { kind: 'comments', feed: result, videoId, threads: new Map(), replies: new Map() };
+  putFeed(key, entry);
+  return commentsPage(key, entry, result);
 }
 
 export async function commentsMore({ key }) {
-  const entry = getFeed(key);
-  if (!entry.feed.has_continuation) return { items: [], continuation: undefined };
+  const entry = commentsEntry(key);
+  if (!entry.feed.has_continuation) return { key, items: [], continuation: undefined };
   const next = await entry.feed.getContinuation();
   entry.feed = next;
-  return commentsPage(key, next);
+  return commentsPage(key, entry, next);
+}
+
+// Replies continue from `<section key>#<comment id>`: the section entry holds where each opened
+// thread stopped (the thread itself, then YouTube.js' CommentsContinuation for later batches).
+const repliesKey = (key, commentId) => `${key}#${commentId}`;
+
+function rememberReplies(entry, commentId, source, seen) {
+  entry.replies.delete(commentId);
+  entry.replies.set(commentId, { source, seen });
+  while (entry.replies.size > MAX_REPLY_LISTS) entry.replies.delete(entry.replies.keys().next().value);
+}
+
+// The first batch of replies to a top-level comment of section `key`. Opening a thread again
+// starts it over (YouTube.js reloads the first batch).
+export async function commentReplies({ key, commentId }) {
+  if (!commentId) fail('invalid', 'Missing comment id.');
+  const entry = commentsEntry(key);
+  const thread = entry.threads.get(commentId);
+  if (!thread) fail('expired', 'This comment is no longer loaded. Open the comments again.', commentId);
+  entry.replies.delete(commentId);
+  if (!thread.has_replies) return toCommentReplies(commentId, [], undefined);
+  await thread.getReplies();
+  // No replies list in the answer: nothing to show and nothing to continue.
+  const replies = thread.replies || [];
+  const more = !!thread.replies && thread.has_continuation;
+  const seen = new Set();
+  if (more) rememberReplies(entry, commentId, thread, seen);
+  return toCommentReplies(commentId, replies, more ? repliesKey(key, commentId) : undefined, seen);
+}
+
+export async function commentRepliesMore({ key }) {
+  const at = String(key || '').lastIndexOf('#');
+  if (at <= 0) fail('invalid', 'Bad replies key.', key);
+  const commentId = key.slice(at + 1);
+  const entry = commentsEntry(key.slice(0, at));
+  const list = entry.replies.get(commentId);
+  if (!list) fail('expired', 'These replies expired. Open the comment again.', key);
+  const next = await list.source.getContinuation();
+  const more = next.has_continuation;
+  if (more) rememberReplies(entry, commentId, next, list.seen);
+  else entry.replies.delete(commentId);
+  return toCommentReplies(commentId, next.replies, more ? key : undefined, list.seen);
 }
 
 export async function postComment({ videoId, text: body }) {

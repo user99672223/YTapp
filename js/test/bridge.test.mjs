@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { loadBundle } from './harness.mjs';
-import { createFakeYouTube, COOKIE, CH1, CH2, CH3, PLAYER_ID } from './fakeyt.mjs';
+import { createFakeYouTube, COOKIE, CH1, CH2, CH3, PLAYER_ID, COMMENT_IDS } from './fakeyt.mjs';
 
 const fixturesDir = new URL('../../Packages/Core/Tests/CoreTests/Fixtures/', import.meta.url);
 mkdirSync(fixturesDir, { recursive: true });
@@ -303,6 +303,101 @@ test('actions: rate, subscribe, watch later', async () => {
   const edit = yt.hits.find((h) => h.path === '/youtubei/v1/browse/edit_playlist');
   assert.equal(edit.body.playlistId, 'WL');
   assert.equal(edit.body.actions[0].addedVideoId, 'VIDEOID0001');
+});
+
+test('comments: pages with a count, markers and counts, and the section key for replies', async () => {
+  const { call, yt } = await connected();
+  const page = await call('comments', { videoId: 'VIDEOID0001' });
+  writeFixture('comments.json', page);
+  assert.equal(page.countText, '1,234', 'the number of the header, without the word');
+  assert.match(page.key, /^comments:\d+$/);
+  assert.equal(page.continuation, page.key);
+  assert.deepEqual(page.items.map((c) => c.id), [COMMENT_IDS.pinned, COMMENT_IDS.plain, COMMENT_IDS.busy]);
+  const [pinned, plain, busy] = page.items;
+  assert.equal(pinned.author, '@channelone');
+  assert.equal(pinned.text, 'Thanks for watching!\nChapters are in the description.');
+  assert.equal(pinned.publishedText, '1 day ago');
+  assert.equal(pinned.likeCountText, '1.2K');
+  assert.equal(pinned.replyCountText, '2');
+  assert.equal(pinned.isPinned, true);
+  assert.equal(pinned.isCreator, true);
+  assert.equal(pinned.isHearted, true);
+  assert.equal(pinned.hasReplies, true);
+  assert.equal(pinned.authorAvatar, `https://yt3.ggpht.com/avatar-${COMMENT_IDS.pinned.toLowerCase()}=s176-c-k-c0x00ffffff-no-rj`);
+  // No likes or replies: no "0" labels.
+  assert.equal(plain.likeCountText, undefined);
+  assert.equal(plain.replyCountText, undefined);
+  assert.equal(plain.hasReplies, false);
+  assert.equal(plain.isPinned, false);
+  assert.equal(busy.hasReplies, true);
+  const commentRequest = yt.hits.find((h) => h.path === '/youtubei/v1/next' && h.body?.continuation);
+  assert.ok(commentRequest, 'comments come from the watch-next continuation');
+
+  const more = await call('commentsMore', { key: page.continuation });
+  writeFixture('comments-more.json', more);
+  assert.equal(more.key, page.key);
+  assert.equal(more.continuation, undefined);
+  assert.equal(more.countText, '1,234', 'later pages keep the header');
+  // YouTube repeats the pinned comment; Swift drops it (CommentsPage.append).
+  assert.deepEqual(more.items.map((c) => c.id), [COMMENT_IDS.pinned, COMMENT_IDS.later, COMMENT_IDS.answered]);
+  assert.deepEqual(await call('commentsMore', { key: page.key }), { key: page.key, items: [] });
+});
+
+test('comments turned off give a plain message, not a parser error', async () => {
+  const yt = createFakeYouTube({ commentsOff: true });
+  const { call } = loadBundle({ router: yt.router });
+  await call('init', { cookie: COOKIE, client: 'TV' });
+  await assert.rejects(call('comments', { videoId: 'VIDEOID0001' }), (e) =>
+    e.kind === 'notFound' && /turned off/.test(e.message));
+});
+
+test('comment replies: first batch, continuation without repeats, prepopulated threads', async () => {
+  const failTokens = ['REPLIESMORE_BUSY'];
+  const yt = createFakeYouTube({ failTokens });
+  const { call } = loadBundle({ router: yt.router });
+  await call('init', { cookie: COOKIE, client: 'TV' });
+  const page = await call('comments', { videoId: 'VIDEOID0001' });
+  const nextHits = () => yt.hits.filter((h) => h.path === '/youtubei/v1/next').length;
+
+  const replies = await call('commentReplies', { key: page.key, commentId: COMMENT_IDS.busy });
+  writeFixture('comment-replies.json', replies);
+  assert.equal(replies.commentId, COMMENT_IDS.busy);
+  assert.deepEqual(replies.items.map((r) => r.id), [`${COMMENT_IDS.busy}.REPLY1`, `${COMMENT_IDS.busy}.REPLY2`]);
+  assert.equal(replies.items[0].author, '@replier1');
+  assert.equal(replies.items[0].text, 'Reply number 1');
+  assert.equal(replies.items[0].hasReplies, false);
+  assert.equal(replies.continuation, `${page.key}#${COMMENT_IDS.busy}`);
+
+  // A failed batch stays where it was: Retry asks for the same batch again.
+  await assert.rejects(call('commentRepliesMore', { key: replies.continuation }), (e) => e.kind === 'network');
+  failTokens.length = 0;
+  const rest = await call('commentRepliesMore', { key: replies.continuation });
+  writeFixture('comment-replies-more.json', rest);
+  assert.deepEqual(rest.items.map((r) => r.id), [`${COMMENT_IDS.busy}.REPLY3`], 'the repeated reply is left out');
+  assert.equal(rest.continuation, undefined);
+  await assert.rejects(call('commentRepliesMore', { key: replies.continuation }), (e) => e.kind === 'expired');
+
+  const pinned = await call('commentReplies', { key: page.key, commentId: COMMENT_IDS.pinned });
+  assert.deepEqual(pinned.items.map((r) => r.author), ['@replier1', '@channelone']);
+  assert.equal(pinned.items[1].isCreator, true);
+  assert.equal(pinned.items[0].likeCountText, '12');
+  assert.equal(pinned.continuation, undefined);
+
+  // No replies: no request.
+  const before = nextHits();
+  assert.deepEqual(await call('commentReplies', { key: page.key, commentId: COMMENT_IDS.plain }), { commentId: COMMENT_IDS.plain, items: [] });
+  assert.equal(nextHits(), before);
+
+  // Threads of later pages can be opened too; a reply that came with the thread needs no request.
+  await call('commentsMore', { key: page.key });
+  const answered = await call('commentReplies', { key: page.key, commentId: COMMENT_IDS.answered });
+  assert.deepEqual(answered.items.map((r) => r.id), [`${COMMENT_IDS.answered}.REPLY1`]);
+  assert.equal(answered.items[0].isCreator, true);
+  assert.equal(nextHits(), before + 1, 'only the comments page was requested');
+
+  await assert.rejects(call('commentReplies', { key: page.key, commentId: 'UgxUNKNOWN' }), (e) => e.kind === 'expired');
+  await assert.rejects(call('commentReplies', { key: 'comments:999', commentId: COMMENT_IDS.busy }), (e) => e.kind === 'expired');
+  await assert.rejects(call('commentRepliesMore', { key: 'nonsense' }), (e) => e.kind === 'invalid');
 });
 
 test('subscribed channels come from the channels page, else from the guide', async () => {
