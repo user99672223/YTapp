@@ -102,7 +102,7 @@ struct ChannelView: View {
                 // No .id(tab): FeedView loads whichever tab's model it's given, and the header
                 // with the tab picker stays in place, so focus stays on the picker. Each tab
                 // shows its own loading, empty and error (with Retry) state below it.
-                FeedView(feed: channel.feed(for: channel.tab), emptyText: emptyText(for: channel.tab)) {
+                FeedView(feed: channel.feed(for: channel.tab), emptyText: emptyText(for: channel.tab), emptySystemImage: "play.rectangle") {
                     ChannelPageHeader(channel: channel, tabsFocused: $tabsFocused)
                 }
                 // The page opens on the tabs rather than on Subscribe, the topmost control, so

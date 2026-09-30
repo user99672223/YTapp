@@ -420,14 +420,17 @@ struct FeedView<Header: View>: View {
     @ObservedObject var feed: FeedModel
     var emptyText = "Nothing here yet."
     var autoRefresh = true
+    var emptySystemImage = "tray"
     let header: Header
     @State private var contentWidth: CGFloat = Layout.defaultContentWidth
     @FocusState private var footerFocused: Bool
 
-    init(feed: FeedModel, emptyText: String = "Nothing here yet.", autoRefresh: Bool = true, @ViewBuilder header: () -> Header) {
+    init(feed: FeedModel, emptyText: String = "Nothing here yet.", autoRefresh: Bool = true,
+         emptySystemImage: String = "tray", @ViewBuilder header: () -> Header) {
         self.feed = feed
         self.emptyText = emptyText
         self.autoRefresh = autoRefresh
+        self.emptySystemImage = emptySystemImage
         self.header = header()
     }
 
@@ -478,7 +481,7 @@ struct FeedView<Header: View>: View {
             if let error = feed.error {
                 errorView(error)
             } else {
-                EmptyStateView(systemImage: "tray", text: emptyText)
+                EmptyStateView(systemImage: emptySystemImage, text: emptyText)
             }
         }
         // Equatable: a loading flag or a new page redraws only the sections that changed, not
@@ -529,10 +532,14 @@ struct FeedView<Header: View>: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
+        // Full width: Down from a card in any column of the last row reaches the centred button.
+        .focusSection()
         // Infinite scroll: load the next page when the footer comes on screen, and again after
         // each page that brought new cards while it stays there (the continuation key stays the
         // same, so it can't be the trigger). The cards near the end usually start it earlier.
-        .task(id: feed.listVersion) {
+        // Keyed on the model too: Subs and channel tabs hand this view another FeedModel, whose
+        // listVersion can happen to equal the old one's.
+        .task(id: [AnyHashable(ObjectIdentifier(feed)), AnyHashable(feed.listVersion)]) {
             await feed.loadMore(model, automatic: true)
         }
     }
@@ -559,8 +566,8 @@ struct FeedView<Header: View>: View {
 }
 
 extension FeedView where Header == EmptyView {
-    init(feed: FeedModel, emptyText: String = "Nothing here yet.", autoRefresh: Bool = true) {
-        self.init(feed: feed, emptyText: emptyText, autoRefresh: autoRefresh) { EmptyView() }
+    init(feed: FeedModel, emptyText: String = "Nothing here yet.", autoRefresh: Bool = true, emptySystemImage: String = "tray") {
+        self.init(feed: feed, emptyText: emptyText, autoRefresh: autoRefresh, emptySystemImage: emptySystemImage) { EmptyView() }
     }
 }
 
@@ -610,7 +617,7 @@ struct FeedSectionView: View, Equatable {
 
     private var grid: some View {
         VStack(alignment: .leading, spacing: 40) {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 56) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: Layout.rowSpacing) {
                 ForEach(section.cards) { entry in
                     FeedItemView(item: entry.item, width: cardWidth)
                         .onAppear { cardAppeared(entry) }
@@ -664,11 +671,10 @@ struct ShelfRow: View {
                 }
             }
             .padding(.vertical, 30)
-            .padding(.horizontal, Layout.horizontalPadding)
         }
-        // The row scrolls out to the screen's safe area on both sides (its first card still lines
-        // up with the list), instead of being cut off at the list's right margin.
-        .padding(.horizontal, -Layout.horizontalPadding)
+        // The row lines up with the list on the safe-area margin but isn't clipped there: its
+        // cards scroll out to the screen's edges and the first card's focus lift and shadow show.
+        .scrollClipDisabled()
         .focusSection()
     }
 }
@@ -703,8 +709,8 @@ extension FeedItem {
 
     /// The artwork a card shows for this item and its size in points, as the cards in
     /// Components.swift draw it (VideoCard and PlaylistCard: 16:9 at the grid's card width;
-    /// ShortCard: 9:16 at `Layout.shortWidth`; ChannelCard: a circle 62% of
-    /// `Layout.channelWidth`), so a prefetched image is the one the card asks for.
+    /// ShortCard: 9:16 at `Layout.shortWidth`; ChannelCard: `ChannelCard.avatarDiameter` of the
+    /// grid's card width), so a prefetched image is the one the card asks for.
     func artwork(cardWidth: CGFloat) -> (url: URL, size: CGSize)? {
         switch self {
         case .video(let video):
@@ -718,7 +724,7 @@ extension FeedItem {
             return (url, CGSize(width: cardWidth, height: cardWidth * 9 / 16))
         case .channel(let channel):
             guard let url = channel.avatar.flatMap(URL.init(string:)) else { return nil }
-            let side = Layout.channelWidth * 0.62
+            let side = ChannelCard.avatarDiameter(forWidth: cardWidth)
             return (url, CGSize(width: side, height: side))
         }
     }

@@ -34,7 +34,7 @@ struct SearchView: View {
                 // Its own focus section, so Down from any filter reaches the results. FeedView
                 // shows the loading, no-results and error (with Retry) states, and lays channels,
                 // videos and playlists out in the same grid as every other list.
-                FeedView(feed: results, emptyText: noResultsText(for: query), autoRefresh: false)
+                FeedView(feed: results, emptyText: noResultsText(for: query), autoRefresh: false, emptySystemImage: "magnifyingglass")
                     .id(ObjectIdentifier(results))
                     .focusSection()
             } else {

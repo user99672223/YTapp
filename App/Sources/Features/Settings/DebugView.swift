@@ -24,7 +24,7 @@ struct DebugView: View {
             // requests unless that one is on too.
             Section("Match frame rate") {
                 InfoRow("Tube setting", value: model.settings.frameRateMatching.label)
-                InfoRow("Apple TV", value: AppleTVFrameRateMatching.current.label)
+                InfoRow("Apple TV", value: DisplayCriteriaController.status)
             }
             Section("Last playback") {
                 let s = diagnostics.snapshot
@@ -36,7 +36,7 @@ struct DebugView: View {
                     InfoRow("Chosen formats", value: s.selection)
                     InfoRow("Decoder", value: "\(s.stats.videoCodec) · hwdec \(s.stats.hwdec.isEmpty ? "no" : s.stats.hwdec)")
                     InfoRow("Resolution", value: "\(s.stats.width)×\(s.stats.height) @ " + String(format: "%.3f fps", s.stats.containerFps))
-                    InfoRow("Display", value: s.refreshRate.map { String(format: "%.3f Hz", $0) } ?? "unchanged")
+                    InfoRow("Display", value: s.refreshRate.map { String(format: "%.3f Hz", $0) } ?? "TV's own rate")
                     InfoRow("Buffer", value: String(format: "%.0f s ahead · %@ cached · %@/s", s.stats.bufferedSeconds,
                                                     Formatters.bytes(Int64(s.stats.demuxerCacheBytes)),
                                                     Formatters.bytes(Int64(s.stats.cacheSpeed))))
