@@ -32,9 +32,18 @@ You need a Mac or Windows computer, your Apple ID, and the Apple TV on the same 
 > With a free Apple ID the app works for 7 days; then open Sideloadly and install it again
 > (your sign-in and settings are kept). With a paid Apple developer account it lasts a year.
 
-**Optional but recommended:** on the Apple TV go to **Settings → Video and Audio → Match
-Content** and turn on **Match Frame Rate**. Tube then switches the TV to each video's frame rate
-(smooth 24/25/30/50/60 fps).
+**Optional — match frame rate:** Tube can switch the TV to a video's frame rate so films play
+without judder. Every switch blanks the picture for a moment and makes some TVs flicker for a
+while, so this is **off** by default. To use it, turn on **Match Frame Rate** on the Apple TV
+(**Settings → Video and Audio → Match Content**), then choose in Tube's **Settings → Match frame
+rate**:
+- **24 fps videos only** — films (23.976/24 fps) switch the TV to 24 Hz; everything else plays at
+  the TV's usual rate.
+- **All videos** — 24 fps → 24 Hz, 25/50 fps → 50 Hz, 30/60 fps → 60 Hz.
+
+Tube switches at most once per video (never again for a quality change or Retry), keeps the mode
+while the next videos have the same frame rate, and puts the TV back to its usual rate when you
+leave the player.
 
 ## 3. Sign in: copy your YouTube cookies to the TV
 
@@ -76,6 +85,9 @@ If you ever need to sign in again: **Settings → Re-enter cookies** in Tube, th
 
 - **Maximum quality** — 4K by default. Order is always AV1 → VP9 → H.264 at the highest
   resolution, with Opus audio. Tube never switches quality while playing; it buffers instead.
+- **Match frame rate** — **Off** (default), **24 fps videos only** or **All videos** (see
+  section 2). Needs *Match Frame Rate* turned on in the Apple TV settings; the Debug screen
+  shows whether it is, and the TV's usual rate.
 - **Stream client** — how Tube asks YouTube for the video streams. **TV** is the default. If
   videos stop playing, try another one here.
 - **YouTube bundle** — YouTube changes often. **Download newer bundle** fetches the latest
