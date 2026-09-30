@@ -14,7 +14,10 @@ warnings and SwiftUI runtime warnings.
 The TV's log relay drops lines when the app logs thousands per second (those UIKit lookups do
 while a grid scrolls), so every count is a lower bound: compare focus_moves with the number of
 presses to see how complete a segment is. Tube's own "images:" line (ImagePipeline, every 10 s
-while images load) is the reliable count of image loads.
+while images load or are drawn from memory) is the reliable count of image loads. ImagePipeline
+reads a thumbnail stored in URLCache itself, without a network task, so `tasks` and `cache_hits`
+leave those out (the "images:" line counts them as "from disk"); `cache_hits` are the other
+requests URLCache answered.
 """
 import bisect
 import re
