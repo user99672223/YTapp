@@ -28,7 +28,9 @@ struct SetupView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 } else {
-                    Image(systemName: "wifi.exclamationmark").font(.system(size: 140)).foregroundStyle(.secondary)
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: Theme.heroSymbolSize))
+                        .foregroundStyle(.secondary)
                     Text("No network address yet").font(.headline)
                 }
             }

@@ -153,7 +153,9 @@ private struct PlaylistHeader: View {
                     } label: {
                         Label("Play", systemImage: "play.fill")
                     }
+                    // A page header's main action, a capsule like a channel's Subscribe.
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
                     .tint(.red)
                     .padding(.top, Theme.Spacing.titleToContent)
                 }
