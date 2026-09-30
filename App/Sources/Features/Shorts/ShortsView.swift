@@ -223,8 +223,10 @@ private struct ShortsContent: View {
 
     // MARK: - Video
 
-    /// The video frame is one button: Select pauses, and the card style gives it the system's
-    /// focus lift. Up/Down page (nothing is above or below it, so focus never moves away).
+    /// The video frame is one button: Select pauses. Its focus look is `ShortsStageStyle`'s lift
+    /// rather than the card style's, which draws its label in a UIKit view of its own and tilts it
+    /// with the remote: no place for a live video and sliding pages. Up/Down page (nothing is
+    /// above or below it, so focus never moves away).
     private var stage: some View {
         Button {
             vm.togglePlay()
@@ -233,7 +235,7 @@ private struct ShortsContent: View {
                         showsVideo: vm.isVideoOnScreen && !isPaging && shownIndex == vm.index,
                         hidesPill: subscribeArmed)
         }
-        .buttonStyle(.card)
+        .buttonStyle(ShortsStageStyle())
         .focused($focus, equals: .video)
         .onMoveCommand { direction in
             switch direction {
@@ -244,12 +246,6 @@ private struct ShortsContent: View {
             }
         }
         .overlay { subscribeLayer }
-        // A plain shape's shadow: shadowing the video itself would render it offscreen every frame.
-        .background {
-            RoundedRectangle(cornerRadius: Theme.Radius.player, style: .continuous)
-                .fill(.black)
-                .shadow(color: .black.opacity(0.6), radius: 40, y: 24)
-        }
     }
 
     /// The Subscribe pill inside the video can't be a button of its own there: the video frame is
@@ -362,7 +358,7 @@ private struct ShortsContent: View {
     }
 }
 
-/// The 9:16 frame. The Shorts next to the current one wait above and below it (clipped away), so
+/// The 9:16 frame. The Shorts around the current one wait above and below it (clipped away), so
 /// a page change slides the outgoing Short out and the incoming one in, over their posters; the
 /// one video sits over the current Short's poster (never moved, so mpv keeps its surface) and is
 /// shown once it has a picture.
@@ -378,48 +374,55 @@ private struct ShortsPager: View {
         let id: String
     }
 
-    /// The current Short and its neighbours.
+    /// The current Short and two on each side, so a slide that quick presses redirect halfway
+    /// still has the Shorts it passes on screen.
     private var pages: [Page] {
         guard !vm.ids.isEmpty else { return [] }
-        let lower = max(0, shownIndex - 1)
-        let upper = min(vm.ids.count - 1, shownIndex + 1)
+        let lower = max(0, shownIndex - 2)
+        let upper = min(vm.ids.count - 1, shownIndex + 2)
         guard lower <= upper else { return [] }
         return (lower...upper).map { Page(position: $0, id: vm.ids[$0]) }
     }
 
     private var size: CGSize { ShortsContent.stageSize }
 
-    private func yOffset(of page: Page) -> CGFloat {
-        CGFloat(page.position - shownIndex) * size.height
-    }
-
     var body: some View {
         ZStack {
             Color.black
-            ForEach(pages) { page in
+            strip { page in
                 ShortPoster(url: vm.poster(at: page.position),
                             fallback: vm.short(at: page.position)?.thumbnail.flatMap(URL.init(string:)))
                     .frame(width: size.width, height: size.height)
                     .clipped()
-                    .offset(y: yOffset(of: page))
-                    .transition(.identity)
             }
             MPVVideoView(player: vm.player)
                 .opacity(showsVideo ? 1 : 0)
                 // Fades in over the poster; hides at once when paging, so it never covers the slide.
                 .animation(showsVideo ? Animation.easeOut(duration: 0.2) : nil, value: showsVideo)
-            ForEach(pages) { page in
-                info(for: page)
-                    .offset(y: yOffset(of: page))
-                    .transition(.identity)
-            }
+            strip { page in info(for: page) }
             if vm.ids.isEmpty, case .loading(let message) = vm.phase {
                 LoadingView(message: message)
             }
         }
         .frame(width: size.width, height: size.height)
         .continuousCorners(Theme.Radius.player)
-        .modifier(HoverShape(radius: Theme.Radius.player))
+    }
+
+    /// The pages one under the other, each at a fixed place `position` frame heights down, in a
+    /// strip that moves as a whole to show `shownIndex`. Only the strip's offset animates, so the
+    /// pages always move together, and once it stops the page is exactly in the frame, however
+    /// often quick presses redirected the slide.
+    private func strip<Content: View>(@ViewBuilder _ content: @escaping (Page) -> Content) -> some View {
+        ZStack(alignment: .top) {
+            ForEach(pages) { page in
+                content(page)
+                    .frame(width: size.width, height: size.height)
+                    .offset(y: CGFloat(page.position) * size.height)
+                    .transition(.identity)
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .offset(y: -CGFloat(shownIndex) * size.height)
     }
 
     /// Title and channel over a soft gradient, and the current Short's loading/paused state.
@@ -445,17 +448,32 @@ private struct ShortsPager: View {
     }
 }
 
-/// The frame's own continuous corners for the card style's focus effect (tvOS 18 and later; on
-/// tvOS 17 the effect keeps the style's shape).
-private struct HoverShape: ViewModifier {
-    let radius: CGFloat
+/// The video frame's focus look: the system's lift for artwork, without its tilt. Focused, the
+/// frame grows a little and its shadow deepens; pressed, it settles back. The shadow is a plain
+/// shape's under the frame: shadowing the video itself would render it offscreen every frame.
+private struct ShortsStageStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StageBody(configuration: configuration)
+    }
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(tvOS 18.0, *) {
-            content.contentShape(.hoverEffect, RoundedRectangle(cornerRadius: radius, style: .continuous))
-        } else {
-            content
+    private struct StageBody: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isFocused) private var isFocused
+
+        /// About the card style's lift on a frame this size (495 → 517 points wide).
+        private static let focusedScale: CGFloat = 1.045
+
+        var body: some View {
+            configuration.label
+                .background {
+                    RoundedRectangle(cornerRadius: Theme.Radius.player, style: .continuous)
+                        .fill(.black)
+                        .shadow(color: .black.opacity(isFocused ? 0.6 : 0.35),
+                                radius: isFocused ? 40 : 16, y: isFocused ? 24 : 8)
+                }
+                .scaleEffect(isFocused && !configuration.isPressed ? Self.focusedScale : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
+                .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
         }
     }
 }
