@@ -13,10 +13,11 @@ struct CommentThreadView: View {
     @ObservedObject var thread: CommentThreadModel
     /// For Retry when the whole section expired.
     let comments: CommentsModel
+    let margins: CommentsMargins
     let focus: FocusState<CommentFocus?>.Binding
 
     var body: some View {
-        CommentScroller {
+        CommentScroller(margins: margins) {
             CommentRow(comment: thread.comment, text: thread.chunks.first ?? "")
                 .focused(focus, equals: .text(0))
             ForEach(Array(thread.chunks.enumerated().dropFirst()), id: \.offset) { index, chunk in
@@ -49,6 +50,14 @@ struct CommentThreadView: View {
                 comments.retryReplies(of: thread)
             }
         } else if thread.isLoaded {
+            if thread.replies.items.isEmpty, !thread.hasMore {
+                // YouTube's answer had no list of replies: say so, with Retry, rather than leave
+                // the heading with nothing under it and nothing to focus.
+                CommentFailure(message: "These replies couldn't be loaded.", focus: focus, focusValue: .retry) {
+                    thread.reload()
+                }
+                .padding(.leading, CommentsLayout.replyIndent)
+            }
             ForEach(thread.replies.items) { reply in
                 CommentRow(comment: reply, isReply: true)
                     .focused(focus, equals: .reply(reply.id))

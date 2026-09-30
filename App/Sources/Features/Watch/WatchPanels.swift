@@ -18,7 +18,8 @@ struct PanelView: View {
 
     var body: some View {
         if panel == .comments {
-            CommentsPanel(comments: vm.comments, close: close)
+            // A floating sheet inside the safe area, like the other panels (see WatchContent).
+            CommentsPanel(comments: vm.comments, margins: CommentsLayout.floating, close: close)
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: Theme.Spacing.row) {

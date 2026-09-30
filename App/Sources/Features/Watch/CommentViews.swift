@@ -21,38 +21,47 @@ enum CommentFocus: Hashable {
     case moreReplies
 }
 
-/// Measurements of the comments panel. The hosts let the panel's material reach the screen's
-/// edges (it ignores the safe area), so its content keeps tvOS' 60-point top/bottom and 80-point
-/// side margins itself.
+/// Where the comments panel's content sits inside the panel. The host picks them for the way it
+/// places the panel (`CommentsLayout.floating`, `CommentsLayout.screenEdge`).
+struct CommentsMargins: Equatable {
+    /// The title row from the panel's top edge.
+    var top: CGFloat
+    /// The text of the title row and of the list from the panel's sides.
+    var leading: CGFloat
+    var trailing: CGFloat
+    /// Room under the last row, inside the scroll content: the list scrolls down to the panel's
+    /// bottom edge and comes to rest this far above it.
+    var bottom: CGFloat
+    /// A band along the bottom that the list never scrolls into (the TV's bottom safe area, for a
+    /// panel whose material reaches the screen's edge).
+    var outsideBottom: CGFloat
+}
+
+/// Measurements of the comments panel.
 enum CommentsLayout {
-    static let top: CGFloat = 60
-    static let bottom: CGFloat = 60
-    static let leading = Theme.Spacing.panel
-    static let trailing: CGFloat = 80
+    /// A floating sheet inside the safe area (the watch page): the side panels' own padding on
+    /// every side, like `PanelView`, and a list that scrolls to the sheet's rounded bottom.
+    static let floating = CommentsMargins(top: Theme.Spacing.panel, leading: Theme.Spacing.panel,
+                                          trailing: Theme.Spacing.panel, bottom: Theme.Spacing.panel,
+                                          outsideBottom: 0)
+    /// A panel whose material reaches the screen's edges (it ignores the safe area): its content
+    /// keeps tvOS' 60-point top/bottom and 80-point side margins itself.
+    static let screenEdge = CommentsMargins(top: 60, leading: Theme.Spacing.panel, trailing: 80,
+                                            bottom: Theme.Spacing.row, outsideBottom: 60)
     static let avatar: CGFloat = 60
     static let replyAvatar: CGFloat = 44
     /// Replies sit this much further right than the comment they answer.
     static let replyIndent: CGFloat = 40
 }
 
-extension View {
-    /// `focused(_:equals:)` when the list is in `CommentsPanel`, which moves focus by code.
-    @ViewBuilder
-    func commentFocus(_ binding: FocusState<CommentFocus?>.Binding?, _ value: CommentFocus) -> some View {
-        if let binding {
-            focused(binding, equals: value)
-        } else {
-            self
-        }
-    }
-}
-
 /// The scrolling column of the comments panel. Rows draw their focus platter `Theme.Spacing.row`
 /// outside their text, so the column is that much wider than the panel's text margins.
 struct CommentScroller<Content: View>: View {
+    private let margins: CommentsMargins
     private let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(margins: CommentsMargins, @ViewBuilder content: () -> Content) {
+        self.margins = margins
         self.content = content()
     }
 
@@ -61,9 +70,9 @@ struct CommentScroller<Content: View>: View {
             LazyVStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
                 content
             }
-            .padding(.leading, CommentsLayout.leading - Theme.Spacing.row)
-            .padding(.trailing, CommentsLayout.trailing - Theme.Spacing.row)
-            .padding(.bottom, Theme.Spacing.row)
+            .padding(.leading, margins.leading - Theme.Spacing.row)
+            .padding(.trailing, margins.trailing - Theme.Spacing.row)
+            .padding(.bottom, margins.bottom)
         }
     }
 }
@@ -73,14 +82,8 @@ struct CommentScroller<Content: View>: View {
 /// itself when the last rows come on screen.
 struct CommentsList: View {
     @ObservedObject var comments: CommentsModel
-    private let focus: FocusState<CommentFocus?>.Binding?
+    private let focus: FocusState<CommentFocus?>.Binding
     @State private var draft = ""
-
-    /// Rows only, for hosts without the panel's thread view: comments don't open their replies.
-    init(comments: CommentsModel) {
-        _comments = ObservedObject(wrappedValue: comments)
-        focus = nil
-    }
 
     init(comments: CommentsModel, focus: FocusState<CommentFocus?>.Binding) {
         _comments = ObservedObject(wrappedValue: comments)
@@ -98,11 +101,11 @@ struct CommentsList: View {
         } else if comments.isLoaded {
             if comments.items.isEmpty {
                 CommentNoteRow(text: "No comments yet.", systemImage: "text.bubble")
-                    .commentFocus(focus, .empty)
+                    .focused(focus, equals: .empty)
             }
             ForEach(comments.items) { comment in
                 CommentRow(comment: comment, action: openAction(for: comment))
-                    .commentFocus(focus, .comment(comment.id))
+                    .focused(focus, equals: .comment(comment.id))
                     .onAppear {
                         if comment.id == loadTrigger { comments.loadMore(automatic: true) }
                     }
@@ -126,7 +129,7 @@ struct CommentsList: View {
     }
 
     private func openAction(for comment: Comment) -> (() -> Void)? {
-        guard focus != nil, comments.canOpen(comment) else { return nil }
+        guard comments.canOpen(comment) else { return nil }
         return { comments.open(comment) }
     }
 
@@ -135,10 +138,10 @@ struct CommentsList: View {
             HStack(spacing: 16) {
                 TextField("Add a comment…", text: $draft)
                     .onSubmit { send() }
-                    .commentFocus(focus, .draft)
+                    .focused(focus, equals: .draft)
                 Button("Post") { send() }
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .commentFocus(focus, .post)
+                    .focused(focus, equals: .post)
             }
             if let status = comments.status {
                 Text(status).font(.caption).foregroundStyle(.secondary)
@@ -149,7 +152,7 @@ struct CommentsList: View {
                 } label: {
                     Label("Retry", systemImage: "arrow.clockwise")
                 }
-                .commentFocus(focus, .retryPost)
+                .focused(focus, equals: .retryPost)
             }
         }
         .padding(.horizontal, Theme.Spacing.row)
@@ -340,7 +343,7 @@ struct CommentLoadingRow: View {
 /// A first page that failed: the plain message and Retry.
 struct CommentFailure: View {
     let message: String
-    let focus: FocusState<CommentFocus?>.Binding?
+    let focus: FocusState<CommentFocus?>.Binding
     let focusValue: CommentFocus
     let retry: () -> Void
 
@@ -353,7 +356,7 @@ struct CommentFailure: View {
             Button(action: retry) {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
-            .commentFocus(focus, focusValue)
+            .focused(focus, equals: focusValue)
         }
         .padding(Theme.Spacing.row)
     }
@@ -364,7 +367,7 @@ struct CommentFailure: View {
 struct CommentsMoreButton: View {
     let title: String
     let state: CommentsMoreState
-    let focus: FocusState<CommentFocus?>.Binding?
+    let focus: FocusState<CommentFocus?>.Binding
     let focusValue: CommentFocus
     let action: () -> Void
 
@@ -391,7 +394,7 @@ struct CommentsMoreButton: View {
                     Text(title)
                 }
             }
-            .commentFocus(focus, focusValue)
+            .focused(focus, equals: focusValue)
         }
         .padding(Theme.Spacing.row)
     }
