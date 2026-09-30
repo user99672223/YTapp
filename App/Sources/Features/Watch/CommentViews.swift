@@ -19,6 +19,23 @@ enum CommentFocus: Hashable {
     case text(Int)
     case reply(String)
     case moreReplies
+
+    /// A row of the list that focus can be sent back to. Not the title row's buttons, nor Post and
+    /// the post's Retry, which are disabled or gone most of the time.
+    var isListRow: Bool {
+        switch self {
+        case .draft, .comment, .moreComments, .retry, .empty: return true
+        default: return false
+        }
+    }
+
+    /// A row of the open thread (`.retry` is the replies' one there).
+    var isThreadRow: Bool {
+        switch self {
+        case .text, .reply, .moreReplies, .retry: return true
+        default: return false
+        }
+    }
 }
 
 /// Where the comments panel's content sits inside the panel. The host picks them for the way it
