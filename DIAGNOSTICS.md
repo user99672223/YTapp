@@ -204,6 +204,15 @@ uses the normal thumbnail once a stream has ended.
 
 **Every grid of Shorts was titled "Shorts".** Tube never read the real title. It does now.
 
+**Grids had a wide margin on the left and almost none on the right.** Video grids (Subs, Home,
+Search, Library, channels) used four cards of a fixed size that together were wider than the space
+between the margins, so they started 160 points from the left edge but ran to 16 points from the
+right. The Shorts tab had the opposite problem: its six fixed cards left more room on the right.
+Grids now measure the space between the margins and size their columns to fill it exactly, so both
+sides match (checked on the TV: 160 points on each side on Subs, 80 on the Shorts tab). Sideways
+rows of Shorts now scroll out to the edge of the screen instead of being cut off at the right
+margin, with their first card lined up with the grid above.
+
 ## Search
 
 **Typing with the Siri Remote never started a search.** Search only ran on Return, which the

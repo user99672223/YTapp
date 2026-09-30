@@ -76,8 +76,11 @@ If you ever need to sign in again: **Settings → Re-enter cookies** in Tube, th
 
 - **Maximum quality** — 4K by default. Order is always AV1 → VP9 → H.264 at the highest
   resolution, with Opus audio. Tube never switches quality while playing; it buffers instead.
-- **Stream client** — how Tube asks YouTube for the video streams. **TV** is the default. If
-  videos stop playing, try another one here.
+  The Apple TV can't decode 4K at 60 fps smoothly in software, so 60 fps videos play at
+  1440p60 (pick 4K for one video from the Quality button if you want to try).
+- **Stream client** — how Tube asks YouTube for the video streams. **Automatic** is the default
+  and tries the clients that still work signed in, in turn. If videos stop playing, try a
+  specific one here.
 - **YouTube bundle** — YouTube changes often. **Download newer bundle** fetches the latest
   version of the part of Tube that talks to YouTube, without reinstalling the app.
 - **Clear cache**, **Re-enter cookies**, **Sign out**, and the **Debug screen** (CPU use, the
@@ -92,7 +95,7 @@ Every problem shows a message on screen with a **Retry** button.
   cookies from a new private window.
 - **A video won't start / “couldn't unlock the stream”** — press Retry; if it keeps failing,
   try *Settings → Download newer bundle*, then another *Stream client*.
-- **4K AV1 stutters** — open the Debug screen while it plays (or turn on *Show stats while
+- **A video stutters** — open the Debug screen while it plays (or turn on *Show stats while
   playing*); if the CPU is maxed out, set *Maximum quality* to 1440p or 1080p.
 - **Live streams** are not supported (YouTube only offers them in a streaming format this app
   deliberately doesn't use). Finished streams play normally.
