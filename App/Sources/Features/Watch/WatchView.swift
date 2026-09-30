@@ -187,6 +187,9 @@ private struct WatchContent: View {
             // Play now, Cancel, Back or the countdown running out: the focused box went away.
             if ended { restoreFocus() }
         }
+        // `videoId` isn't published, but `load(videoId:)` publishes in the same step (countdown,
+        // phase), so the page is redrawn with the new id.
+        .onChange(of: vm.videoId) { _, _ in videoChanged() }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the app (TV button) pauses, like the YouTube app.
             vm.setInBackground(phase == .background)
@@ -220,8 +223,10 @@ private struct WatchContent: View {
         .focused($focus, equals: .catcher)
         .onMoveCommand { direction in
             switch direction {
-            case .left: jump(-10)
-            case .right: jump(10)
+            // ±10 s once there is a video to seek in; while the next one loads (the controls
+            // can be hidden then too), left/right bring the controls up like up/down.
+            case .left where vm.phase == .playing: jump(-10)
+            case .right where vm.phase == .playing: jump(10)
             default: showControls()
             }
         }
@@ -238,8 +243,15 @@ private struct WatchContent: View {
         bumpHideTimer()
     }
 
+    /// The hide timer: only while nothing else holds the screen or the remote.
     private func hideControls() {
         guard panel == nil, scrubTarget == nil, vm.countdown == nil, !isFailed else { return }
+        hideNow()
+    }
+
+    /// Hides the controls; the invisible catcher takes the remote.
+    private func hideNow() {
+        hideTask?.cancel()
         controlsVisible = false
         focus = .catcher
     }
@@ -258,6 +270,8 @@ private struct WatchContent: View {
     /// countdown, the failure screen): the open panel, else the controls, else the remote catcher.
     private func restoreFocus() {
         if panel != nil {
+            // Nil for comments, which place their own focus (the system lands in the panel,
+            // the only focusable part of the screen then).
             focus = panelFocus
         } else if controlsVisible {
             focus = .playPause
@@ -293,25 +307,55 @@ private struct WatchContent: View {
         bumpHideTimer()
     }
 
+    /// The countdown's Cancel button: the viewer stays on this video, so the controls come up
+    /// (Play again, Up next).
     private func cancelCountdown() {
         vm.cancelCountdown()
         if panel == nil { showControls() }
     }
 
-    /// Back: a scrub preview is dropped first (like the system player), then the countdown,
-    /// the panel, the controls, and last the watch page itself. The countdown goes before the
-    /// panel because it takes focus when it appears, even over an open panel.
+    /// Back on the up-next countdown: autoplay stops and the box goes, and nothing comes up in
+    /// its place. The controls stay hidden (the finished video's pause raised them under the
+    /// box), so the next Back leaves the page; a panel open under the box gets focus back.
+    private func dismissCountdown() {
+        if panel == nil {
+            hideTask?.cancel()
+            controlsVisible = false
+        }
+        vm.cancelCountdown()
+        // `onChange(of: vm.countdown == nil)` puts focus back: on the panel, else the catcher.
+    }
+
+    /// Another video started in this session (autoplay, Play now, an Up next card). An open panel
+    /// belongs to the previous one (its chapters, captions, streams, comments): it closes back to
+    /// the controls, which now show the new title. A scrub preview is dropped rather than
+    /// seeking the new video to a time on the old one's bar. Otherwise a panel could stay open
+    /// across the change, and Back, meant to leave, would first close it.
+    private func videoChanged() {
+        scrubCommit?.cancel()
+        scrubTarget = nil
+        guard panel != nil else { return }
+        panel = nil
+        panelFocus = nil
+        controlsVisible = true
+        if vm.countdown == nil { focus = .playPause }
+        bumpHideTimer()
+    }
+
+    /// Back/Menu takes away one thing, the one on top, in this order: a scrub preview (dropped,
+    /// like the system player's), the up-next countdown (it takes focus when it appears, even over
+    /// an open panel), a side panel (focus goes back to the button that opened it), the controls,
+    /// and, with nothing left on screen, the watch page itself. The same whether the video is
+    /// playing, paused or still loading: controls on screen are hidden first, never skipped.
     private func handleExit() {
         if scrubTarget != nil {
             cancelScrub()
         } else if vm.countdown != nil {
-            cancelCountdown()
+            dismissCountdown()
         } else if panel != nil {
             closePanel()
-        } else if controlsVisible, vm.phase == .playing {
-            hideTask?.cancel()
-            controlsVisible = false
-            focus = .catcher
+        } else if showsControls {
+            hideNow()
         } else {
             closeWatch()
         }
