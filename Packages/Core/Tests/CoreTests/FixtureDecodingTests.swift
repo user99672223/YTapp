@@ -93,6 +93,20 @@ final class FixtureDecodingTests: XCTestCase {
         XCTAssertEqual(short.likeStatus, .like)
         XCTAssertFalse(short.formats.isEmpty)
         XCTAssertTrue(short.trackingAvailable)
+        XCTAssertEqual(short.likeCountText, "12K")
+        XCTAssertEqual(short.commentsCountText, "1.2K")
+        XCTAssertEqual(short.channel.avatar, "https://yt3.ggpht.com/short-avatar=s176")
+    }
+
+    /// A reel answer without the overlay leaves the counts and the avatar out, like the Short
+    /// details written before those fields existed; they still decode.
+    func testShortDetailsWithoutOverlay() throws {
+        let short = try Self.decode(ShortDetails.self, "short-bare")
+        XCTAssertEqual(short.id, "SHORTID0004")
+        XCTAssertNil(short.likeCountText)
+        XCTAssertNil(short.commentsCountText)
+        XCTAssertNil(short.channel.avatar)
+        XCTAssertFalse(short.formats.isEmpty)
     }
 
     func testFeedItemRoundTrip() throws {

@@ -290,6 +290,35 @@ test('Shorts feed seeds from Home and resolves a short', async () => {
   assert.ok(yt.hits.some((h) => h.path === '/api/stats/playback' && h.url.includes('docid=SHORTID0001')));
 });
 
+test('Shorts show like and comment counts and the channel avatar from the reel overlay', async () => {
+  const { call, logs } = await connected();
+  // Renderers: the like count as a number (formatted like the watch page's), the comment count
+  // from the comments panel's header, the avatar closest to 176 px from the player header.
+  const short = await call('shortInfo', { id: 'SHORTID0001', client: 'TV' });
+  assert.equal(short.likeCountText, '12K');
+  assert.equal(short.commentsCountText, '1.2K');
+  assert.equal(short.channel.avatar, 'https://yt3.ggpht.com/short-avatar=s176');
+
+  // View models: the exact like count from the button's label, the comment count from the
+  // comments button's title, the avatar from the channel bar.
+  const second = await call('shortInfo', { id: 'SHORTID0002', client: 'TV' });
+  assert.equal(second.likeStatus, 'none');
+  assert.equal(second.likeCountText, '1.5M');
+  assert.equal(second.commentsCountText, '3.4K');
+  assert.equal(second.channel.avatar, 'https://yt3.ggpht.com/short-two=s176');
+
+  // No overlay: the fields are left out (Swift shows "Like", "Comments" and the initial), and
+  // that is logged once.
+  const bare = await call('shortInfo', { id: 'SHORTID0004', client: 'TV' });
+  writeFixture('short-bare.json', bare);
+  assert.equal(bare.likeCountText, undefined);
+  assert.equal(bare.commentsCountText, undefined);
+  assert.equal(bare.channel.avatar, undefined);
+  assert.equal(bare.channel.name, 'Channel One');
+  assert.ok(bare.formats.length > 0);
+  assert.equal(logs.filter((l) => /short SHORTID0004: the reel answer has no likeCountText, commentsCountText, avatar/.test(l.message)).length, 1);
+});
+
 test('actions: rate, subscribe, watch later', async () => {
   const { call, yt } = await connected();
   await call('videoInfo', { id: 'VIDEOID0001', client: 'TV' });

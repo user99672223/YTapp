@@ -247,8 +247,14 @@ public struct VideoDetails: Codable, Hashable, Sendable, Identifiable {
 public struct ShortDetails: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var title: String
+    /// `channel.avatar` comes from the reel overlay, when YouTube sends one.
     public var channel: ChannelSummary
     public var viewCountText: String?
+    /// Compact like count ("12K"); nil when the reel overlay has none (likes hidden, or an answer
+    /// without the overlay).
+    public var likeCountText: String?
+    /// Compact comment count ("1.2K"); nil when the reel overlay has none.
+    public var commentsCountText: String?
     public var likeStatus: LikeStatus
     public var thumbnail: String?
     public var durationSeconds: Double?
