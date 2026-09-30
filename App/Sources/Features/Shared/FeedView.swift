@@ -614,8 +614,10 @@ struct FeedSectionView: View, Equatable {
         }
     }
 
+    /// The grid, then its Shorts shelf one row spacing under its last row of text, as far as the
+    /// grid's rows are from each other.
     private var grid: some View {
-        VStack(alignment: .leading, spacing: 40) {
+        VStack(alignment: .leading, spacing: Layout.rowSpacing - ShelfRow.liftRoom(for: section.shelf)) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: Layout.rowSpacing) {
                 ForEach(section.cards) { entry in
                     FeedItemView(item: entry.item, width: cardWidth)
@@ -640,6 +642,9 @@ struct FeedSectionView: View, Equatable {
     }
 }
 
+/// A horizontal row of cards. It takes the same spacings as a grid (`Theme.Spacing.titleToContent`
+/// under a title, `Layout.rowSpacing` under a grid's text, `Theme.Spacing.section` to the next
+/// section) and keeps only `liftRoom(for:)` above its cards.
 struct ShelfRow: View {
     let entries: [KeyedFeedItem]
     /// A card came on screen (FeedView loads the next page near the end and fetches the artwork
@@ -656,8 +661,15 @@ struct ShelfRow: View {
         self.cardDisappeared = cardDisappeared
     }
 
-    init(items: [FeedItem]) {
-        self.init(entries: items.keyed)
+    /// Room kept above the cards: the part of their focus lift that goes past a video card's. The
+    /// spacings above a row leave room for a focused video card to lift into; a focused Short
+    /// reaches twice as far up (`Layout.focusOverflow`), and this keeps it as clear of the title
+    /// or text above. The cards' own text already starts below their lift, so nothing is kept
+    /// below them.
+    static func liftRoom(for entries: [KeyedFeedItem]) -> CGFloat {
+        guard entries.contains(where: { $0.item.isShortVideo }) else { return 0 }
+        return Layout.focusOverflow(ShortCard.artworkSize(width: Layout.shortWidth).height)
+            - Layout.focusOverflow(VideoCard.artworkSize(width: Layout.cardWidth).height)
     }
 
     var body: some View {
@@ -669,10 +681,11 @@ struct ShelfRow: View {
                         .onDisappear { cardDisappeared(entry) }
                 }
             }
-            .padding(.vertical, 30)
+            .padding(.top, Self.liftRoom(for: entries))
         }
         // The row lines up with the list on the safe-area margin but isn't clipped there: its
-        // cards scroll out to the screen's edges and the first card's focus lift and shadow show.
+        // cards scroll out to the screen's edges, and a focused card's lift and shadow show
+        // above and below the row.
         .scrollClipDisabled()
         .focusSection()
     }
