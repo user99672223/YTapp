@@ -114,11 +114,17 @@ final class ImagePipeline: @unchecked Sendable {
 
     /// The image for `url` if one at least `pixels` large is already decoded. Cheap enough for a
     /// view's body: it's what lets a card that comes back on screen draw its image at once.
-    func cachedImage(_ url: URL, pixels: CGSize, mode: ContentMode) -> UIImage? {
+    /// `counts`: whether this is a draw for the stats line. A body can run several times for one
+    /// appearance, so it passes false and the card's load (once per appearance) counts it.
+    func cachedImage(_ url: URL, pixels: CGSize, mode: ContentMode, counts: Bool = true) -> UIImage? {
         guard let entry = memory.object(forKey: url as NSURL), Self.isLargeEnough(entry, for: pixels, mode: mode) else {
             return nil
         }
-        locked { stats.fromMemory += 1 }
+        if counts {
+            locked { stats.fromMemory += 1 }
+            // A scroll back over cached cards loads nothing, so its line is written from here.
+            logStatsIfDue()
+        }
         return entry.image
     }
 
@@ -126,7 +132,8 @@ final class ImagePipeline: @unchecked Sendable {
     /// and keeps it in memory. Views asking for the same image at the same size share one load;
     /// it's cancelled when all of them are (their cards left the screen).
     func image(_ url: URL, pixels: CGSize, mode: ContentMode) async throws -> UIImage {
-        if let hit = cachedImage(url, pixels: pixels, mode: mode) { return hit }
+        // Not a draw: RemoteImage counts its own look first, and a prefetch isn't one.
+        if let hit = cachedImage(url, pixels: pixels, mode: mode, counts: false) { return hit }
         let key = LoadKey(url: url, width: Int(pixels.width.rounded(.up)), height: Int(pixels.height.rounded(.up)), fill: mode == .fill)
         let ticket = Ticket()
         let load: Load = locked {
@@ -197,8 +204,21 @@ final class ImagePipeline: @unchecked Sendable {
             // Thumbnail URLs change when the picture does (YouTube signs them), so a stored copy
             // is used without asking the server again.
             let request = URLRequest(url: key.url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30)
-            let wasStored = urlCache.cachedResponse(for: request) != nil
-            let (data, response) = try await session.data(for: request)
+            // A stored copy is read here, once, and used as it is: asking the session afterwards
+            // (only to tell a download from a disk read in the stats) read every file twice.
+            let data: Data
+            let response: URLResponse
+            let wasStored: Bool
+            if let stored = urlCache.cachedResponse(for: request) {
+                data = stored.data
+                response = stored.response
+                wasStored = true
+            } else {
+                let loaded = try await session.data(for: request)
+                data = loaded.0
+                response = loaded.1
+                wasStored = false
+            }
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 throw URLError(.badServerResponse)
             }
@@ -207,6 +227,9 @@ final class ImagePipeline: @unchecked Sendable {
             // Two sizes of the same picture loading at once: keep the larger one.
             let kept = memory.object(forKey: key.url as NSURL)
             if kept == nil || !(kept!.isFullSize || kept!.image.size.width > entry.image.size.width) {
+                // The smaller copy is removed first: that goes through the eviction delegate, which
+                // takes its bytes off the count. Replacing it in setObject doesn't tell the delegate.
+                if kept != nil { memory.removeObject(forKey: key.url as NSURL) }
                 memory.setObject(entry, forKey: key.url as NSURL, cost: entry.cost)
                 locked { stats.bytes += entry.cost }
             }
@@ -281,7 +304,8 @@ final class ImagePipeline: @unchecked Sendable {
 
     // MARK: - Stats
 
-    /// At most every 10 s while images load: where the lists got their images since the last line.
+    /// At most every 10 s while images load or are drawn from memory: where the lists got their
+    /// images since the last line.
     private func logStatsIfDue() {
         let line: String? = locked {
             guard Date().timeIntervalSince(lastStatsLog) >= 10, stats != loggedStats else { return nil }

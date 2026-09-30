@@ -56,7 +56,8 @@ private struct RemoteImageContent: View {
     private var image: UIImage? {
         if let shown, shown.url == url { return shown.image }
         guard let url, size.width > 0, size.height > 0 else { return nil }
-        return ImagePipeline.shared.cachedImage(url, pixels: pixels, mode: contentMode)
+        // Not counted as a draw here: `load()` counts it, once per appearance.
+        return ImagePipeline.shared.cachedImage(url, pixels: pixels, mode: contentMode, counts: false)
     }
 
     var body: some View {
