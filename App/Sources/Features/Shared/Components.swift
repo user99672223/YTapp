@@ -104,10 +104,7 @@ struct ErrorStateView: View {
                     if !isRetrying { retry() }
                 } label: {
                     if isRetrying {
-                        HStack(spacing: Theme.Spacing.row) {
-                            ProgressView()
-                            Text("Retrying…")
-                        }
+                        ProgressLabel("Retrying…", plain: true)
                     } else {
                         Label("Retry", systemImage: "arrow.clockwise")
                     }
@@ -132,6 +129,34 @@ struct LoadingView: View {
             Text(message).font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A spinner with a line of text beside it ("Loading…"), one look everywhere: `Theme.Spacing.row`
+/// apart, the text in the secondary callout style. `plain` keeps the surrounding font and colour
+/// instead (a button's label, a status line among others).
+struct ProgressLabel: View {
+    let text: String
+    var plain = false
+
+    init(_ text: String, plain: Bool = false) {
+        self.text = text
+        self.plain = plain
+    }
+
+    var body: some View {
+        if plain {
+            row
+        } else {
+            row.font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: Theme.Spacing.row) {
+            ProgressView()
+            Text(text)
+        }
     }
 }
 

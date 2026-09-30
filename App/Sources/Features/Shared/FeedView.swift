@@ -513,11 +513,8 @@ struct FeedView<Header: View>: View {
                 Text(error.userMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             if feed.loadsMoreByItself, !footerFocused {
-                HStack(spacing: 16) {
-                    ProgressView()
-                    Text("Loading…").foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 10)
+                ProgressLabel("Loading…")
+                    .padding(.vertical, 10)
             } else {
                 Button {
                     if feed.canLoadMore {
@@ -548,10 +545,7 @@ struct FeedView<Header: View>: View {
     @ViewBuilder
     private var footerLabel: some View {
         if feed.isLoadingMore {
-            HStack(spacing: 16) {
-                ProgressView()
-                Text("Loading…")
-            }
+            ProgressLabel("Loading…", plain: true)
         } else if feed.canLoadMore {
             if feed.moreError != nil {
                 Label("Retry", systemImage: "arrow.clockwise")

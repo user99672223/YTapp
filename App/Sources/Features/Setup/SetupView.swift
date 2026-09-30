@@ -100,10 +100,8 @@ struct SetupView: View {
         case .waiting:
             Label("Waiting for your cookies…", systemImage: "hourglass").foregroundStyle(.secondary)
         case .checking:
-            HStack(spacing: 16) {
-                ProgressView()
-                Text("Checking the cookies with YouTube…")
-            }
+            // In the status lines' own style, like the labels around it.
+            ProgressLabel("Checking the cookies with YouTube…", plain: true)
         case .success(let name):
             Label("Signed in as \(name)", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
         case .error(let message):

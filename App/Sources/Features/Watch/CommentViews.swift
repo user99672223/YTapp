@@ -332,11 +332,8 @@ struct CommentLoadingRow: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 16) {
-            ProgressView()
-            Text(text).foregroundStyle(.secondary)
-        }
-        .padding(Theme.Spacing.row)
+        ProgressLabel(text)
+            .padding(Theme.Spacing.row)
     }
 }
 
@@ -384,10 +381,7 @@ struct CommentsMoreButton: View {
             } label: {
                 switch state {
                 case .loading:
-                    HStack(spacing: 16) {
-                        ProgressView()
-                        Text("Loading…")
-                    }
+                    ProgressLabel("Loading…", plain: true)
                 case .failed:
                     Label("Retry", systemImage: "arrow.clockwise")
                 case .idle:
