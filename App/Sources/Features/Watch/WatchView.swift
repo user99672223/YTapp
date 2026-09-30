@@ -560,15 +560,20 @@ private struct ControlsOverlay: View {
         .focused(focus, equals: .opener(panel))
     }
 
+    /// Width of the cards in the Up next row.
+    private static let upNextCardWidth: CGFloat = 288
+
     @ViewBuilder
     private var upNextRow: some View {
-        if let upNext = vm.details?.upNext, !upNext.isEmpty {
+        // The previous video's details stay until the next one's arrive; so would its Up next.
+        if let details = vm.details, details.id == vm.videoId, !details.upNext.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
                 Text("Up next").font(.headline).foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: Layout.cardSpacing) {
-                        ForEach(Array(upNext.prefix(20).enumerated()), id: \.offset) { _, video in
-                            UpNextCard(video: video) {
+                        ForEach(Array(details.upNext.prefix(20).enumerated()), id: \.offset) { _, video in
+                            // The app's video card, playing in this watch session.
+                            VideoCard(video: video, width: Self.upNextCardWidth) {
                                 vm.play(video)
                                 // This row turns into the next video's; keep focus on a control
                                 // that stays.
@@ -624,39 +629,6 @@ private struct ControlButton: View {
                     .accessibilityHidden(true)
             }
         }
-    }
-}
-
-/// An up-next video in the controls: artwork with the card focus effect and the title under it,
-/// like the cards in the rest of the app. Plays in this watch session.
-private struct UpNextCard: View {
-    let video: VideoItem
-    let play: () -> Void
-
-    private static let width: CGFloat = 288
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.cardToText) {
-            Button(action: play) {
-                ZStack(alignment: .bottomTrailing) {
-                    RemoteImage(url: video.thumbnailURL)
-                        .frame(width: Self.width, height: Self.width * 9 / 16)
-                        .clipped()
-                    if video.isLive {
-                        Badge(text: "LIVE", color: .red).padding(8)
-                    } else if let duration = video.durationText {
-                        Badge(text: duration).padding(8)
-                    }
-                }
-                .frame(width: Self.width, height: Self.width * 9 / 16)
-            }
-            .buttonStyle(.card)
-            Text(video.title)
-                .font(.caption.weight(.medium))
-                .lineLimit(2, reservesSpace: true)
-                .frame(width: Self.width, alignment: .leading)
-        }
-        .frame(width: Self.width, alignment: .topLeading)
     }
 }
 

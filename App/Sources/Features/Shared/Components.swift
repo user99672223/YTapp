@@ -187,7 +187,16 @@ struct VideoCard: View {
     @EnvironmentObject private var model: AppModel
     let video: VideoItem
     var width: CGFloat = Layout.cardWidth
+    /// Replaces opening the video on its own watch page (the watch page's Up next row plays it in
+    /// the same session). A card with an action of its own has no context menu.
+    var action: (() -> Void)? = nil
     @State private var watchLaterError: BridgeError?
+
+    init(video: VideoItem, width: CGFloat = Layout.cardWidth, action: (() -> Void)? = nil) {
+        self.video = video
+        self.width = width
+        self.action = action
+    }
 
     /// The artwork of a card `width` points wide: 16:9, rounded to whole points. Code that fetches
     /// artwork ahead asks for this size, so the image it caches is the one the card draws.
@@ -199,20 +208,7 @@ struct VideoCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                router.play(video)
-            } label: {
-                artwork
-            }
-            .buttonStyle(.card)
-            .contextMenu {
-                if model.isSignedIn, !video.isShort {
-                    Button("Save to Watch Later") { saveToWatchLater() }
-                }
-                if let channelId = video.channelId {
-                    Button("Go to channel") { router.open(.channel(channelId)) }
-                }
-            }
+            artworkButton
             CardText(title: video.title, detail: video.subtitle, width: width, artworkHeight: height)
         }
         .frame(width: width, alignment: .topLeading)
@@ -221,6 +217,28 @@ struct VideoCard: View {
             Button("OK", role: .cancel) {}
         } message: { error in
             Text(error.userMessage)
+        }
+    }
+
+    @ViewBuilder
+    private var artworkButton: some View {
+        let button = Button {
+            if let action { action() } else { router.play(video) }
+        } label: {
+            artwork
+        }
+        .buttonStyle(.card)
+        if action == nil {
+            button.contextMenu {
+                if model.isSignedIn, !video.isShort {
+                    Button("Save to Watch Later") { saveToWatchLater() }
+                }
+                if let channelId = video.channelId {
+                    Button("Go to channel") { router.open(.channel(channelId)) }
+                }
+            }
+        } else {
+            button
         }
     }
 
