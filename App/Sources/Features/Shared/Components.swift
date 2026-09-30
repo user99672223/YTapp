@@ -532,6 +532,19 @@ extension View {
     }
 }
 
+extension View {
+    /// A segmented picker at the head of a list (Subscriptions, Library, a channel's tabs): the
+    /// segments as wide as their titles, the same on every screen, at the list's leading edge
+    /// right above its first card, so Down from the picker reaches that card ("Show the latest"
+    /// included). The full-width focus section brings Up from any column back to the picker.
+    func listHeaderPicker() -> some View {
+        pickerStyle(.segmented)
+            .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusSection()
+    }
+}
+
 /// Renders any feed item with the right card.
 struct FeedItemView: View {
     let item: FeedItem

@@ -167,14 +167,10 @@ private struct ChannelPageHeader: View {
                 Picker("Channel section", selection: $channel.tab) {
                     ForEach(tabs) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
                 .focused(tabsFocused)
-                // Leading, right above the list's first card, so Down from the tabs reaches that
-                // card; the full-width focus section brings Up from any column (and Down from
-                // Subscribe, at the trailing end of the header) to the tabs.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focusSection()
+                // Its full-width focus section also brings Down from Subscribe, at the trailing
+                // end of the header, to the tabs.
+                .listHeaderPicker()
             }
         }
     }

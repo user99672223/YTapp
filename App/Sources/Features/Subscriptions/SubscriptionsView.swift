@@ -20,13 +20,7 @@ struct SubscriptionsView: View {
             Picker("Show", selection: $mode) {
                 ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 600)
-            // Leading, above the list's first row, so Down from the picker reaches that row
-            // ("Show the latest" included) instead of skipping past it. The full-width focus
-            // section brings Up from any column back to the picker.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .focusSection()
+            .listHeaderPicker()
         }
     }
 

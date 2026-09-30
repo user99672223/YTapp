@@ -39,12 +39,7 @@ struct LibraryView: View {
                     Picker("Library", selection: $section) {
                         ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 1000)
-                    // Leading, above the list's first row, so Down from the picker reaches that
-                    // row; the full-width focus section brings Up from any column back to it.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .focusSection()
+                    .listHeaderPicker()
                 }
             } else {
                 VStack(spacing: Theme.Spacing.titleToContent) {
