@@ -621,13 +621,13 @@ private struct CommentsActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        ShortsActionButton(title: "Comments", caption: countText ?? loadedCount ?? "Comments", systemImage: "text.bubble",
+        ShortsActionButton(title: "Comments", caption: countText ?? count ?? "Comments", systemImage: "text.bubble",
                            isActive: isOpen, focus: focus, target: .comments, action: action)
     }
 
     /// "1,234 Comments" → "1,234"; nil until loaded or when the text has no number.
-    private var loadedCount: String? {
-        guard let first = comments.page?.countText?.split(separator: " ").first,
+    private var count: String? {
+        guard let first = comments.countText?.split(separator: " ").first,
               first.first?.isNumber == true else { return nil }
         return String(first)
     }
