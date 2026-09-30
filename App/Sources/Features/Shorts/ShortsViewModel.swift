@@ -220,7 +220,9 @@ final class ShortsViewModel: ObservableObject {
             ))
             playingEarlierLinks = earlier
             prepared[id] = ready
-            // Only ticks of this file reach the reporter (the player drops the previous file's).
+            // From here on only this file's ticks arrive (the player drops the previous file's):
+            // the first one with time moving on shows the video.
+            isVideoOnScreen = false
             reporter = PlaybackReporter(videoId: id, model: model)
             reporterSelection = selection
             playbackStarted = false
@@ -332,9 +334,10 @@ final class ShortsViewModel: ObservableObject {
     }
 
     private func tick(position: Double, playing: Bool) {
-        // Ticks only come for the file of the latest load, once it's loaded: time moving on
-        // means its frames are on screen.
-        if !isVideoOnScreen, position > 0.01 {
+        // Time moving on means the frames are on screen, but only a tick of this Short's file
+        // counts: until `show` has loaded it, the previous file's last ticks can still arrive (the
+        // player drops them only from `load` on), and there's no reporter until then.
+        if !isVideoOnScreen, reporter != nil, position > 0.01 {
             isVideoOnScreen = true
         }
         // No reporter while the next Short loads: a tick then must not use up its start.
