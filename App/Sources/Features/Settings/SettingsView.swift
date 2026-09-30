@@ -18,6 +18,10 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var confirmClear = false
     @State private var cacheSize: Int64 = 0
+    @Environment(\.scenePhase) private var scenePhase
+    /// Read when Settings appears and when the app comes back to the screen: it's switched in
+    /// the Apple TV's own settings, outside the app.
+    @State private var appleTVFrameRate: AppleTVFrameRateMatching?
 
     private let qualities = [2160, 1440, 1080, 720, 480]
     private let captionLanguages: [(String, String)] = [
@@ -38,16 +42,19 @@ struct SettingsView: View {
     private var captionLanguageOptions: [ChoiceOption<String>] {
         captionLanguages.map { ChoiceOption(value: $0.0, label: $0.1) }
     }
+    private var frameRateOptions: [ChoiceOption<FrameRateMatching>] {
+        FrameRateMatching.allCases.map { ChoiceOption(value: $0, label: $0.label) }
+    }
 
     var body: some View {
         Form {
             Section("Account") {
                 if let account = model.account {
-                    HStack(spacing: 24) {
+                    HStack(spacing: Theme.Spacing.titleToContent) {
                         RemoteImage(url: account.photo.flatMap(URL.init(string:)))
                             .frame(width: 70, height: 70)
                             .clipShape(Circle())
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
                             Text(account.name)
                             if let handle = account.handle { Text(handle).font(.caption).foregroundStyle(.secondary) }
                         }
@@ -63,8 +70,8 @@ struct SettingsView: View {
 
             Section {
                 ChoiceRow("Maximum quality", selection: $model.settings.maxHeight, options: qualityOptions)
-                LabeledContent("Codec order", value: "AV1 → VP9 → H.264")
-                LabeledContent("Audio", value: "Opus (highest bitrate), else AAC")
+                InfoRow("Codec order", value: "AV1 → VP9 → H.264")
+                InfoRow("Audio", value: "Opus (highest bitrate), else AAC")
                 Toggle("Hardware decoding for H.264", isOn: $model.settings.hardwareDecodeH264)
             } header: {
                 Text("Quality rule")
@@ -81,16 +88,23 @@ struct SettingsView: View {
                 Text("Automatic tries TV, TV as a Samsung set, Web embedded and Mobile web in turn, and keeps using the one that works. Only Mobile web needs a PO token; with PO tokens off, Automatic skips it.")
             }
 
-            Section("Playback") {
+            Section {
                 Toggle("Autoplay next video", isOn: $model.settings.autoplay)
                 Toggle("Captions on by default", isOn: $model.settings.captionsEnabled)
                 ChoiceRow("Caption language", selection: $model.settings.captionsLanguage, options: captionLanguageOptions)
                 Toggle("Show stats while playing", isOn: $model.settings.showStatsOverlay)
+                // Last, right above the footer that explains it.
+                ChoiceRow("Match frame rate", selection: $model.settings.frameRateMatching, options: frameRateOptions,
+                          footer: Self.frameRateChoices)
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text(frameRateFooter)
             }
 
             Section {
-                LabeledContent("Running bundle", value: model.bundleInfo.map { "\($0.bundleVersion)" } ?? "not loaded")
-                LabeledContent("Source", value: model.bundles.hasDownloadedBundle ? "Downloaded" : "Built into the app")
+                InfoRow("Running bundle", value: model.bundleInfo.map { "\($0.bundleVersion)" } ?? "not loaded")
+                InfoRow("Source", value: model.bundles.hasDownloadedBundle ? "Downloaded" : "Built into the app")
                 TextField("Bundle URL", text: $model.settings.bundleURL)
                     .textContentType(.URL)
                 Button(bundleUpdate.busy ? "Downloading…" : "Download newer bundle") {
@@ -112,7 +126,7 @@ struct SettingsView: View {
             }
 
             Section("Storage") {
-                LabeledContent("Player & session cache", value: Formatters.bytes(cacheSize))
+                InfoRow("Player & session cache", value: Formatters.bytes(cacheSize))
                 Button { confirmClear = true } label: { DestructiveRowLabel("Clear cache") }
             }
 
@@ -120,10 +134,12 @@ struct SettingsView: View {
                 NavigationLink("Debug screen") { DebugView() }
             }
 
+            // Highlightable rows: this is the end of the list, and a tvOS list only scrolls as far
+            // as the last row focus can reach.
             Section("About") {
-                LabeledContent("Tube", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")
-                LabeledContent("YouTube.js", value: model.bundleInfo?.youtubeiVersion ?? "?")
-                LabeledContent("libmpv client API", value: "\(mpv_client_api_version() >> 16).\(mpv_client_api_version() & 0xffff)")
+                InfoRow("Tube", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")
+                InfoRow("YouTube.js", value: model.bundleInfo?.youtubeiVersion ?? "?")
+                InfoRow("libmpv client API", value: "\(mpv_client_api_version() >> 16).\(mpv_client_api_version() & 0xffff)")
             }
         }
         .confirmationDialog("Sign out?", isPresented: $confirmSignOut) {
@@ -144,6 +160,25 @@ struct SettingsView: View {
             Text("Feeds, thumbnails and the unlocked player script are downloaded again. Your sign-in stays.")
         }
         .task { cacheSize = model.fileCache.totalBytes }
+        .onAppear { appleTVFrameRate = .current }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { appleTVFrameRate = .current }
+        }
+    }
+
+    /// Under the list of Match frame rate values.
+    private static let frameRateChoices = "Off: the TV stays at its usual refresh rate. 24 fps videos only: films and other 24 fps videos switch the TV to 24 Hz, everything else plays at the usual rate. All videos: 24 fps → 24 Hz, 25 and 50 fps → 50 Hz, 30 and 60 fps → 60 Hz."
+
+    /// Why a switch can flicker and what it needs, plus a warning when the Apple TV won't let Tube
+    /// switch at all, so choosing a mode that can't work doesn't look like a broken setting.
+    private var frameRateFooter: String {
+        let text = "Switching the TV's refresh rate makes some TVs flicker for a moment. 24 fps only switches just for films and other 24 fps videos. Needs Settings → Video and Audio → Match Content → Match Frame Rate on the Apple TV."
+        guard model.settings.frameRateMatching != .off else { return text }
+        switch appleTVFrameRate {
+        case .off: return text + " It's off on this Apple TV right now, so the TV won't switch."
+        case .unavailable: return text + " This tvOS doesn't let apps switch the refresh rate, so the TV won't switch."
+        case .on, nil: return text
+        }
     }
 
     private func label(forHeight height: Int) -> String {
