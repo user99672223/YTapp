@@ -189,7 +189,13 @@ struct VideoCard: View {
     var width: CGFloat = Layout.cardWidth
     @State private var watchLaterError: BridgeError?
 
-    private var height: CGFloat { (width * 9 / 16).rounded() }
+    /// The artwork of a card `width` points wide: 16:9, rounded to whole points. Code that fetches
+    /// artwork ahead asks for this size, so the image it caches is the one the card draws.
+    static func artworkSize(width: CGFloat) -> CGSize {
+        CGSize(width: width, height: (width * 9 / 16).rounded())
+    }
+
+    private var height: CGFloat { Self.artworkSize(width: width).height }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -289,7 +295,13 @@ struct ShortCard: View {
     let video: VideoItem
     var width: CGFloat = Layout.shortWidth
 
-    private var height: CGFloat { (width * 16 / 9).rounded() }
+    /// The artwork of a card `width` points wide: 9:16, rounded to whole points (see
+    /// `VideoCard.artworkSize(width:)`).
+    static func artworkSize(width: CGFloat) -> CGSize {
+        CGSize(width: width, height: (width * 16 / 9).rounded())
+    }
+
+    private var height: CGFloat { Self.artworkSize(width: width).height }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -360,7 +372,8 @@ struct PlaylistCard: View {
     let playlist: PlaylistItem
     var width: CGFloat = Layout.cardWidth
 
-    private var height: CGFloat { (width * 9 / 16).rounded() }
+    /// The same 16:9 artwork as a video's.
+    private var height: CGFloat { VideoCard.artworkSize(width: width).height }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
