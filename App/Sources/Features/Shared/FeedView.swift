@@ -14,6 +14,9 @@ final class FeedModel: ObservableObject {
     private(set) var sections: [FeedSectionModel] = []
     /// Cards in `page`.
     private(set) var itemCount = 0
+    /// Every card in the order it's drawn (a grid, then its Shorts shelf, then the next
+    /// section), and whether it's drawn in a grid column or at a shelf's own card size.
+    private var drawOrder: [(item: FeedItem, inGrid: Bool)] = []
     /// Goes up when `page` is replaced by a different first page (a refresh, "Show the latest"),
     /// so sections whose card count didn't change still redraw.
     private var generation = 0
@@ -90,11 +93,26 @@ final class FeedModel: ObservableObject {
     /// second reached the end before the page arrived, and the cards appeared under the focus.
     static let loadAheadCount = Layout.gridColumns * 5
 
-    /// A card at `index` (in the whole page) came on screen: close enough to the end, the next
-    /// page starts loading.
-    func cardAppeared(at index: Int, _ model: AppModel) {
-        guard index >= itemCount - Self.loadAheadCount, loadsMoreByItself, !isLoadingMore else { return }
-        Task { await loadMore(model, automatic: true) }
+    /// Cards fetched ahead of a card that comes on screen: two grid rows, or the start of the
+    /// shelf or section after it.
+    static let artworkAheadCount = Layout.gridColumns * 2
+
+    /// A card came on screen. Close enough to the end, the next page starts loading; and the
+    /// artwork of the cards drawn after it is fetched now. A lazy grid or shelf only makes a
+    /// card as it scrolls into view, so its image used to start downloading when the focus was
+    /// already landing on it (a grey card under the focus, then a fade).
+    /// `gridCardWidth` and `scale` give the size the cards draw their artwork at.
+    func cardAppeared(_ entry: KeyedFeedItem, _ model: AppModel, gridCardWidth: CGFloat, scale: CGFloat) {
+        if entry.offset >= itemCount - Self.loadAheadCount, loadsMoreByItself, !isLoadingMore {
+            Task { await loadMore(model, automatic: true) }
+        }
+        let next = drawOrder.dropFirst(entry.slot + 1).prefix(Self.artworkAheadCount)
+        for upcoming in next {
+            guard let artwork = upcoming.item.artwork(cardWidth: upcoming.inGrid ? gridCardWidth : Layout.cardWidth) else { continue }
+            ImagePipeline.shared.prefetch(artwork.url, pixels: CGSize(
+                width: (artwork.size.width * scale).rounded(.up),
+                height: (artwork.size.height * scale).rounded(.up)))
+        }
     }
 
     /// First appearance: show cache, fetch if missing or stale. With `keepPlace` (FeedView,
@@ -275,6 +293,7 @@ final class FeedModel: ObservableObject {
         guard let page else {
             sections = []
             itemCount = 0
+            drawOrder = []
             return
         }
         var start = 0
@@ -290,6 +309,13 @@ final class FeedModel: ObservableObject {
         }
         sections = rebuilt
         itemCount = start
+        var order: [(item: FeedItem, inGrid: Bool)] = []
+        order.reserveCapacity(start)
+        for section in rebuilt {
+            for card in section.cards { order.append((item: card.item, inGrid: section.style == .grid)) }
+            for card in section.shelf { order.append((item: card.item, inGrid: false)) }
+        }
+        drawOrder = order
     }
 }
 
@@ -319,23 +345,25 @@ struct FeedSectionModel: Identifiable, Equatable {
         count = section.items.count
         self.generation = generation
         // Keys come from the whole section (a video listed twice is numbered as before);
-        // `offset` becomes the position in the page and `slot` the position in the grid or shelf.
+        // `offset` becomes the position in the page and `slot` the position in the order the
+        // feed is drawn (the grid, then its shelf), which starts at `start` too.
         let keyed = section.items.keyed.map { entry in
             KeyedFeedItem(id: entry.id, offset: start + entry.offset, item: entry.item)
         }
         switch section.style {
         case .grid:
-            cards = Self.slotted(keyed.filter { !$0.item.isShortVideo })
-            shelf = Self.slotted(keyed.filter { $0.item.isShortVideo })
+            let gridCards = keyed.filter { !$0.item.isShortVideo }
+            cards = Self.slotted(gridCards, from: start)
+            shelf = Self.slotted(keyed.filter { $0.item.isShortVideo }, from: start + gridCards.count)
         case .row, .shorts:
-            cards = Self.slotted(keyed)
+            cards = Self.slotted(keyed, from: start)
             shelf = []
         }
     }
 
-    private static func slotted(_ entries: [KeyedFeedItem]) -> [KeyedFeedItem] {
-        entries.enumerated().map { slot, entry in
-            KeyedFeedItem(id: entry.id, offset: entry.offset, item: entry.item, slot: slot)
+    private static func slotted(_ entries: [KeyedFeedItem], from first: Int) -> [KeyedFeedItem] {
+        entries.enumerated().map { index, entry in
+            KeyedFeedItem(id: entry.id, offset: entry.offset, item: entry.item, slot: first + index)
         }
     }
 
@@ -542,9 +570,7 @@ struct FeedSectionView: View, Equatable {
             case .grid:
                 grid
             case .row, .shorts:
-                ShelfRow(entries: section.cards) { entry in
-                    feed.cardAppeared(at: entry.offset, model)
-                }
+                ShelfRow(entries: section.cards, cardAppeared: cardAppeared)
             }
         }
     }
@@ -558,34 +584,24 @@ struct FeedSectionView: View, Equatable {
                 }
             }
             if !section.shelf.isEmpty {
-                ShelfRow(entries: section.shelf) { entry in
-                    feed.cardAppeared(at: entry.offset, model)
-                }
+                ShelfRow(entries: section.shelf, cardAppeared: cardAppeared)
             }
         }
     }
 
-    /// Loads the next page when the end is near, and the artwork of the next two rows: the grid
-    /// only makes a row's cards as it scrolls into view, so a card's image used to start
-    /// downloading when the focus was already landing on it (a grey card under the focus).
+    /// Loads the next page when the end is near and fetches the artwork of the next cards.
     private func cardAppeared(_ entry: KeyedFeedItem) {
-        feed.cardAppeared(at: entry.offset, model)
-        let next = section.cards.dropFirst(entry.slot + 1).prefix(Layout.gridColumns * 2)
-        for upcoming in next {
-            guard let artwork = upcoming.item.artwork(cardWidth: cardWidth) else { continue }
-            ImagePipeline.shared.prefetch(artwork.url, pixels: CGSize(
-                width: (artwork.size.width * displayScale).rounded(.up),
-                height: (artwork.size.height * displayScale).rounded(.up)))
-        }
+        feed.cardAppeared(entry, model, gridCardWidth: cardWidth, scale: displayScale)
     }
 }
 
 struct ShelfRow: View {
     let entries: [KeyedFeedItem]
-    /// A card came on screen (FeedView loads the next page when it's near the end).
-    let cardAppeared: (KeyedFeedItem) -> Void
+    /// A card came on screen (FeedView loads the next page near the end and fetches the artwork
+    /// of the cards after it).
+    let cardAppeared: @MainActor (KeyedFeedItem) -> Void
 
-    init(entries: [KeyedFeedItem], cardAppeared: @escaping (KeyedFeedItem) -> Void = { _ in }) {
+    init(entries: [KeyedFeedItem], cardAppeared: @escaping @MainActor (KeyedFeedItem) -> Void = { _ in }) {
         self.entries = entries
         self.cardAppeared = cardAppeared
     }
@@ -619,7 +635,7 @@ struct KeyedFeedItem: Identifiable {
     /// Position in the list it came from (for FeedView's sections: in the whole page).
     let offset: Int
     let item: FeedItem
-    /// Position in its grid or shelf.
+    /// Position in the order the feed draws its cards (FeedView: a grid, then its Shorts shelf).
     var slot = 0
 }
 

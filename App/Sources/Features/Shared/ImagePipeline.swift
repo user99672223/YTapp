@@ -22,7 +22,7 @@ extension URLCache {
 /// again, had the full-size picture (1280×720 for most thumbnails, up to 1080×1920 for Shorts)
 /// decoded on the main thread in the middle of the scroll animation, and faded in. Here each image
 /// - is decoded and scaled down to the pixel size it is drawn at, on a background queue (a grid
-///   thumbnail takes about a third of the memory of the full picture, a Short's a fifth);
+///   card's 1280×720 thumbnail becomes 364×205 pixels on a 1080p screen, 728×410 on a 4K one);
 /// - stays decoded in memory (NSCache, emptied on a memory warning), so a card that comes back
 ///   draws its image in its first frame, without a placeholder or a fade;
 /// - is requested once however many cards ask for it at the same time, through `URLCache.images`;
@@ -95,17 +95,14 @@ final class ImagePipeline: @unchecked Sendable {
         urlCache = cache
         let config = URLSessionConfiguration.default
         config.urlCache = cache
-        // Thumbnail URLs change when the picture does (YouTube signs them), so a stored copy is
-        // used without asking the server again.
-        config.requestCachePolicy = .returnCacheDataElseLoad
-        config.timeoutIntervalForRequest = 30
         session = URLSession(configuration: config)
         decodeQueue.name = "com.local.tube.images.decode"
         decodeQueue.maxConcurrentOperationCount = 3
         decodeQueue.qualityOfService = .userInitiated
-        // About 130 grid thumbnails (≈1.2 MB each on a 4K screen): what's on screen, what's
-        // around it and a few screens back.
-        memory.totalCostLimit = 160 * 1024 * 1024
+        // A few screens back: 400 cards, about 120 MB of grid thumbnails on a 1080p screen
+        // (≈0.3 MB each); on a 4K one (≈1.2 MB each) the byte limit keeps about 100.
+        memory.totalCostLimit = 128 * 1024 * 1024
+        memory.countLimit = 400
         memory.delegate = evictions
         evictions.onEvict = { [weak self] object in
             guard let self, let entry = object as? Entry else { return }
@@ -197,7 +194,9 @@ final class ImagePipeline: @unchecked Sendable {
 
     private func fetch(_ key: LoadKey) async throws -> UIImage {
         do {
-            let request = URLRequest(url: key.url)
+            // Thumbnail URLs change when the picture does (YouTube signs them), so a stored copy
+            // is used without asking the server again.
+            let request = URLRequest(url: key.url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 30)
             let wasStored = urlCache.cachedResponse(for: request) != nil
             let (data, response) = try await session.data(for: request)
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
