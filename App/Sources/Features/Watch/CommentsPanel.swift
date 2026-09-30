@@ -4,9 +4,9 @@ import Core
 /// The comments side panel, shared by the watch page and Shorts: "Comments" with the count and
 /// Done, then the list, or one comment with its replies. The host places it at the trailing edge
 /// (width, material background, focus section, transition), picks the margins that go with that
-/// placement, and keeps the video playing underneath; Back/Menu on the list is handled by the
-/// host, which closes the panel. In a thread, Menu goes back to the list. Closing the panel also
-/// closes the thread, so the next opening starts on the list.
+/// placement, and keeps the video playing underneath. Back/Menu is handled here, one step per
+/// press: in a thread it goes back to the list, on the list it closes the panel (`close`, like
+/// Done). Closing the panel also closes the thread, so the next opening starts on the list.
 struct CommentsPanel: View {
     @ObservedObject var comments: CommentsModel
     let margins: CommentsMargins
@@ -54,7 +54,7 @@ struct CommentsPanel: View {
         }
         .animation(.easeInOut(duration: 0.25), value: comments.thread?.comment.id)
         .defaultFocus($focus, initialTarget ?? .done)
-        .onExitCommand(perform: backToList)
+        .onExitCommand(perform: goBack)
         .onAppear {
             comments.load()
             placesInitialFocus = true
@@ -114,10 +114,17 @@ struct CommentsPanel: View {
         }
     }
 
-    /// Menu in a thread goes back to the list; on the list it's left to the host (nil).
-    private var backToList: (() -> Void)? {
-        guard isThreadOpen else { return nil }
-        return { comments.closeThread() }
+    /// Back/Menu, one step per press: from a thread to the list, from the list out of the panel
+    /// (like Done). It's decided when the button is pressed, not when the panel was last drawn:
+    /// a handler that switched between "close the thread" and nil (left to the host) could still
+    /// be the thread's one after the thread had closed, and swallow the press that should have
+    /// closed the panel.
+    private func goBack() {
+        if isThreadOpen {
+            comments.closeThread()
+        } else {
+            close()
+        }
     }
 
     private var initialTarget: CommentFocus? {
