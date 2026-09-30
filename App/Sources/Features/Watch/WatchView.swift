@@ -582,6 +582,9 @@ private struct ControlsOverlay: View {
                     }
                 }
                 .scrollIndicators(.hidden)
+                // A horizontal scroll view also stretches vertically: without this it took the
+                // overlay's free height from the Spacer above and pushed the controls to the top.
+                .fixedSize(horizontal: false, vertical: true)
                 // The focused card grows and casts a shadow past the row's edges.
                 .scrollClipDisabled()
                 .focusSection()
