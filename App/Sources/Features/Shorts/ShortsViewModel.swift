@@ -26,8 +26,8 @@ final class ShortsViewModel: ObservableObject {
     /// mpv shows the current Short's picture. Until then the pager shows its poster, so paging
     /// never flashes black or the previous Short's last frame.
     @Published private(set) var isVideoOnScreen = false
-    /// Details of the Shorts around the current one, by id: the pager shows their posters and
-    /// titles while they slide in.
+    /// Details of the Shorts around the current one, by id: the pager shows their titles while
+    /// they slide in (and their thumbnails where a poster from `poster(at:)` can't be loaded).
     @Published private(set) var details: [String: ShortDetails] = [:]
     @Published var toast: String?
 
@@ -128,6 +128,17 @@ final class ShortsViewModel: ObservableObject {
         ids.indices.contains(position) ? details[ids[position]] : nil
     }
 
+    /// The poster of the Short at `position`: its vertical thumbnail, which needs only the id (the
+    /// bridge's own fallback), so every Short has one the moment it enters the pager, details or
+    /// not, and it never changes under a Short that is on screen.
+    func poster(at position: Int) -> URL? {
+        ids.indices.contains(position) ? Self.poster(for: ids[position]) : nil
+    }
+
+    private static func poster(for id: String) -> URL? {
+        URL(string: "https://i.ytimg.com/vi/\(id)/oar2.jpg")
+    }
+
     func next() {
         guard !ids.isEmpty else { return }
         if index + 1 < ids.count {
@@ -186,6 +197,9 @@ final class ShortsViewModel: ObservableObject {
         let id = ids[position]
         if comments.videoId != id { comments.reset(videoId: id) }
         phase = .loading("Loading Short…")
+        // The next poster is in the pager already; the one after it comes in with the next page.
+        warmPoster(poster(at: position + 1))
+        warmPoster(poster(at: position + 2))
         do {
             if !freshLinks, let running = preparing[id] {
                 // Its preparation is on the way: wait for it rather than asking the bridge twice.
@@ -198,7 +212,7 @@ final class ShortsViewModel: ObservableObject {
                 ready = saved
                 earlier = true
             } else {
-                ready = try await prepare(id, refresh: freshLinks)
+                ready = try await prepare(id, refresh: freshLinks) { self.index == position && !self.closed }
                 earlier = false
             }
             guard index == position, !closed else { return }
@@ -245,14 +259,20 @@ final class ShortsViewModel: ObservableObject {
         isSubscribed = info.channel.isSubscribed
     }
 
-    private func prepare(_ id: String, refresh: Bool) async throws -> Prepared {
+    /// `stillWanted` is asked before each further bridge call: a Short the viewer paged past, or a
+    /// player that closed, shouldn't cost a stream resolution (and its googlevideo probe) that
+    /// nobody plays. It stops with `CancellationError` then.
+    private func prepare(_ id: String, refresh: Bool, stillWanted: () -> Bool) async throws -> Prepared {
         let info = try await detailsFor(id, refresh: refresh)
+        guard stillWanted() else { throw CancellationError() }
         do {
             let (selection, streams) = try await selectAndResolve(id, formats: info.formats)
             return Prepared(info: info, selection: selection, streams: streams)
         } catch let error as BridgeError where error.kind == .expired {
             // The bridge dropped this Short's player data; fetch it again.
+            guard stillWanted() else { throw CancellationError() }
             let fresh = try await detailsFor(id, refresh: true)
+            guard stillWanted() else { throw CancellationError() }
             let (selection, streams) = try await selectAndResolve(id, formats: fresh.formats)
             return Prepared(info: fresh, selection: selection, streams: streams)
         }
@@ -288,7 +308,8 @@ final class ShortsViewModel: ObservableObject {
         prepared = prepared.filter { neighbours.contains($0.key) }
     }
 
-    /// Prepares the Short at `position`: details, stream links and poster.
+    /// Prepares the Short at `position`: its details and stream links (`show` warms its poster).
+    /// Given up once that Short is no longer next to the current one.
     private func prefetch(_ position: Int) {
         guard ids.indices.contains(position) else { return }
         let id = ids[position]
@@ -298,22 +319,30 @@ final class ShortsViewModel: ObservableObject {
             guard let self else { return }
             defer { self.preparing[id] = nil }
             do {
-                let ready = try await self.prepare(id, refresh: false)
+                let ready = try await self.prepare(id, refresh: false) {
+                    !self.closed && !Task.isCancelled && self.isNeighbour(id)
+                }
                 guard !self.closed else { return }
                 self.prepared[id] = ready
-                self.warmPoster(ready.info.thumbnail)
+            } catch is CancellationError {
+                // Paged away or closed: nothing to prepare any more.
             } catch {
                 // Not shown: the Short is loaded (and its failure shown) when it comes up.
                 self.model.logs.append(.info, "Shorts: preparing \(id) failed: \(BridgeError.wrap(error).message)")
-                if let info = self.details[id] { self.warmPoster(info.thumbnail) }
             }
         }
     }
 
+    /// `id` is the current Short or one next to it: the ones whose prepared links are kept.
+    private func isNeighbour(_ id: String) -> Bool {
+        guard let position = ids.firstIndex(of: id) else { return false }
+        return abs(position - index) <= 1
+    }
+
     /// Loads a poster into URLCache.shared, which the image views read from, so it's there the
     /// moment its Short slides in.
-    private func warmPoster(_ thumbnail: String?) {
-        guard let thumbnail, let url = URL(string: thumbnail) else { return }
+    private func warmPoster(_ url: URL?) {
+        guard let url else { return }
         let request = URLRequest(url: url)
         guard URLCache.shared.cachedResponse(for: request) == nil else { return }
         URLSession.shared.dataTask(with: request).resume()

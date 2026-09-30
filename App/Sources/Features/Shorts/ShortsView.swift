@@ -171,7 +171,10 @@ private struct ShortsContent: View {
                 .transition(.opacity)
             }
         }
-        .background { ShortsBackdrop(url: vm.short(at: vm.index)?.thumbnail.flatMap(URL.init(string:))) }
+        .background {
+            ShortsBackdrop(url: vm.poster(at: vm.index),
+                           fallback: vm.short(at: vm.index)?.thumbnail.flatMap(URL.init(string:)))
+        }
         .animation(Self.panelAnimation, value: showComments)
         .animation(.easeInOut(duration: 0.2), value: vm.toast)
         .defaultFocus($focus, .video)
@@ -386,7 +389,8 @@ private struct ShortsPager: View {
         ZStack {
             Color.black
             ForEach(pages) { page in
-                RemoteImage(url: vm.short(at: page.position)?.thumbnail.flatMap(URL.init(string:)))
+                ShortPoster(url: vm.poster(at: page.position),
+                            fallback: vm.short(at: page.position)?.thumbnail.flatMap(URL.init(string:)))
                     .frame(width: size.width, height: size.height)
                     .clipped()
                     .offset(y: yOffset(of: page))
@@ -624,18 +628,40 @@ private struct CommentsActionButton: View {
     }
 }
 
+/// A Short's poster: its vertical thumbnail from the id alone, so it never waits for the details
+/// and never switches under the viewer; if that one can't be loaded, the thumbnail from its
+/// details (once they're known).
+private struct ShortPoster: View {
+    let url: URL?
+    let fallback: URL?
+
+    var body: some View {
+        AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().aspectRatio(contentMode: .fill)
+            case .failure:
+                RemoteImage(url: fallback)
+            default:
+                Color.white.opacity(0.08)
+            }
+        }
+    }
+}
+
 /// The current Short's poster, blurred and darkened behind everything, crossfading on paging.
 private struct ShortsBackdrop: View {
     let url: URL?
-    /// The last poster shown: a Short whose details are still loading keeps the previous one
-    /// instead of dipping to black.
+    let fallback: URL?
+    /// The last poster shown: while the feed is still loading (no Short yet) it stays instead of
+    /// dipping to black.
     @State private var shown: URL? = nil
 
     var body: some View {
         ZStack {
             Color.black
             if let shown {
-                RemoteImage(url: shown)
+                ShortPoster(url: shown, fallback: fallback)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                     .blur(radius: 70, opaque: true)
