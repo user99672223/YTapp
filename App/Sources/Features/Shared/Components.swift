@@ -28,6 +28,9 @@ enum Layout {
     /// The width between the side margins of a list on the Apple TV's 1920-point screen (80-point
     /// safe area plus `horizontalPadding` on each side). Used until the real width is measured.
     static let defaultContentWidth: CGFloat = 1920 - 2 * (screenMargin + horizontalPadding)
+    /// The band a list's first-load states (loading, failure, nothing here) are centred in under
+    /// its header, so the list doesn't jump when one of them replaces another.
+    static let stateHeight: CGFloat = 500
 
     /// Width of each of `count` equal columns that exactly fill `width`, so a grid has the same
     /// margin on the right as on the left.

@@ -446,7 +446,7 @@ struct FeedView<Header: View>: View {
                 } else if let error = feed.error {
                     errorView(error)
                 } else {
-                    LoadingView().frame(height: 500)
+                    LoadingView().frame(minHeight: Layout.stateHeight)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -483,6 +483,7 @@ struct FeedView<Header: View>: View {
                 errorView(error)
             } else {
                 EmptyStateView(systemImage: emptySystemImage, text: emptyText)
+                    .frame(minHeight: Layout.stateHeight)
             }
         }
         // Equatable: a loading flag or a new page redraws only the sections that changed, not
@@ -496,10 +497,13 @@ struct FeedView<Header: View>: View {
         }
     }
 
+    /// In the same band as the loading state it replaces (a scroll view doesn't give its
+    /// `maxHeight: .infinity` any height, which left it at the top).
     private func errorView(_ error: BridgeError) -> some View {
         ErrorStateView(error: error, isRetrying: feed.isLoading) {
             Task { await feed.refresh(model, userInitiated: true) }
         }
+        .frame(minHeight: Layout.stateHeight)
     }
 
     /// While pages load by themselves the footer is only a spinner that focus can't land on: a
