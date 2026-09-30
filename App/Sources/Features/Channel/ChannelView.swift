@@ -167,14 +167,10 @@ private struct ChannelPageHeader: View {
                 Picker("Channel section", selection: $channel.tab) {
                     ForEach(tabs) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
                 .focused(tabsFocused)
-                // Leading, right above the list's first card, so Down from the tabs reaches that
-                // card; the full-width focus section brings Up from any column (and Down from
-                // Subscribe, at the trailing end of the header) to the tabs.
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .focusSection()
+                // Its full-width focus section also brings Down from Subscribe, at the trailing
+                // end of the header, to the tabs.
+                .listHeaderPicker()
             }
         }
     }
@@ -258,20 +254,14 @@ private struct ChannelPageHeader: View {
 
 /// A channel's banner behind the header: it fills the header and is cut to the app's banner
 /// corners, darkened towards the bottom, where the avatar, name and Subscribe sit, so they read
-/// well over any artwork. A banner that can't load leaves a plain dark panel (no photo glyph
-/// behind the name).
+/// well over any artwork. It loads through the image pipeline like all artwork (decoded off the
+/// main thread at the size it's drawn, and kept in memory for the next visit). A banner that
+/// can't load leaves a plain dark panel (no photo glyph behind the name).
 private struct ChannelBanner: View {
     let url: URL
 
     var body: some View {
-        Color.white.opacity(0.08)
-            .overlay {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    }
-                }
-            }
+        RemoteImage(url: url, showsFailureGlyph: false)
             .overlay {
                 LinearGradient(
                     stops: [

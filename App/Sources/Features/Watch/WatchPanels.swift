@@ -18,7 +18,8 @@ struct PanelView: View {
 
     var body: some View {
         if panel == .comments {
-            CommentsPanel(comments: vm.comments, close: close)
+            // A floating sheet inside the safe area, like the other panels (see WatchContent).
+            CommentsPanel(comments: vm.comments, margins: CommentsLayout.floating, close: close)
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: Theme.Spacing.row) {
@@ -52,7 +53,6 @@ struct PanelView: View {
         case .speed: return "Playback speed"
         case .quality: return "Quality"
         case .comments: return "Comments"
-        case .upNext: return "Up next"
         }
     }
 
@@ -65,7 +65,6 @@ struct PanelView: View {
         case .speed: speedList
         case .quality: QualityPanel(vm: vm, focus: focus)
         case .comments: EmptyView() // CommentsPanel, above
-        case .upNext: upNextList
         }
     }
 
@@ -115,16 +114,6 @@ struct PanelView: View {
             .focused(focus, equals: .panelRow(RowID.speed(speed)))
         }
     }
-
-    private var upNextList: some View {
-        ForEach(Array((vm.details?.upNext ?? []).enumerated()), id: \.offset) { index, video in
-            PanelChoice(title: video.title, subtitle: video.subtitle, thumbnail: video.thumbnailURL, selected: false) {
-                vm.play(video)
-                close()
-            }
-            .focused(focus, equals: .panelRow(RowID.upNext(index)))
-        }
-    }
 }
 
 extension PanelView {
@@ -165,8 +154,6 @@ extension PanelView {
             if details.channel.id != nil { return .panelRow(RowID.channel) }
             if !InfoPanel.paragraphs(of: details.description).isEmpty { return .panelRow(RowID.paragraph(0)) }
             return .panelDone
-        case .upNext:
-            return vm.details?.upNext.isEmpty == false ? .panelRow(RowID.upNext(0)) : .panelDone
         }
     }
 }
@@ -182,7 +169,6 @@ private enum RowID {
     static func video(_ index: Int) -> String { "video.\(index)" }
     static func audio(_ index: Int) -> String { "audio.\(index)" }
     static func paragraph(_ index: Int) -> String { "info.paragraph.\(index)" }
-    static func upNext(_ index: Int) -> String { "upnext.\(index)" }
 }
 
 /// One row of a side panel: a full-width button with optional artwork, a title, a secondary
@@ -190,7 +176,7 @@ private enum RowID {
 struct PanelChoice: View {
     let title: String
     var subtitle: String?
-    /// Leading artwork (chapter and up-next thumbnails).
+    /// Leading artwork (chapter thumbnails).
     var thumbnail: URL?
     let selected: Bool
     let action: () -> Void
@@ -313,14 +299,22 @@ private struct InfoPanel: View {
             let paragraphs = Self.paragraphs(of: details.description)
             if !paragraphs.isEmpty {
                 PanelSectionTitle(title: "Description")
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
-                    // Focusable only so the remote can scroll through the text; clicking does nothing.
-                    Button {} label: {
-                        DescriptionParagraph(text: paragraph)
+                // Spaced like the comments' text rows: the rows' own padding keeps the text apart.
+                VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
+                    ForEach(Array(paragraphs.enumerated()), id: \.offset) { index, paragraph in
+                        // Focusable only so the remote can scroll through the text; clicking does
+                        // nothing. The same focus look as the comments' text rows.
+                        Button {} label: {
+                            DescriptionParagraph(text: paragraph)
+                        }
+                        .buttonStyle(PanelTextRowStyle())
+                        .focused(focus, equals: .panelRow(RowID.paragraph(index)))
                     }
-                    .buttonStyle(.plain)
-                    .focused(focus, equals: .panelRow(RowID.paragraph(index)))
                 }
+                // The style pads the text by `Theme.Spacing.row` for its platter: pull the rows
+                // out by as much, so the text lines up with the heading and the platter reaches
+                // into the panel's margin, as in the comments.
+                .padding(.horizontal, -Theme.Spacing.row)
             }
         }
     }
@@ -359,7 +353,8 @@ private struct InfoPanel: View {
     }
 }
 
-/// A paragraph of the description: dimmed like secondary text, full brightness while focused.
+/// A paragraph of the description: dimmed like secondary text, full brightness while focused (on
+/// the row's platter).
 private struct DescriptionParagraph: View {
     let text: String
     @Environment(\.isFocused) private var isFocused

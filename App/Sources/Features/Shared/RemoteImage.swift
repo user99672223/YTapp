@@ -12,10 +12,13 @@ import UIKit
 struct RemoteImage: View {
     let url: URL?
     var contentMode: ContentMode = .fill
+    /// An image that can't load shows a photo symbol on the placeholder; false leaves the plain
+    /// placeholder (artwork behind text, such as a channel's banner).
+    var showsFailureGlyph = true
 
     var body: some View {
         GeometryReader { geo in
-            RemoteImageContent(url: url, contentMode: contentMode, size: geo.size)
+            RemoteImageContent(url: url, contentMode: contentMode, showsFailureGlyph: showsFailureGlyph, size: geo.size)
         }
     }
 }
@@ -23,15 +26,17 @@ struct RemoteImage: View {
 private struct RemoteImageContent: View {
     let url: URL?
     let contentMode: ContentMode
+    let showsFailureGlyph: Bool
     let size: CGSize
     @Environment(\.displayScale) private var displayScale
     /// The image on screen, held here too so it stays even if the pipeline's cache drops it.
     @State private var shown: Shown?
     @State private var failedURL: URL?
 
-    init(url: URL?, contentMode: ContentMode, size: CGSize) {
+    init(url: URL?, contentMode: ContentMode, showsFailureGlyph: Bool, size: CGSize) {
         self.url = url
         self.contentMode = contentMode
+        self.showsFailureGlyph = showsFailureGlyph
         self.size = size
     }
 
@@ -69,7 +74,7 @@ private struct RemoteImageContent: View {
             } else {
                 Color.white.opacity(0.08)
                     .overlay {
-                        if let failedURL, failedURL == url {
+                        if showsFailureGlyph, let failedURL, failedURL == url {
                             Image(systemName: "photo").foregroundStyle(.secondary)
                         }
                     }

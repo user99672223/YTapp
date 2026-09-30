@@ -28,6 +28,9 @@ enum Layout {
     /// The width between the side margins of a list on the Apple TV's 1920-point screen (80-point
     /// safe area plus `horizontalPadding` on each side). Used until the real width is measured.
     static let defaultContentWidth: CGFloat = 1920 - 2 * (screenMargin + horizontalPadding)
+    /// The band a list's first-load states (loading, failure, nothing here) are centred in under
+    /// its header, so the list doesn't jump when one of them replaces another.
+    static let stateHeight: CGFloat = 500
 
     /// Width of each of `count` equal columns that exactly fill `width`, so a grid has the same
     /// margin on the right as on the left.
@@ -65,23 +68,33 @@ struct ContentWidthReader: View {
 
 /// Plain message + Retry, used for every failure.
 struct ErrorStateView: View {
+    /// A second way out, drawn under Retry in the same focus section ("Re-enter cookies", "Close").
+    struct SecondaryAction {
+        let title: String
+        let perform: () -> Void
+    }
+
     let title: String
     let message: String
     /// The retry is running: the button shows progress (and stays, keeping focus).
     let isRetrying: Bool
+    let secondary: SecondaryAction?
     let retry: (() -> Void)?
 
-    init(error: BridgeError, isRetrying: Bool = false, retry: (() -> Void)?) {
+    init(error: BridgeError, isRetrying: Bool = false, secondary: SecondaryAction? = nil, retry: (() -> Void)?) {
         title = error.title
         message = error.userMessage
         self.isRetrying = isRetrying
+        self.secondary = secondary
         self.retry = retry
     }
 
-    init(title: String, message: String, isRetrying: Bool = false, retry: (() -> Void)?) {
+    init(title: String, message: String, isRetrying: Bool = false, secondary: SecondaryAction? = nil,
+         retry: (() -> Void)?) {
         self.title = title
         self.message = message
         self.isRetrying = isRetrying
+        self.secondary = secondary
         self.retry = retry
     }
 
@@ -99,17 +112,21 @@ struct ErrorStateView: View {
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: Theme.messageWidth)
-            if let retry {
-                Button {
-                    if !isRetrying { retry() }
-                } label: {
-                    if isRetrying {
-                        HStack(spacing: Theme.Spacing.row) {
-                            ProgressView()
-                            Text("Retrying…")
+            if retry != nil || secondary != nil {
+                VStack(spacing: Theme.Spacing.row) {
+                    if let retry {
+                        Button {
+                            if !isRetrying { retry() }
+                        } label: {
+                            if isRetrying {
+                                ProgressLabel("Retrying…", plain: true)
+                            } else {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
                         }
-                    } else {
-                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                    if let secondary {
+                        Button(secondary.title, action: secondary.perform)
                     }
                 }
                 .padding(.top, Theme.Spacing.row)
@@ -132,6 +149,34 @@ struct LoadingView: View {
             Text(message).font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A spinner with a line of text beside it ("Loading…"), one look everywhere: `Theme.Spacing.row`
+/// apart, the text in the secondary callout style. `plain` keeps the surrounding font and colour
+/// instead (a button's label, a status line among others).
+struct ProgressLabel: View {
+    let text: String
+    var plain = false
+
+    init(_ text: String, plain: Bool = false) {
+        self.text = text
+        self.plain = plain
+    }
+
+    var body: some View {
+        if plain {
+            row
+        } else {
+            row.font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: Theme.Spacing.row) {
+            ProgressView()
+            Text(text)
+        }
     }
 }
 
@@ -187,26 +232,28 @@ struct VideoCard: View {
     @EnvironmentObject private var model: AppModel
     let video: VideoItem
     var width: CGFloat = Layout.cardWidth
+    /// Replaces opening the video on its own watch page (the watch page's Up next row plays it in
+    /// the same session). A card with an action of its own has no context menu.
+    var action: (() -> Void)? = nil
     @State private var watchLaterError: BridgeError?
 
-    private var height: CGFloat { (width * 9 / 16).rounded() }
+    init(video: VideoItem, width: CGFloat = Layout.cardWidth, action: (() -> Void)? = nil) {
+        self.video = video
+        self.width = width
+        self.action = action
+    }
+
+    /// The artwork of a card `width` points wide: 16:9, rounded to whole points. Code that fetches
+    /// artwork ahead asks for this size, so the image it caches is the one the card draws.
+    static func artworkSize(width: CGFloat) -> CGSize {
+        CGSize(width: width, height: (width * 9 / 16).rounded())
+    }
+
+    private var height: CGFloat { Self.artworkSize(width: width).height }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                router.play(video)
-            } label: {
-                artwork
-            }
-            .buttonStyle(.card)
-            .contextMenu {
-                if model.isSignedIn, !video.isShort {
-                    Button("Save to Watch Later") { saveToWatchLater() }
-                }
-                if let channelId = video.channelId {
-                    Button("Go to channel") { router.open(.channel(channelId)) }
-                }
-            }
+            artworkButton
             CardText(title: video.title, detail: video.subtitle, width: width, artworkHeight: height)
         }
         .frame(width: width, alignment: .topLeading)
@@ -215,6 +262,28 @@ struct VideoCard: View {
             Button("OK", role: .cancel) {}
         } message: { error in
             Text(error.userMessage)
+        }
+    }
+
+    @ViewBuilder
+    private var artworkButton: some View {
+        let button = Button {
+            if let action { action() } else { router.play(video) }
+        } label: {
+            artwork
+        }
+        .buttonStyle(.card)
+        if action == nil {
+            button.contextMenu {
+                if model.isSignedIn, !video.isShort {
+                    Button("Save to Watch Later") { saveToWatchLater() }
+                }
+                if let channelId = video.channelId {
+                    Button("Go to channel") { router.open(.channel(channelId)) }
+                }
+            }
+        } else {
+            button
         }
     }
 
@@ -289,7 +358,13 @@ struct ShortCard: View {
     let video: VideoItem
     var width: CGFloat = Layout.shortWidth
 
-    private var height: CGFloat { (width * 16 / 9).rounded() }
+    /// The artwork of a card `width` points wide: 9:16, rounded to whole points (see
+    /// `VideoCard.artworkSize(width:)`).
+    static func artworkSize(width: CGFloat) -> CGSize {
+        CGSize(width: width, height: (width * 16 / 9).rounded())
+    }
+
+    private var height: CGFloat { Self.artworkSize(width: width).height }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -360,7 +435,8 @@ struct PlaylistCard: View {
     let playlist: PlaylistItem
     var width: CGFloat = Layout.cardWidth
 
-    private var height: CGFloat { (width * 9 / 16).rounded() }
+    /// The same 16:9 artwork as a video's.
+    private var height: CGFloat { VideoCard.artworkSize(width: width).height }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -448,11 +524,7 @@ private struct ToastText: View {
         // A container that stays, so the toast slides in and out instead of popping.
         VStack {
             if let message = toasts.message {
-                Label(message, systemImage: "checkmark.circle.fill")
-                    .font(.callout)
-                    .padding(.horizontal, Theme.Spacing.floating)
-                    .padding(.vertical, Theme.Spacing.floating / 2)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+                ToastView(text: message, systemImage: "checkmark.circle.fill")
                     .padding(.top, Theme.Spacing.floating)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -461,10 +533,66 @@ private struct ToastText: View {
     }
 }
 
+/// A short message over the screen: a confirmation ("Saved to Watch Later") or a note about an
+/// action that didn't work. The same box everywhere (the app's toast, the watch page's and
+/// Shorts'): `floatingBox(compact:)`, at most `Theme.messageWidth` wide.
+struct ToastView: View {
+    let text: String
+    /// A symbol before the text (a confirmation's checkmark); nil for plain text, as for messages
+    /// that can also report a failure.
+    var systemImage: String? = nil
+
+    var body: some View {
+        content
+            .font(.callout)
+            .multilineTextAlignment(.center)
+            .floatingBox(compact: true)
+            .frame(maxWidth: Theme.messageWidth)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let systemImage {
+            Label(text, systemImage: systemImage)
+        } else {
+            Text(text)
+        }
+    }
+}
+
+extension View {
+    /// The look of boxes that float over a screen (toasts, banners, the watch page's loading box,
+    /// seek sign, up-next countdown and stats): the regular material with the floating corner
+    /// radius.
+    func floatingBackground() -> some View {
+        background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+    }
+
+    /// A floating box: `Theme.Spacing.floating` padding inside `floatingBackground()`. `compact`
+    /// (one-line boxes such as toasts and the seek sign) halves the padding above and below.
+    func floatingBox(compact: Bool = false) -> some View {
+        padding(.horizontal, Theme.Spacing.floating)
+            .padding(.vertical, compact ? Theme.Spacing.floating / 2 : Theme.Spacing.floating)
+            .floatingBackground()
+    }
+}
+
+extension View {
+    /// A segmented picker at the head of a list (Subscriptions, Library, a channel's tabs): the
+    /// segments as wide as their titles, the same on every screen, at the list's leading edge
+    /// right above its first card, so Down from the picker reaches that card ("Show the latest"
+    /// included). The full-width focus section brings Up from any column back to the picker.
+    func listHeaderPicker() -> some View {
+        pickerStyle(.segmented)
+            .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusSection()
+    }
+}
+
 /// Renders any feed item with the right card.
 struct FeedItemView: View {
     let item: FeedItem
-    var compact = false
     /// Card width for video, playlist and channel cards (a grid column); nil keeps the standard
     /// size.
     var width: CGFloat?

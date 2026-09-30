@@ -22,16 +22,6 @@ public enum FrameRateMatching: String, CaseIterable, Codable, Sendable {
 
 /// Video frame rates and the display refresh rates they are shown at.
 public enum RefreshRate {
-    public static let standard: [Double] = [23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60]
-
-    /// The nearest standard rate (within 0.6 fps), else the rate itself. What Tube asks the TV
-    /// for is `target(fps:)`.
-    public static func match(fps: Double) -> Double? {
-        guard fps.isFinite, fps >= 10 else { return nil }
-        let best = standard.min(by: { abs($0 - fps) < abs($1 - fps) })!
-        return abs(best - fps) <= 0.6 ? best : fps
-    }
-
     /// The refresh rate Tube asks the TV for when a video plays with frame-rate matching on:
     /// 23.976/24 fps → 24 Hz, 25/50 fps → 50 Hz, 29.97/30/59.94/60 fps → 60 Hz. Any other rate
     /// (15, 48, 120 fps…) has no mode of its own and never switches the TV.
@@ -81,8 +71,9 @@ public enum RefreshRate {
 ///   video keep whatever mode is on.
 /// - Only a rate different from the one in effect is requested, so consecutive videos of the same
 ///   rate (autoplay, Up next) keep the mode.
-/// - 24 fps videos only: any other video while the TV is at 24 Hz goes back to the home rate
-///   (60 fps at 24 Hz would drop most frames); at the home rate it doesn't switch.
+/// - 24 fps videos only: any other video while the TV is at 24 Hz, one of unknown frame rate
+///   included, goes back to the home rate (60 fps at 24 Hz would drop most frames); at the home
+///   rate it doesn't switch.
 /// - Leaving the player restores the home rate, and only if Tube changed it.
 public struct FrameRateSwitcher: Equatable, Sendable {
     public enum Decision: Equatable, Sendable {
@@ -139,6 +130,9 @@ public struct FrameRateSwitcher: Equatable, Sendable {
         }
         decidedVideoId = videoId
         guard fps.isFinite, fps > 0 else {
+            // 24 fps videos only: a video that isn't known to be 24 fps goes back to the home
+            // rate like any other (it may well be a 60 fps one).
+            if mode == .only24, requested != nil { return resetToHome(for: "frame rate unknown") }
             return keep("display: frame rate unknown → keeping \(hz(current))")
         }
         let video = "\(RefreshRate.format(fps)) fps"

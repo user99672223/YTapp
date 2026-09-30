@@ -3,11 +3,13 @@ import Core
 
 /// The comments side panel, shared by the watch page and Shorts: "Comments" with the count and
 /// Done, then the list, or one comment with its replies. The host places it at the trailing edge
-/// (width, material background, focus section, transition) and keeps the video playing
-/// underneath; Back/Menu on the list is handled by the host, which closes the panel. In a thread,
-/// Menu goes back to the list.
+/// (width, material background, focus section, transition), picks the margins that go with that
+/// placement, and keeps the video playing underneath; Back/Menu on the list is handled by the
+/// host, which closes the panel. In a thread, Menu goes back to the list. Closing the panel also
+/// closes the thread, so the next opening starts on the list.
 struct CommentsPanel: View {
     @ObservedObject var comments: CommentsModel
+    let margins: CommentsMargins
     let close: () -> Void
     @FocusState private var focus: CommentFocus?
     /// Focus goes to the first comment (or Retry, or the "no comments" line) as soon as the list
@@ -17,33 +19,38 @@ struct CommentsPanel: View {
     /// Focus moves wait this long (60 ms), so the target is laid out and enabled when it's asked for.
     static let focusDelay: UInt64 = 60_000_000
 
-    init(comments: CommentsModel, close: @escaping () -> Void) {
+    /// `margins`: `CommentsLayout.floating` on a sheet inside the safe area, like the watch page's
+    /// panels; `CommentsLayout.screenEdge` (the default) when the host lets the panel's material
+    /// reach the screen's edges, as Shorts does. The default is the one that keeps the content out
+    /// of the TV's overscan band wherever the panel is placed.
+    init(comments: CommentsModel, margins: CommentsMargins = CommentsLayout.screenEdge, close: @escaping () -> Void) {
         _comments = ObservedObject(wrappedValue: comments)
+        self.margins = margins
         self.close = close
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
             header
-                .padding(.leading, CommentsLayout.leading)
-                .padding(.trailing, CommentsLayout.trailing)
-                .padding(.top, CommentsLayout.top)
+                .padding(.leading, margins.leading)
+                .padding(.trailing, margins.trailing)
+                .padding(.top, margins.top)
             ZStack(alignment: .topLeading) {
                 // The list stays while a thread is open (hidden and disabled), so Back finds it
                 // scrolled where it was, with the comment to focus on screen.
-                CommentScroller {
+                CommentScroller(margins: margins) {
                     CommentsList(comments: comments, focus: $focus)
                 }
                 .opacity(isThreadOpen ? 0 : 1)
                 .disabled(isThreadOpen)
                 .accessibilityHidden(isThreadOpen)
                 if let thread = comments.thread {
-                    CommentThreadView(thread: thread, comments: comments, focus: $focus)
+                    CommentThreadView(thread: thread, comments: comments, margins: margins, focus: $focus)
                         .id(thread.comment.id)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .padding(.bottom, CommentsLayout.bottom)
+            .padding(.bottom, margins.outsideBottom)
         }
         .animation(.easeInOut(duration: 0.25), value: comments.thread?.comment.id)
         .defaultFocus($focus, initialTarget ?? .done)
@@ -52,6 +59,11 @@ struct CommentsPanel: View {
             comments.load()
             placesInitialFocus = true
             placeInitialFocus()
+        }
+        .onDisappear {
+            // Done or Back inside a thread: the next opening (the same video's comments are kept)
+            // starts on the list, where the first comment takes focus.
+            comments.closeThread()
         }
         .onChange(of: initialTarget) { _, target in
             // The list started over (reload, another video): place focus again when it's back.

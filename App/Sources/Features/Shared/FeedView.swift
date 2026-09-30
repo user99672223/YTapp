@@ -115,8 +115,9 @@ final class FeedModel: ObservableObject {
     /// artwork of the cards drawn after it is fetched now. A lazy grid or shelf only makes a
     /// card as it scrolls into view, so its image used to start downloading when the focus was
     /// already landing on it (a grey card under the focus, then a fade).
-    /// `generation` is the one of the section that drew the card; `gridCardWidth` and `scale`
-    /// give the size the cards draw their artwork at.
+    /// `generation` is the one of the section that drew the card; `gridCardWidth` (the width a
+    /// grid hands its cards; a shelf's cards keep their own) and `scale` give the size the cards
+    /// draw their artwork at.
     func cardAppeared(_ entry: KeyedFeedItem, generation: Int, _ model: AppModel, gridCardWidth: CGFloat, scale: CGFloat) {
         guard generation == self.generation else { return }
         cardsOnScreen.insert(entry.offset)
@@ -126,7 +127,7 @@ final class FeedModel: ObservableObject {
         }
         let next = drawOrder.dropFirst(entry.slot + 1).prefix(Self.artworkAheadCount)
         for upcoming in next {
-            guard let artwork = upcoming.item.artwork(cardWidth: upcoming.inGrid ? gridCardWidth : Layout.cardWidth) else { continue }
+            guard let artwork = upcoming.item.artwork(cardWidth: upcoming.inGrid ? gridCardWidth : nil) else { continue }
             ImagePipeline.shared.prefetch(artwork.url, pixels: CGSize(
                 width: (artwork.size.width * scale).rounded(.up),
                 height: (artwork.size.height * scale).rounded(.up)))
@@ -445,7 +446,7 @@ struct FeedView<Header: View>: View {
                 } else if let error = feed.error {
                     errorView(error)
                 } else {
-                    LoadingView().frame(height: 500)
+                    LoadingView().frame(minHeight: Layout.stateHeight)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -482,6 +483,7 @@ struct FeedView<Header: View>: View {
                 errorView(error)
             } else {
                 EmptyStateView(systemImage: emptySystemImage, text: emptyText)
+                    .frame(minHeight: Layout.stateHeight)
             }
         }
         // Equatable: a loading flag or a new page redraws only the sections that changed, not
@@ -495,10 +497,13 @@ struct FeedView<Header: View>: View {
         }
     }
 
+    /// In the same band as the loading state it replaces (a scroll view doesn't give its
+    /// `maxHeight: .infinity` any height, which left it at the top).
     private func errorView(_ error: BridgeError) -> some View {
         ErrorStateView(error: error, isRetrying: feed.isLoading) {
             Task { await feed.refresh(model, userInitiated: true) }
         }
+        .frame(minHeight: Layout.stateHeight)
     }
 
     /// While pages load by themselves the footer is only a spinner that focus can't land on: a
@@ -512,11 +517,8 @@ struct FeedView<Header: View>: View {
                 Text(error.userMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             if feed.loadsMoreByItself, !footerFocused {
-                HStack(spacing: 16) {
-                    ProgressView()
-                    Text("Loading…").foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 10)
+                ProgressLabel("Loading…")
+                    .padding(.vertical, 10)
             } else {
                 Button {
                     if feed.canLoadMore {
@@ -547,10 +549,7 @@ struct FeedView<Header: View>: View {
     @ViewBuilder
     private var footerLabel: some View {
         if feed.isLoadingMore {
-            HStack(spacing: 16) {
-                ProgressView()
-                Text("Loading…")
-            }
+            ProgressLabel("Loading…", plain: true)
         } else if feed.canLoadMore {
             if feed.moreError != nil {
                 Label("Retry", systemImage: "arrow.clockwise")
@@ -615,8 +614,10 @@ struct FeedSectionView: View, Equatable {
         }
     }
 
+    /// The grid, then its Shorts shelf one row spacing under its last row of text, as far as the
+    /// grid's rows are from each other.
     private var grid: some View {
-        VStack(alignment: .leading, spacing: 40) {
+        VStack(alignment: .leading, spacing: Layout.rowSpacing - ShelfRow.liftRoom(for: section.shelf)) {
             LazyVGrid(columns: columns, alignment: .leading, spacing: Layout.rowSpacing) {
                 ForEach(section.cards) { entry in
                     FeedItemView(item: entry.item, width: cardWidth)
@@ -641,6 +642,9 @@ struct FeedSectionView: View, Equatable {
     }
 }
 
+/// A horizontal row of cards. It takes the same spacings as a grid (`Theme.Spacing.titleToContent`
+/// under a title, `Layout.rowSpacing` under a grid's text, `Theme.Spacing.section` to the next
+/// section) and keeps only `liftRoom(for:)` above its cards.
 struct ShelfRow: View {
     let entries: [KeyedFeedItem]
     /// A card came on screen (FeedView loads the next page near the end and fetches the artwork
@@ -657,8 +661,15 @@ struct ShelfRow: View {
         self.cardDisappeared = cardDisappeared
     }
 
-    init(items: [FeedItem]) {
-        self.init(entries: items.keyed)
+    /// Room kept above the cards: the part of their focus lift that goes past a video card's. The
+    /// spacings above a row leave room for a focused video card to lift into; a focused Short
+    /// reaches twice as far up (`Layout.focusOverflow`), and this keeps it as clear of the title
+    /// or text above. The cards' own text already starts below their lift, so nothing is kept
+    /// below them.
+    static func liftRoom(for entries: [KeyedFeedItem]) -> CGFloat {
+        guard entries.contains(where: { $0.item.isShortVideo }) else { return 0 }
+        return Layout.focusOverflow(ShortCard.artworkSize(width: Layout.shortWidth).height)
+            - Layout.focusOverflow(VideoCard.artworkSize(width: Layout.cardWidth).height)
     }
 
     var body: some View {
@@ -670,10 +681,11 @@ struct ShelfRow: View {
                         .onDisappear { cardDisappeared(entry) }
                 }
             }
-            .padding(.vertical, 30)
+            .padding(.top, Self.liftRoom(for: entries))
         }
         // The row lines up with the list on the safe-area margin but isn't clipped there: its
-        // cards scroll out to the screen's edges and the first card's focus lift and shadow show.
+        // cards scroll out to the screen's edges, and a focused card's lift and shadow show
+        // above and below the row.
         .scrollClipDisabled()
         .focusSection()
     }
@@ -707,24 +719,25 @@ extension FeedItem {
         return false
     }
 
-    /// The artwork a card shows for this item and its size in points, as the cards in
-    /// Components.swift draw it (VideoCard and PlaylistCard: 16:9 at the grid's card width;
-    /// ShortCard: 9:16 at `Layout.shortWidth`; ChannelCard: `ChannelCard.avatarDiameter` of the
-    /// grid's card width), so a prefetched image is the one the card asks for.
-    func artwork(cardWidth: CGFloat) -> (url: URL, size: CGSize)? {
+    /// The artwork `FeedItemView(item:width:)` draws for this item and its size in points, from
+    /// the cards' own size functions, so a prefetched image is exactly the one the card asks for
+    /// (the image pipeline only shares a load between requests of the same pixel size).
+    /// `cardWidth` is the width passed to `FeedItemView`: a grid's column, or nil in a shelf,
+    /// where every kind of card keeps its own width. Shorts keep theirs in a grid too.
+    func artwork(cardWidth: CGFloat?) -> (url: URL, size: CGSize)? {
         switch self {
         case .video(let video):
             guard let url = video.thumbnailURL else { return nil }
             if video.isShort {
-                return (url, CGSize(width: Layout.shortWidth, height: Layout.shortWidth * 16 / 9))
+                return (url, ShortCard.artworkSize(width: Layout.shortWidth))
             }
-            return (url, CGSize(width: cardWidth, height: cardWidth * 9 / 16))
+            return (url, VideoCard.artworkSize(width: cardWidth ?? Layout.cardWidth))
         case .playlist(let playlist):
             guard let url = playlist.thumbnail.flatMap(URL.init(string:)) else { return nil }
-            return (url, CGSize(width: cardWidth, height: cardWidth * 9 / 16))
+            return (url, VideoCard.artworkSize(width: cardWidth ?? Layout.cardWidth))
         case .channel(let channel):
             guard let url = channel.avatar.flatMap(URL.init(string:)) else { return nil }
-            let side = ChannelCard.avatarDiameter(forWidth: cardWidth)
+            let side = ChannelCard.avatarDiameter(forWidth: cardWidth ?? Layout.channelWidth)
             return (url, CGSize(width: side, height: side))
         }
     }

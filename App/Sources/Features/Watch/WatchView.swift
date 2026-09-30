@@ -26,7 +26,7 @@ private struct WatchScreen: View {
 }
 
 enum WatchPanel: String, Identifiable {
-    case info, chapters, captions, speed, quality, comments, upNext
+    case info, chapters, captions, speed, quality, comments
     var id: String { rawValue }
 }
 
@@ -107,7 +107,8 @@ private struct WatchContent: View {
             // screen: at the top, beside an open panel rather than under it.
             VStack(spacing: Theme.Spacing.row) {
                 if let toast = vm.toast {
-                    WatchToast(text: toast)
+                    // Plain text: the watch page's messages report failures too.
+                    ToastView(text: toast)
                 }
                 if showsControls {
                     statusBox
@@ -138,11 +139,8 @@ private struct WatchContent: View {
             if case .failed(let error) = vm.phase {
                 ZStack {
                     Color.black.opacity(0.85).ignoresSafeArea()
-                    VStack(spacing: 0) {
-                        // Its own height only, so Close sits right under Retry.
-                        ErrorStateView(error: error) { vm.retry() }
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Close") { closeWatch() }
+                    ErrorStateView(error: error, secondary: .init(title: "Close") { closeWatch() }) {
+                        vm.retry()
                     }
                 }
             }
@@ -246,10 +244,8 @@ private struct WatchContent: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 28)
-            .floatingBackground()
-            .frame(maxWidth: 900)
+            .floatingBox()
+            .frame(maxWidth: Theme.messageWidth)
         } else if isBuffering {
             HStack(spacing: Theme.Spacing.titleToContent) {
                 ProgressView()
@@ -266,9 +262,7 @@ private struct WatchContent: View {
                     }
                 }
             }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 28)
-            .floatingBackground()
+            .floatingBox()
         }
     }
 
@@ -328,9 +322,6 @@ private struct WatchContent: View {
         panelFocus = nil
         controlsVisible = true
         switch closing {
-        case .upNext:
-            // Nothing in the controls opens it.
-            focus = .playPause
         case .chapters where vm.chapters.isEmpty:
             // The video changed under the panel and the new one has no Chapters button.
             focus = .playPause
@@ -563,15 +554,20 @@ private struct ControlsOverlay: View {
         .focused(focus, equals: .opener(panel))
     }
 
+    /// Width of the cards in the Up next row.
+    private static let upNextCardWidth: CGFloat = 288
+
     @ViewBuilder
     private var upNextRow: some View {
-        if let upNext = vm.details?.upNext, !upNext.isEmpty {
+        // The previous video's details stay until the next one's arrive; so would its Up next.
+        if let details = vm.details, details.id == vm.videoId, !details.upNext.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
                 Text("Up next").font(.headline).foregroundStyle(.secondary)
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: Layout.cardSpacing) {
-                        ForEach(Array(upNext.prefix(20).enumerated()), id: \.offset) { _, video in
-                            UpNextCard(video: video) {
+                        ForEach(Array(details.upNext.prefix(20).enumerated()), id: \.offset) { _, video in
+                            // The app's video card, playing in this watch session.
+                            VideoCard(video: video, width: Self.upNextCardWidth) {
                                 vm.play(video)
                                 // This row turns into the next video's; keep focus on a control
                                 // that stays.
@@ -630,39 +626,6 @@ private struct ControlButton: View {
                     .accessibilityHidden(true)
             }
         }
-    }
-}
-
-/// An up-next video in the controls: artwork with the card focus effect and the title under it,
-/// like the cards in the rest of the app. Plays in this watch session.
-private struct UpNextCard: View {
-    let video: VideoItem
-    let play: () -> Void
-
-    private static let width: CGFloat = 288
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.cardToText) {
-            Button(action: play) {
-                ZStack(alignment: .bottomTrailing) {
-                    RemoteImage(url: video.thumbnailURL)
-                        .frame(width: Self.width, height: Self.width * 9 / 16)
-                        .clipped()
-                    if video.isLive {
-                        Badge(text: "LIVE", color: .red).padding(8)
-                    } else if let duration = video.durationText {
-                        Badge(text: duration).padding(8)
-                    }
-                }
-                .frame(width: Self.width, height: Self.width * 9 / 16)
-            }
-            .buttonStyle(.card)
-            Text(video.title)
-                .font(.caption.weight(.medium))
-                .lineLimit(2, reservesSpace: true)
-                .frame(width: Self.width, alignment: .leading)
-        }
-        .frame(width: Self.width, alignment: .topLeading)
     }
 }
 
@@ -763,14 +726,9 @@ private struct ScrubberBar: View {
 }
 
 // MARK: - Floating boxes
-
-private extension View {
-    /// The watch page's floating boxes (loading, buffering, seek flash, toast, up-next countdown,
-    /// stats) share one look: the regular material with the floating corner radius.
-    func floatingBackground() -> some View {
-        background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
-    }
-}
+//
+// The watch page's floating boxes (loading, buffering, seek flash, toast, up-next countdown,
+// stats) are `floatingBox(compact:)`s, like the app's toast (Components.swift).
 
 /// A short sign over the video while the controls are hidden: a jump (±10 s) or play.
 private struct SeekFlash: Equatable {
@@ -789,23 +747,7 @@ private struct SeekFlashView: View {
             }
         }
         .font(.title3.weight(.semibold))
-        .padding(.horizontal, 32)
-        .padding(.vertical, 20)
-        .floatingBackground()
-    }
-}
-
-private struct WatchToast: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 32)
-            .padding(.vertical, 18)
-            .floatingBackground()
-            .frame(maxWidth: 1000)
+        .floatingBox(compact: true)
     }
 }
 
@@ -840,8 +782,7 @@ private struct UpNextCountdown: View {
             }
             .frame(width: 560, alignment: .leading)
         }
-        .padding(40)
-        .floatingBackground()
+        .floatingBox()
         .focusSection()
         .onAppear { playNowFocused = true }
     }
@@ -869,8 +810,7 @@ struct StatsOverlay: View {
             if !vm.historyStatus.isEmpty { Text("history: \(vm.historyStatus)") }
         }
         .font(.caption2.monospaced())
-        .padding(20)
-        .floatingBackground()
+        .floatingBox()
         .task {
             while !Task.isCancelled {
                 cpu = ProcessStats.cpuPercent()

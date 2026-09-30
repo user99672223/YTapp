@@ -39,12 +39,7 @@ struct LibraryView: View {
                     Picker("Library", selection: $section) {
                         ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 1000)
-                    // Leading, above the list's first row, so Down from the picker reaches that
-                    // row; the full-width focus section brings Up from any column back to it.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .focusSection()
+                    .listHeaderPicker()
                 }
             } else {
                 VStack(spacing: Theme.Spacing.titleToContent) {
@@ -136,7 +131,9 @@ private struct PlaylistHeader: View {
     private static let artworkWidth: CGFloat = 560
 
     var body: some View {
-        let first = feed.page?.allItems.compactMap(\.video).first
+        // Lazily: this runs on every change of the feed (each loading flag while pages load), and
+        // `allItems` would copy the whole playlist each time to read its first video.
+        let first = feed.page?.sections.lazy.flatMap(\.items).compactMap(\.video).first
         HStack(alignment: .top, spacing: Theme.Spacing.section) {
             // Watch Later and Liked have no artwork of their own: their first video's stands in.
             RemoteImage(url: playlist.info?.thumbnail.flatMap(URL.init(string:)) ?? first?.thumbnailURL)
@@ -158,7 +155,9 @@ private struct PlaylistHeader: View {
                     } label: {
                         Label("Play", systemImage: "play.fill")
                     }
+                    // A page header's main action, a capsule like a channel's Subscribe.
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
                     .tint(.red)
                     .padding(.top, Theme.Spacing.titleToContent)
                 }

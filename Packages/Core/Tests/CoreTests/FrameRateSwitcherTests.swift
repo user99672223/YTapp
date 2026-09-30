@@ -165,6 +165,19 @@ final class FrameRateSwitcherTests: XCTestCase {
         XCTAssertNil(switcher.requested)
     }
 
+    func testOnly24UnknownRateAfterAFilmGoesBackToHome() {
+        var switcher = FrameRateSwitcher()
+        XCTAssertEqual(switcher.decide(videoId: "film", fps: 24, mode: .only24, homeRate: 60).decision, .switchTo(24))
+        XCTAssertEqual(switcher.decide(videoId: "unlisted", fps: 0, mode: .only24, homeRate: 24),
+                       .init(decision: .resetToHome, message: "display: frame rate unknown → reset to home 60 Hz (was 24 Hz)"),
+                       "a video not known to be 24 fps may be a 60 fps one")
+        XCTAssertNil(switcher.requested)
+        XCTAssertEqual(switcher.decide(videoId: "unlisted2", fps: .nan, mode: .only24, homeRate: 60),
+                       .init(decision: .keep, message: "display: frame rate unknown → keeping 60 Hz"),
+                       "at the home rate there is nothing to reset")
+        XCTAssertEqual(switcher.leave().decision, .keep)
+    }
+
     func testUnknownFrameRateUsesUpTheDecision() {
         var switcher = FrameRateSwitcher()
         XCTAssertEqual(switcher.decide(videoId: "a", fps: 0, mode: .all, homeRate: 60),

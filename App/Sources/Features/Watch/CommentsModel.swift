@@ -272,15 +272,22 @@ final class CommentThreadModel: ObservableObject {
     /// this one was dropped, the replies start over from the first batch.
     func showMore() {
         if more.error?.kind == .expired {
-            cancel()
-            replies = CommentList()
-            isLoaded = false
-            more = .idle
-            automaticPaused = false
-            load()
+            reload()
         } else {
             loadMore()
         }
+    }
+
+    /// Starts the replies over from the first batch (an expired list, or Retry after a first
+    /// batch that came back without replies).
+    func reload() {
+        cancel()
+        replies = CommentList()
+        isLoaded = false
+        error = nil
+        more = .idle
+        automaticPaused = false
+        load()
     }
 
     func cancel() {
