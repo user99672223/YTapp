@@ -144,12 +144,4 @@ enum AppleTVFrameRateMatching {
         guard DisplayCriteriaController.isAvailable else { return .unavailable }
         return DisplayCriteriaController.isMatchingEnabled ? .on : .off
     }
-
-    var label: String {
-        switch self {
-        case .unavailable: return "Not available on this tvOS"
-        case .off: return "Off — turn on in Apple TV Settings → Video and Audio → Match Content"
-        case .on: return "On"
-        }
-    }
 }

@@ -22,16 +22,6 @@ public enum FrameRateMatching: String, CaseIterable, Codable, Sendable {
 
 /// Video frame rates and the display refresh rates they are shown at.
 public enum RefreshRate {
-    public static let standard: [Double] = [23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60]
-
-    /// The nearest standard rate (within 0.6 fps), else the rate itself. What Tube asks the TV
-    /// for is `target(fps:)`.
-    public static func match(fps: Double) -> Double? {
-        guard fps.isFinite, fps >= 10 else { return nil }
-        let best = standard.min(by: { abs($0 - fps) < abs($1 - fps) })!
-        return abs(best - fps) <= 0.6 ? best : fps
-    }
-
     /// The refresh rate Tube asks the TV for when a video plays with frame-rate matching on:
     /// 23.976/24 fps → 24 Hz, 25/50 fps → 50 Hz, 29.97/30/59.94/60 fps → 60 Hz. Any other rate
     /// (15, 48, 120 fps…) has no mode of its own and never switches the TV.

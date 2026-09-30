@@ -593,7 +593,6 @@ extension View {
 /// Renders any feed item with the right card.
 struct FeedItemView: View {
     let item: FeedItem
-    var compact = false
     /// Card width for video, playlist and channel cards (a grid column); nil keeps the standard
     /// size.
     var width: CGFloat?

@@ -26,7 +26,7 @@ private struct WatchScreen: View {
 }
 
 enum WatchPanel: String, Identifiable {
-    case info, chapters, captions, speed, quality, comments, upNext
+    case info, chapters, captions, speed, quality, comments
     var id: String { rawValue }
 }
 
@@ -322,9 +322,6 @@ private struct WatchContent: View {
         panelFocus = nil
         controlsVisible = true
         switch closing {
-        case .upNext:
-            // Nothing in the controls opens it.
-            focus = .playPause
         case .chapters where vm.chapters.isEmpty:
             // The video changed under the panel and the new one has no Chapters button.
             focus = .playPause

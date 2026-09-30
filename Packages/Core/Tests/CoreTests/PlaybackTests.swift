@@ -64,16 +64,6 @@ final class PolicyTests: XCTestCase {
         XCTAssertFalse(ResumePolicy.isFinished(position: 300, duration: 600))
     }
 
-    func testRefreshRate() {
-        XCTAssertEqual(RefreshRate.match(fps: 23.976), 23.976)
-        XCTAssertEqual(RefreshRate.match(fps: 24), 24)
-        XCTAssertEqual(RefreshRate.match(fps: 29.97), 29.97)
-        XCTAssertEqual(RefreshRate.match(fps: 59.94), 59.94)
-        XCTAssertEqual(RefreshRate.match(fps: 60), 60)
-        XCTAssertEqual(RefreshRate.match(fps: 50.0), 50)
-        XCTAssertNil(RefreshRate.match(fps: 0))
-    }
-
     func testRefreshPolicy() {
         let now = Date()
         XCTAssertTrue(RefreshPolicy.isFresh(fetchedAt: now.addingTimeInterval(-14 * 60), category: .home, now: now))

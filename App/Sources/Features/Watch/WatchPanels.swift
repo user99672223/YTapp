@@ -53,7 +53,6 @@ struct PanelView: View {
         case .speed: return "Playback speed"
         case .quality: return "Quality"
         case .comments: return "Comments"
-        case .upNext: return "Up next"
         }
     }
 
@@ -66,7 +65,6 @@ struct PanelView: View {
         case .speed: speedList
         case .quality: QualityPanel(vm: vm, focus: focus)
         case .comments: EmptyView() // CommentsPanel, above
-        case .upNext: upNextList
         }
     }
 
@@ -116,16 +114,6 @@ struct PanelView: View {
             .focused(focus, equals: .panelRow(RowID.speed(speed)))
         }
     }
-
-    private var upNextList: some View {
-        ForEach(Array((vm.details?.upNext ?? []).enumerated()), id: \.offset) { index, video in
-            PanelChoice(title: video.title, subtitle: video.subtitle, thumbnail: video.thumbnailURL, selected: false) {
-                vm.play(video)
-                close()
-            }
-            .focused(focus, equals: .panelRow(RowID.upNext(index)))
-        }
-    }
 }
 
 extension PanelView {
@@ -166,8 +154,6 @@ extension PanelView {
             if details.channel.id != nil { return .panelRow(RowID.channel) }
             if !InfoPanel.paragraphs(of: details.description).isEmpty { return .panelRow(RowID.paragraph(0)) }
             return .panelDone
-        case .upNext:
-            return vm.details?.upNext.isEmpty == false ? .panelRow(RowID.upNext(0)) : .panelDone
         }
     }
 }
@@ -183,7 +169,6 @@ private enum RowID {
     static func video(_ index: Int) -> String { "video.\(index)" }
     static func audio(_ index: Int) -> String { "audio.\(index)" }
     static func paragraph(_ index: Int) -> String { "info.paragraph.\(index)" }
-    static func upNext(_ index: Int) -> String { "upnext.\(index)" }
 }
 
 /// One row of a side panel: a full-width button with optional artwork, a title, a secondary
@@ -191,7 +176,7 @@ private enum RowID {
 struct PanelChoice: View {
     let title: String
     var subtitle: String?
-    /// Leading artwork (chapter and up-next thumbnails).
+    /// Leading artwork (chapter thumbnails).
     var thumbnail: URL?
     let selected: Bool
     let action: () -> Void
