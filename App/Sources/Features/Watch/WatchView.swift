@@ -30,6 +30,22 @@ enum WatchPanel: String, Identifiable {
     var id: String { rawValue }
 }
 
+/// What has focus on the watch page. The controls and the side panels share one focus state, so
+/// opening a panel can put focus on its current choice and closing it can give focus back to the
+/// button that opened it.
+enum WatchFocus: Hashable {
+    /// The invisible full-screen button that takes the remote while the controls are hidden.
+    case catcher
+    case playPause
+    case scrubber
+    /// The button in the controls that opens this panel.
+    case opener(WatchPanel)
+    /// A row of the open side panel (ids from `PanelView`).
+    case panelRow(String)
+    /// The open side panel's Done button.
+    case panelDone
+}
+
 /// A button style with no focus decoration (used for the invisible full-screen remote catcher).
 struct InvisibleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -44,13 +60,11 @@ private struct WatchContent: View {
     @ObservedObject var vm: WatchViewModel
     @ObservedObject var player: MPVPlayer.State
 
-    enum Focus: Hashable {
-        case catcher, playPause, scrubber, panel
-    }
-
-    @FocusState private var focus: Focus?
+    @FocusState private var focus: WatchFocus?
     @State private var controlsVisible = true
     @State private var panel: WatchPanel?
+    /// Where focus went when `panel` opened; also where it goes if it gets lost inside the panel.
+    @State private var panelFocus: WatchFocus?
     @State private var scrubTarget: Double?
     @State private var scrubStep: Double = 10
     @State private var lastScrub = Date.distantPast
@@ -96,26 +110,22 @@ private struct WatchContent: View {
             }
 
             if let panel {
-                HStack {
-                    Spacer()
-                    Group {
-                        if panel == .comments {
-                            CommentsPanel(comments: vm.comments, close: { closePanel() })
-                        } else {
-                            PanelView(panel: panel, vm: vm, player: player, close: { closePanel() }, openChannel: openChannel)
-                        }
-                    }
-                        .frame(width: Theme.panelWidth)
-                        .frame(maxHeight: .infinity)
-                        .background(.regularMaterial)
-                        .focusSection()
-                }
-                .ignoresSafeArea()
-                .transition(.move(edge: .trailing))
+                // A floating sheet inside the safe area. It slides in only a little, so it is on
+                // screen (and can take focus) from the first frame of the animation.
+                PanelView(panel: panel, vm: vm, player: player, focus: $focus,
+                          close: { closePanel() }, openChannel: openChannel)
+                    .frame(width: Theme.panelWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(.regularMaterial)
+                    .continuousCorners(Theme.Radius.panel)
+                    .focusSection()
+                    .defaultFocus($focus, panelFocus ?? .panelDone)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .transition(.opacity.combined(with: .offset(x: 60)))
             }
 
             if let countdown = vm.countdown, let next = vm.nextVideo {
-                UpNextCountdown(video: next, seconds: countdown, playNow: { vm.playNext() }, cancel: { vm.cancelCountdown(); showControls() })
+                UpNextCountdown(video: next, seconds: countdown, playNow: { vm.playNext() }, cancel: { cancelCountdown() })
             }
 
             if case .loading(let message) = vm.phase {
@@ -169,6 +179,24 @@ private struct WatchContent: View {
         .onChange(of: player.isPaused) { _, paused in
             if paused { showControls() } else { bumpHideTimer() }
         }
+        .onChange(of: isFailed) { _, failed in
+            if failed {
+                // The failure screen takes the remote. A panel left open under it would keep
+                // focus on rows nobody can see.
+                hideTask?.cancel()
+                scrubCommit?.cancel()
+                scrubTarget = nil
+                panel = nil
+                panelFocus = nil
+            } else {
+                controlsVisible = true
+                restoreFocus()
+            }
+        }
+        .onChange(of: vm.countdown == nil) { _, ended in
+            // Play now, Cancel, Back or the countdown running out: the focused box went away.
+            if ended { restoreFocus() }
+        }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the app (TV button) pauses, like the YouTube app.
             vm.setInBackground(phase == .background)
@@ -203,16 +231,18 @@ private struct WatchContent: View {
         }
     }
 
-    // MARK: - Controls visibility
+    // MARK: - Controls visibility and focus
 
+    /// Shows the controls. Focus goes to Play/Pause when they were hidden, like the system
+    /// player; if they are already up (pausing from the remote), it stays where it is.
     private func showControls() {
+        if !controlsVisible, panel == nil, vm.countdown == nil { focus = .playPause }
         controlsVisible = true
-        focus = .playPause
         bumpHideTimer()
     }
 
     private func hideControls() {
-        guard panel == nil, scrubTarget == nil else { return }
+        guard panel == nil, scrubTarget == nil, vm.countdown == nil, !isFailed else { return }
         controlsVisible = false
         focus = .catcher
     }
@@ -227,23 +257,63 @@ private struct WatchContent: View {
         }
     }
 
+    /// Gives focus back to the page after something that held it went away (the up-next
+    /// countdown, the failure screen): the open panel, else the controls, else the remote catcher.
+    private func restoreFocus() {
+        if panel != nil {
+            focus = panelFocus
+        } else if controlsVisible {
+            focus = .playPause
+            bumpHideTimer()
+        } else {
+            focus = .catcher
+        }
+    }
+
     private func open(_ newPanel: WatchPanel) {
         hideTask?.cancel()
+        // Straight to the current choice (or the first row), not wherever the system lands
+        // when the button that had focus disappears.
+        let target = PanelView.initialFocus(for: newPanel, vm: vm, player: player)
+        panelFocus = target
         panel = newPanel
-        focus = .panel
+        focus = target
     }
 
+    /// Closes the panel and gives focus back to the button that opened it.
     private func closePanel() {
+        guard let closing = panel else { return }
         panel = nil
-        showControls()
+        panelFocus = nil
+        controlsVisible = true
+        switch closing {
+        case .upNext:
+            // Nothing in the controls opens it.
+            focus = .playPause
+        case .chapters where vm.chapters.isEmpty:
+            // The video changed under the panel and the new one has no Chapters button.
+            focus = .playPause
+        default:
+            focus = .opener(closing)
+        }
+        bumpHideTimer()
     }
 
+    private func cancelCountdown() {
+        vm.cancelCountdown()
+        if panel == nil { showControls() }
+    }
+
+    /// Back: a scrub preview is dropped first (like the system player), then the countdown,
+    /// the panel, the controls, and last the watch page itself. The countdown goes before the
+    /// panel because it takes focus when it appears, even over an open panel.
     private func handleExit() {
-        if panel != nil {
-            closePanel()
+        if scrubTarget != nil {
+            cancelScrub()
         } else if vm.countdown != nil {
-            vm.cancelCountdown()
-            showControls()
+            cancelCountdown()
+        } else if panel != nil {
+            closePanel()
         } else if controlsVisible, vm.phase == .playing {
             hideTask?.cancel()
             controlsVisible = false
@@ -302,6 +372,13 @@ private struct WatchContent: View {
         scrubTarget = nil
         bumpHideTimer()
     }
+
+    /// Back while scrubbing: drop the preview and stay where the video is.
+    private func cancelScrub() {
+        scrubCommit?.cancel()
+        scrubTarget = nil
+        bumpHideTimer()
+    }
 }
 
 // MARK: - Controls overlay
@@ -309,7 +386,7 @@ private struct WatchContent: View {
 private struct ControlsOverlay: View {
     @ObservedObject var vm: WatchViewModel
     @ObservedObject var player: MPVPlayer.State
-    var focus: FocusState<WatchContent.Focus?>.Binding
+    var focus: FocusState<WatchFocus?>.Binding
     let scrubTarget: Double?
     let onScrub: (MoveCommandDirection) -> Void
     let onCommitScrub: () -> Void
@@ -349,12 +426,18 @@ private struct ControlsOverlay: View {
                 Spacer().frame(width: 30)
                 if !chapters.isEmpty {
                     ControlButton(systemImage: "list.bullet.rectangle", title: "Chapters") { onPanel(.chapters) }
+                        .focused(focus, equals: .opener(.chapters))
                 }
                 ControlButton(systemImage: vm.activeCaption == nil ? "captions.bubble" : "captions.bubble.fill", title: "Captions") { onPanel(.captions) }
+                    .focused(focus, equals: .opener(.captions))
                 ControlButton(systemImage: "speedometer", title: String(format: "%g×", player.speed)) { onPanel(.speed) }
+                    .focused(focus, equals: .opener(.speed))
                 ControlButton(systemImage: "slider.horizontal.3", title: vm.selection.map { $0.video.qualityLabel ?? "\($0.video.shortSide)p" } ?? "Quality") { onPanel(.quality) }
+                    .focused(focus, equals: .opener(.quality))
                 ControlButton(systemImage: "info.circle", title: "Info") { onPanel(.info) }
+                    .focused(focus, equals: .opener(.info))
                 ControlButton(systemImage: "text.bubble", title: "Comments") { onPanel(.comments) }
+                    .focused(focus, equals: .opener(.comments))
             }
 
             if let upNext = vm.details?.upNext, !upNext.isEmpty {
@@ -362,7 +445,13 @@ private struct ControlsOverlay: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 30) {
                         ForEach(Array(upNext.prefix(20).enumerated()), id: \.offset) { _, video in
-                            Button { vm.play(video) } label: {
+                            Button {
+                                vm.play(video)
+                                // This row turns into the next video's; keep focus on a control
+                                // that stays.
+                                focus.wrappedValue = .playPause
+                                onActivity()
+                            } label: {
                                 ZStack(alignment: .bottomLeading) {
                                     RemoteImage(url: video.thumbnailURL)
                                         .frame(width: 320, height: 180)
