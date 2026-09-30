@@ -176,18 +176,28 @@ struct RemoteImage: View {
 struct Badge: View {
     let text: String
     var color: Color = .black.opacity(0.8)
+    /// A symbol before the text (a playlist's stack, for example).
+    var systemImage: String? = nil
 
     var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(color, in: RoundedRectangle(cornerRadius: 6))
-            .foregroundStyle(.white)
+        HStack(spacing: 6) {
+            if let systemImage { Image(systemName: systemImage) }
+            Text(text)
+        }
+        .font(.caption2.weight(.semibold).monospacedDigit())
+        .lineLimit(1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color, in: RoundedRectangle(cornerRadius: Theme.Radius.badge, style: .continuous))
+        .foregroundStyle(.white)
     }
 }
 
 // MARK: - Cards
+//
+// A card is a tvOS lockup: artwork on the system's `.card` button style (it lifts, tilts with the
+// remote and casts a shadow when focused), with continuous corners, and the title and one line
+// of details below it in `CardText`.
 
 struct VideoCard: View {
     @EnvironmentObject private var router: Router
@@ -196,12 +206,14 @@ struct VideoCard: View {
     var width: CGFloat = Layout.cardWidth
     @State private var watchLaterError: BridgeError?
 
+    private var height: CGFloat { (width * 9 / 16).rounded() }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 router.play(video)
             } label: {
-                thumbnail
+                artwork
             }
             .buttonStyle(.card)
             .contextMenu {
@@ -212,17 +224,7 @@ struct VideoCard: View {
                     Button("Go to channel") { router.open(.channel(channelId)) }
                 }
             }
-            Text(video.title)
-                .font(.callout.weight(.medium))
-                .lineLimit(2)
-                .frame(width: width, alignment: .leading)
-            if !video.subtitle.isEmpty {
-                Text(video.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: width, alignment: .leading)
-            }
+            CardText(title: video.title, detail: video.subtitle, width: width, artworkHeight: height)
         }
         .frame(width: width, alignment: .topLeading)
         .alert("Watch Later failed", isPresented: watchLaterFailed, presenting: watchLaterError) { _ in
@@ -254,32 +256,48 @@ struct VideoCard: View {
         }
     }
 
-    private var thumbnail: some View {
-        ZStack(alignment: .bottomTrailing) {
-            RemoteImage(url: video.thumbnailURL)
-                .frame(width: width, height: width * 9 / 16)
-                .clipped()
-            HStack(spacing: 6) {
-                if video.isLive { Badge(text: "LIVE", color: .red) }
-                if video.isUpcoming { Badge(text: "UPCOMING") }
-                if video.isShort { Badge(text: "SHORTS", color: .red.opacity(0.85)) }
-                if let duration = video.durationText, !video.isLive { Badge(text: duration) }
-            }
-            .padding(10)
-            if let percent = video.watchedPercent, percent > 0 {
-                GeometryReader { geo in
-                    VStack {
-                        Spacer()
-                        ZStack(alignment: .leading) {
-                            Rectangle().fill(Color.white.opacity(0.3))
-                            Rectangle().fill(Color.red).frame(width: geo.size.width * min(1, percent / 100))
-                        }
-                        .frame(height: 5)
-                    }
+    /// Watched share, 0…1; nil when the video wasn't started.
+    private var watched: Double? {
+        guard let percent = video.watchedPercent, percent > 0 else { return nil }
+        return min(1, percent / 100)
+    }
+
+    /// The thumbnail with its badges and the watched bar, all inside the rounded shape.
+    private var artwork: some View {
+        RemoteImage(url: video.thumbnailURL)
+            .frame(width: width, height: height)
+            .overlay(alignment: .bottomTrailing) {
+                HStack(spacing: 8) {
+                    if video.isLive { Badge(text: "LIVE", color: .red) }
+                    if video.isUpcoming { Badge(text: "UPCOMING") }
+                    if video.isShort { Badge(text: "SHORTS", color: .red.opacity(0.85)) }
+                    if let duration = video.durationText, !video.isLive { Badge(text: duration) }
                 }
+                .padding(Theme.Spacing.badgeInset)
+                .padding(.bottom, watched == nil ? 0 : WatchedBar.height)
             }
-        }
-        .frame(width: width, height: width * 9 / 16)
+            .overlay(alignment: .bottom) {
+                if let watched { WatchedBar(fraction: watched) }
+            }
+            .continuousCorners(Theme.Radius.card)
+    }
+}
+
+/// How much of a video was watched, along the bottom edge of its artwork. The artwork's rounded
+/// corners clip it, so it follows the card's shape.
+private struct WatchedBar: View {
+    static let height: CGFloat = 6
+    let fraction: Double
+
+    var body: some View {
+        Rectangle()
+            .fill(.white.opacity(0.35))
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(.red)
+                    .scaleEffect(x: CGFloat(fraction), y: 1, anchor: .leading)
+            }
+            .frame(height: Self.height)
     }
 }
 
@@ -288,69 +306,142 @@ struct ShortCard: View {
     let video: VideoItem
     var width: CGFloat = Layout.shortWidth
 
+    private var height: CGFloat { (width * 16 / 9).rounded() }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 router.play(video)
             } label: {
                 RemoteImage(url: video.thumbnailURL)
-                    .frame(width: width, height: width * 16 / 9)
-                    .clipped()
+                    .frame(width: width, height: height)
+                    .continuousCorners(Theme.Radius.card)
             }
             .buttonStyle(.card)
-            Text(video.title).font(.caption.weight(.medium)).lineLimit(2).frame(width: width, alignment: .leading)
-            if let views = video.viewCountText {
-                Text(views).font(.caption2).foregroundStyle(.secondary).frame(width: width, alignment: .leading)
-            }
+            CardText(title: video.title, detail: video.viewCountText, width: width, artworkHeight: height, compact: true)
         }
         .frame(width: width, alignment: .topLeading)
     }
 }
 
+/// A channel: a round avatar that lifts on focus like the system's own lockups (the borderless
+/// button style with the highlight effect on the avatar, shaped as a circle), with the name and
+/// subscriber count centred below.
 struct ChannelCard: View {
     let channel: ChannelItem
     var width: CGFloat = Layout.channelWidth
 
+    /// As tall as a video card's artwork, so a channel lines up with the videos next to it in
+    /// search results; smaller in a narrower column.
+    private var diameter: CGFloat {
+        min((width * 0.85).rounded(), (Layout.cardWidth * 9 / 16).rounded())
+    }
+
     var body: some View {
         NavigationLink(value: Route.channel(channel.id)) {
-            VStack(spacing: 14) {
+            VStack(spacing: 0) {
                 RemoteImage(url: channel.avatar.flatMap(URL.init(string:)))
-                    .frame(width: width * 0.62, height: width * 0.62)
+                    .frame(width: diameter, height: diameter)
                     .clipShape(Circle())
-                Text(channel.name).font(.callout.weight(.medium)).lineLimit(1)
-                if let subs = channel.subscriberCountText ?? channel.handle {
-                    Text(subs).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .hoverEffect(HoverEffect.highlight)
+                VStack(spacing: Theme.Spacing.textLines) {
+                    Text(channel.name)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    if let detail = channel.subscriberCountText ?? channel.handle {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
+                .multilineTextAlignment(.center)
+                .frame(width: width)
+                // Below the lifted avatar, like the text under the other cards.
+                .padding(.top, Theme.Spacing.cardToText + Layout.focusOverflow(diameter))
             }
             .frame(width: width)
-            .padding(.vertical, 20)
         }
-        .buttonStyle(.card)
+        .buttonStyle(.borderless)
+        .buttonBorderShape(.circle)
     }
 }
 
+/// A playlist: its first video's artwork on a stack of cards (two edges peek out above it) with
+/// the number of videos in a badge, so it doesn't read as a single video.
 struct PlaylistCard: View {
     let playlist: PlaylistItem
     var width: CGFloat = Layout.cardWidth
 
+    private var height: CGFloat { (width * 9 / 16).rounded() }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             NavigationLink(value: Route.playlist(id: playlist.id, title: playlist.title)) {
-                ZStack(alignment: .bottomTrailing) {
-                    RemoteImage(url: playlist.thumbnail.flatMap(URL.init(string:)))
-                        .frame(width: width, height: width * 9 / 16)
-                        .clipped()
-                    Badge(text: playlist.videoCountText.map { "▶︎ \($0)" } ?? "Playlist").padding(10)
-                }
-                .frame(width: width, height: width * 9 / 16)
+                RemoteImage(url: playlist.thumbnail.flatMap(URL.init(string:)))
+                    .frame(width: width, height: height)
+                    .overlay(alignment: .bottomTrailing) {
+                        Badge(text: playlist.videoCountText ?? "Playlist", systemImage: "list.and.film")
+                            .padding(Theme.Spacing.badgeInset)
+                    }
+                    .continuousCorners(Theme.Radius.card)
             }
             .buttonStyle(.card)
-            Text(playlist.title).font(.callout.weight(.medium)).lineLimit(2).frame(width: width, alignment: .leading)
-            if let channel = playlist.channelName {
-                Text(channel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
+            .background(alignment: .top) { PlaylistStackEdges(width: width) }
+            CardText(title: playlist.title, detail: playlist.channelName, width: width, artworkHeight: height)
         }
         .frame(width: width, alignment: .topLeading)
+    }
+}
+
+/// The two cards behind a playlist's artwork. They sit in the gap above it without taking layout
+/// space (so the artwork lines up with the videos in the same row), and the focused card lifts
+/// over them.
+private struct PlaylistStackEdges: View {
+    let width: CGFloat
+    /// How far each edge shows above the one in front of it.
+    private var rise: CGFloat { 7 }
+
+    var body: some View {
+        let inset = (width * 0.04).rounded()
+        ZStack(alignment: .top) {
+            edge(width: width - 4 * inset, opacity: 0.14).offset(y: -2 * rise)
+            edge(width: width - 2 * inset, opacity: 0.28).offset(y: -rise)
+        }
+    }
+
+    private func edge(width: CGFloat, opacity: Double) -> some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+            .fill(.white.opacity(opacity))
+            .frame(width: width, height: 4 * rise)
+    }
+}
+
+/// The title and one line of details under a card's artwork. It starts below the room the lifted
+/// artwork takes when focused, so focus never covers or moves it; the title always takes two
+/// lines, so the details of the cards in a row line up.
+private struct CardText: View {
+    let title: String
+    let detail: String?
+    let width: CGFloat
+    let artworkHeight: CGFloat
+    /// Narrow poster cards (Shorts) use the next smaller pair of text styles.
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
+            Text(title)
+                .font(compact ? Font.caption.weight(.medium) : Font.callout.weight(.medium))
+                .lineLimit(2, reservesSpace: true)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(compact ? Font.caption2 : Font.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: width, alignment: .leading)
+        .padding(.top, Theme.Spacing.cardToText + Layout.focusOverflow(artworkHeight))
     }
 }
 
@@ -367,12 +458,19 @@ private struct ToastText: View {
     @ObservedObject var toasts: ToastCenter
 
     var body: some View {
-        if let message = toasts.message {
-            Text(message)
-                .padding(.horizontal, 30).padding(.vertical, 16)
-                .background(.ultraThinMaterial, in: Capsule())
-                .padding(.top, 40)
+        // A container that stays, so the toast slides in and out instead of popping.
+        VStack {
+            if let message = toasts.message {
+                Label(message, systemImage: "checkmark.circle.fill")
+                    .font(.callout)
+                    .padding(.horizontal, Theme.Spacing.floating)
+                    .padding(.vertical, Theme.Spacing.floating / 2)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+                    .padding(.top, Theme.Spacing.floating)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: toasts.message)
     }
 }
 
@@ -380,7 +478,8 @@ private struct ToastText: View {
 struct FeedItemView: View {
     let item: FeedItem
     var compact = false
-    /// Card width for video and playlist cards (a grid column); nil keeps the standard size.
+    /// Card width for video, playlist and channel cards (a grid column); nil keeps the standard
+    /// size.
     var width: CGFloat?
 
     var body: some View {
@@ -392,7 +491,7 @@ struct FeedItemView: View {
                 VideoCard(video: video, width: width ?? Layout.cardWidth)
             }
         case .channel(let channel):
-            ChannelCard(channel: channel)
+            ChannelCard(channel: channel, width: width ?? Layout.channelWidth)
         case .playlist(let playlist):
             PlaylistCard(playlist: playlist, width: width ?? Layout.cardWidth)
         }
