@@ -734,6 +734,30 @@ function reelOverlayRenderers(id) {
   };
 }
 
+// The renderers without the exact numbers: no numeric likeCount and no comments engagement panel,
+// so the like count comes from the like button's texts and the comment count from the comments
+// button, both { simpleText } like YouTube sends them.
+function reelOverlayRenderersTextOnly(id) {
+  const { overlay } = reelOverlayRenderers(id);
+  const renderer = overlay.reelPlayerOverlayRenderer;
+  return {
+    overlay: {
+      reelPlayerOverlayRenderer: {
+        ...renderer,
+        likeButton: {
+          likeButtonRenderer: {
+            target: { videoId: id }, likeStatus: 'INDIFFERENT', likesAllowed: true,
+            likeCountWithLikeText: simple('988'), likeCountWithUnlikeText: simple('987')
+          }
+        }
+      }
+    },
+    engagementPanels: [
+      { engagementPanelSectionListRenderer: { panelIdentifier: 'shorts-description-panel', header: { engagementPanelTitleHeaderRenderer: { title: runs('Description') } } } }
+    ]
+  };
+}
+
 function reelOverlayViewModels() {
   const button = (iconName, title, accessibilityText) => ({ buttonViewModel: { iconName, title, accessibilityText } });
   return {
@@ -790,8 +814,11 @@ function reelOverlayViewModels() {
 }
 
 function reelWatch(id) {
-  // SHORTID0001: renderers; SHORTID0002: view models (and not liked); others: no overlay at all.
-  const overlay = id === 'SHORTID0001' ? reelOverlayRenderers(id) : id === 'SHORTID0002' ? reelOverlayViewModels() : {};
+  // SHORTID0001: renderers; SHORTID0002: view models (and not liked); SHORTID0003: renderers with
+  // texts only (and not liked); others: no overlay at all.
+  const overlays = { SHORTID0001: reelOverlayRenderers, SHORTID0002: reelOverlayViewModels, SHORTID0003: reelOverlayRenderersTextOnly };
+  const overlay = overlays[id] ? overlays[id](id) : {};
+  const likeStatus = id === 'SHORTID0002' || id === 'SHORTID0003' ? 'INDIFFERENT' : 'LIKE';
   return {
     responseContext: {},
     ...overlay,
@@ -800,7 +827,7 @@ function reelWatch(id) {
       entityBatchUpdate: {
         mutations: [{
           entityKey: 'x',
-          payload: { likeStatusEntity: { key: Buffer.from([0x0a, 11, ...Buffer.from(id)]).toString('base64'), likeStatus: id === 'SHORTID0002' ? 'INDIFFERENT' : 'LIKE' } }
+          payload: { likeStatusEntity: { key: Buffer.from([0x0a, 11, ...Buffer.from(id)]).toString('base64'), likeStatus } }
         }]
       }
     }

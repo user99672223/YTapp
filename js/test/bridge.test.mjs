@@ -307,6 +307,14 @@ test('Shorts show like and comment counts and the channel avatar from the reel o
   assert.equal(second.commentsCountText, '3.4K');
   assert.equal(second.channel.avatar, 'https://yt3.ggpht.com/short-two=s176');
 
+  // Renderers without the exact numbers: the like count from the like button's { simpleText } for
+  // the current state (not liked), the comment count from the comments button's { simpleText }.
+  const textOnly = await call('shortInfo', { id: 'SHORTID0003', client: 'TV' });
+  assert.equal(textOnly.likeStatus, 'none');
+  assert.equal(textOnly.likeCountText, '987');
+  assert.equal(textOnly.commentsCountText, '1,234');
+  assert.equal(textOnly.channel.avatar, 'https://yt3.ggpht.com/short-avatar=s176');
+
   // No overlay: the fields are left out (Swift shows "Like", "Comments" and the initial), and
   // that is logged once.
   const bare = await call('shortInfo', { id: 'SHORTID0004', client: 'TV' });

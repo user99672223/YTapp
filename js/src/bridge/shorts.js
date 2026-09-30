@@ -40,9 +40,11 @@ function findModel(node, key) {
   return found;
 }
 
-// A count as YouTube shows it ("1.2K", "12,345"), not a label ("Like", "Comments").
+// A count as YouTube shows it ("1.2K", "12,345"), not a label ("Like", "Comments"). The reel answer
+// is raw JSON, not YouTube.js nodes, so its texts can also be { simpleText }, which util's text()
+// does not read.
 function countText(value) {
-  const s = text(value);
+  const s = text(value) ?? (typeof value?.simpleText === 'string' ? value.simpleText.trim() : undefined);
   return s && /^\d/.test(s) ? s : undefined;
 }
 
@@ -59,7 +61,10 @@ function likeCountOf(overlay, liked) {
   if (renderer && renderer.likesAllowed !== false) {
     const n = typeof renderer.likeCount === 'number' ? renderer.likeCount : parseInt(renderer.likeCount, 10);
     if (Number.isFinite(n)) return formatCount(n);
-    const shown = countText(liked ? renderer.likeCountWithUnlikeText : renderer.likeCountWithLikeText) || countText(renderer.likeCountText);
+    // likeCountText is the count as it stands; likeCountWithLikeText is the count with the
+    // viewer's like in it and likeCountWithUnlikeText the count without it.
+    const shown = countText(renderer.likeCountText) ||
+      countText(liked ? renderer.likeCountWithLikeText : renderer.likeCountWithUnlikeText);
     if (shown) return shown;
   }
   // The newer action bar: a toggle button whose title is the count (per state).

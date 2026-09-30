@@ -45159,7 +45159,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   }
   __name(findModel, "findModel");
   function countText(value) {
-    const s = text(value);
+    const s = text(value) ?? (typeof value?.simpleText === "string" ? value.simpleText.trim() : void 0);
     return s && /^\d/.test(s) ? s : void 0;
   }
   __name(countText, "countText");
@@ -45174,7 +45174,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     if (renderer && renderer.likesAllowed !== false) {
       const n = typeof renderer.likeCount === "number" ? renderer.likeCount : parseInt(renderer.likeCount, 10);
       if (Number.isFinite(n)) return formatCount(n);
-      const shown = countText(liked ? renderer.likeCountWithUnlikeText : renderer.likeCountWithLikeText) || countText(renderer.likeCountText);
+      const shown = countText(renderer.likeCountText) || countText(liked ? renderer.likeCountWithLikeText : renderer.likeCountWithUnlikeText);
       if (shown) return shown;
     }
     const toggle = findModel(findModel(overlay, "likeButtonViewModel"), "toggleButtonViewModel");
