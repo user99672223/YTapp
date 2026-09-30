@@ -45320,6 +45320,7 @@ return process(__tube_n, __tube_sp, __tube_s);`);
   function commentsEntry(key) {
     const entry = getFeed(key);
     if (entry.kind !== "comments") fail("expired", "These comments expired. Open them again.", key);
+    putFeed(key, entry);
     return entry;
   }
   __name(commentsEntry, "commentsEntry");

@@ -289,8 +289,8 @@ private struct CommentRowButtonBody: View {
     }
 
     private var fillOpacity: Double {
-        if configuration.isPressed { return 0.28 }
-        return isFocused ? 0.18 : 0
+        if configuration.isPressed { return 0.3 }
+        return isFocused ? 0.2 : 0
     }
 }
 

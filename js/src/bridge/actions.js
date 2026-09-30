@@ -120,9 +120,12 @@ function commentsPage(key, entry, comments) {
   };
 }
 
+// Using a section moves it to the recent end of the feed cache, so the one being read outlives
+// feeds loaded meanwhile.
 function commentsEntry(key) {
   const entry = getFeed(key);
   if (entry.kind !== 'comments') fail('expired', 'These comments expired. Open them again.', key);
+  putFeed(key, entry);
   return entry;
 }
 
