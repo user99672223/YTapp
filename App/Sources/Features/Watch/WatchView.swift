@@ -98,8 +98,14 @@ private struct WatchContent: View {
             if let panel {
                 HStack {
                     Spacer()
-                    PanelView(panel: panel, vm: vm, player: player, close: { closePanel() }, openChannel: openChannel)
-                        .frame(width: 760)
+                    Group {
+                        if panel == .comments {
+                            CommentsPanel(comments: vm.comments, close: { closePanel() })
+                        } else {
+                            PanelView(panel: panel, vm: vm, player: player, close: { closePanel() }, openChannel: openChannel)
+                        }
+                    }
+                        .frame(width: Theme.panelWidth)
                         .frame(maxHeight: .infinity)
                         .background(.regularMaterial)
                         .focusSection()
@@ -225,7 +231,6 @@ private struct WatchContent: View {
         hideTask?.cancel()
         panel = newPanel
         focus = .panel
-        if newPanel == .comments { vm.comments.load() }
     }
 
     private func closePanel() {

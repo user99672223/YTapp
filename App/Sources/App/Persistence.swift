@@ -64,6 +64,8 @@ struct AppSettings: Equatable {
     var visitorData: String = ""
     var showStatsOverlay: Bool = false
     var hardwareDecodeH264: Bool = true
+    /// Off by default: every display-mode switch makes some TVs flicker.
+    var frameRateMatching: FrameRateMatching = .off
 
     /// Apple TV 4K (A15) measurements, September 2026: AV1/VP9 are decoded in software (no
     /// VideoToolbox support for either); 2160p30 AV1 plays with ~270% CPU and no drops, 2160p60
@@ -103,6 +105,7 @@ extension AppSettings {
         if let v = d["visitorData"] as? String { visitorData = v }
         if let v = d["showStatsOverlay"] as? Bool { showStatsOverlay = v }
         if let v = d["hardwareDecodeH264"] as? Bool { hardwareDecodeH264 = v }
+        if let v = d["frameRateMatching"] as? String, let mode = FrameRateMatching(rawValue: v) { frameRateMatching = mode }
     }
 
     var dictionary: [String: Any] {
@@ -117,7 +120,8 @@ extension AppSettings {
             "poTokenMode": poTokenMode,
             "visitorData": visitorData,
             "showStatsOverlay": showStatsOverlay,
-            "hardwareDecodeH264": hardwareDecodeH264
+            "hardwareDecodeH264": hardwareDecodeH264,
+            "frameRateMatching": frameRateMatching.rawValue
         ]
     }
 }

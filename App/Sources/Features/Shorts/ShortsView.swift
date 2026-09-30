@@ -135,22 +135,8 @@ private struct ShortsContent: View {
             if showComments {
                 HStack {
                     Spacer()
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack {
-                            Text("Comments").font(.title3.bold())
-                            Spacer()
-                            Button("Done") { showComments = false }
-                        }
-                        .padding(40)
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 18) {
-                                CommentsList(comments: vm.comments)
-                            }
-                            .padding(.horizontal, 40)
-                            .padding(.bottom, 60)
-                        }
-                    }
-                    .frame(width: 760)
+                    CommentsPanel(comments: vm.comments, close: { showComments = false })
+                    .frame(width: Theme.panelWidth)
                     .frame(maxHeight: .infinity)
                     .background(.regularMaterial)
                     .focusSection()
@@ -222,7 +208,6 @@ private struct ShortsContent: View {
                 .onMoveCommand(perform: move)
                 Button {
                     showComments = true
-                    vm.comments.load()
                 } label: {
                     Image(systemName: "text.bubble")
                 }
