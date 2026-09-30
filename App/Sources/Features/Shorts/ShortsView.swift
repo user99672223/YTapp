@@ -31,9 +31,13 @@ struct ShortsTabView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(ContentWidthReader(width: $contentWidth))
-            .padding(.horizontal, Layout.horizontalPadding)
+            // The other tabs sit in a NavigationStack, which keeps them inside tvOS's side safe
+            // area; this one doesn't, so it keeps the same margin itself. The scroll view spans the
+            // screen's width either way, so the margin is exactly the other screens' one.
+            .padding(.horizontal, Layout.screenMargin + Layout.horizontalPadding)
             .padding(.vertical, 40)
         }
+        .ignoresSafeArea(.container, edges: .horizontal)
         .task { await home.loadIfNeeded(model) }
     }
 
@@ -42,7 +46,7 @@ struct ShortsTabView: View {
         if let shorts = home.page?.shorts, !shorts.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
                 Text("From your Home feed").font(.title3.bold())
-                LazyVGrid(columns: columns, alignment: .leading, spacing: Theme.Spacing.section) {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: Layout.rowSpacing) {
                     ForEach(shorts, id: \.id) { short in
                         ShortCard(video: short, width: shortWidth)
                     }
@@ -52,12 +56,12 @@ struct ShortsTabView: View {
             ErrorStateView(error: error, isRetrying: home.isLoading) {
                 Task { await home.refresh(model, userInitiated: true) }
             }
-            .frame(height: 500)
+            .frame(height: Layout.stateHeight)
         } else if home.page == nil || home.isLoading {
-            LoadingView().frame(height: 500)
+            LoadingView().frame(height: Layout.stateHeight)
         } else {
             EmptyStateView(systemImage: "bolt.horizontal", text: "Your Home feed has no Shorts right now.")
-                .frame(height: 500)
+                .frame(height: Layout.stateHeight)
         }
     }
 }
