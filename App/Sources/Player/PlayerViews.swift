@@ -69,17 +69,27 @@ enum IdleTimer {
     }
 }
 
-/// Frame-rate matching: asks tvOS to switch the display to the stream's frame rate (SDR).
+/// Frame-rate matching: asks tvOS to switch the display to a refresh rate (SDR) and back. When
+/// and to what is `FrameRateSwitcher`'s decision (Core); this only applies it.
 ///
 /// tvOS 27 removed `-[UIWindow avDisplayManager]` (calling it raises "unrecognized selector" and
 /// aborts the app), so the display manager is looked up dynamically: the window where it still
 /// exists, else the window scene or the screen if a later tvOS moved it there. Without one,
 /// frame-rate matching is simply off.
+///
+/// A real mode change shows up in the TV's log as this app's own
+/// `[com.apple.BackBoard:Display] [FBSDisplaySource 1-1] updating <… mode: "1920x1080 24Hz …">`
+/// line. A request for the mode that is already on only gets PineBoard's "Display mode update
+/// specifies current mode, not changing anything", but still reports a switch in progress for
+/// about 2.5 s.
 @MainActor
 enum DisplayCriteriaController {
     private static let log = Logger(subsystem: "com.local.tube", category: "display")
     private static let selector = NSSelectorFromString("avDisplayManager")
     private static var reported = false
+    /// The rate Tube's criteria ask for; nil while none are set and the TV shows its own format.
+    private(set) static var requestedRate: Double?
+    private static var knownHomeRate: Double?
 
     private static var window: UIWindow? {
         UIApplication.shared.connectedScenes
@@ -111,6 +121,12 @@ enum DisplayCriteriaController {
         log.notice("\(message, privacy: .public)")
     }
 
+    /// One frame-rate line in the TV log (category "display", notice level), e.g.
+    /// "display: 23.976 fps → switching to 24 Hz (was 50 Hz)".
+    static func note(_ message: String) {
+        log.notice("\(message, privacy: .public)")
+    }
+
     static var isAvailable: Bool { manager != nil }
 
     static var isMatchingEnabled: Bool {
@@ -121,28 +137,69 @@ enum DisplayCriteriaController {
         manager?.isDisplayModeSwitchInProgress ?? false
     }
 
-    /// Returns the applied refresh rate, or nil when matching is off or not possible.
-    @discardableResult
-    static func apply(fps: Double, width: Int, height: Int) -> Double? {
-        guard let manager, manager.isDisplayCriteriaMatchingEnabled,
-              let rate = RefreshRate.match(fps: fps) else { return nil }
+    /// Why Tube can't switch the display now, or nil when it can. tvOS ignores the criteria
+    /// unless Settings → Video and Audio → Match Content → Match Frame Rate is on.
+    static var unavailableReason: String? {
+        guard let manager else { return "no AVDisplayManager on this tvOS (\(UIDevice.current.systemVersion))" }
+        guard manager.isDisplayCriteriaMatchingEnabled else {
+            return "Match Frame Rate is off in Apple TV Settings → Video and Audio → Match Content"
+        }
+        return nil
+    }
+
+    /// The Apple TV side of frame-rate matching, for the Debug screen: whether tvOS lets apps
+    /// switch at all, the TV's own rate, and the rate Tube asks for right now.
+    static var status: String {
+        guard let manager else { return "Not available on this tvOS" }
+        guard manager.isDisplayCriteriaMatchingEnabled else {
+            return "Off — turn on Match Frame Rate in Apple TV Settings → Video and Audio → Match Content"
+        }
+        let home = "TV home rate \(RefreshRate.format(homeRate)) Hz"
+        guard let requestedRate else { return "On · \(home)" }
+        return "On · \(home) · Tube asked for \(RefreshRate.format(requestedRate)) Hz"
+    }
+
+    /// The TV's own refresh rate: the format picked in Apple TV Settings → Video and Audio, which
+    /// the home screen and every unswitched video play at. tvOS has no API that names it; the
+    /// screen's `maximumFramesPerSecond` follows the current output mode (Kodi reads the same
+    /// through CADisplayLink), so it is read only while Tube has no criteria set and no switch is
+    /// under way, and remembered for the times Tube's own rate is on. 50 when the screen says 50,
+    /// else 60 (see `RefreshRate.home`).
+    static var homeRate: Double {
+        if requestedRate == nil, !isSwitching, let screen = window?.screen {
+            let screenRate = screen.maximumFramesPerSecond
+            let home = RefreshRate.home(screenFramesPerSecond: screenRate)
+            if home != knownHomeRate {
+                note("display: home rate \(RefreshRate.format(home)) Hz (screen reports \(screenRate) fps)")
+            }
+            knownHomeRate = home
+        }
+        return knownHomeRate ?? 60
+    }
+
+    /// Asks tvOS for `refreshRate` in SDR (BT.709). False when the criteria couldn't be built.
+    static func request(refreshRate: Double, width: Int, height: Int) -> Bool {
+        guard let manager else { return false }
         var format: CMVideoFormatDescription?
         let extensions: [CFString: Any] = [
             kCMFormatDescriptionExtension_ColorPrimaries: kCMFormatDescriptionColorPrimaries_ITU_R_709_2,
             kCMFormatDescriptionExtension_TransferFunction: kCMFormatDescriptionTransferFunction_ITU_R_709_2,
             kCMFormatDescriptionExtension_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_709_2
         ]
-        let status = CMVideoFormatDescriptionCreate(
+        let created = CMVideoFormatDescriptionCreate(
             allocator: kCFAllocatorDefault, codecType: kCMVideoCodecType_H264,
             width: Int32(max(width, 16)), height: Int32(max(height, 16)),
             extensions: extensions as CFDictionary, formatDescriptionOut: &format)
-        guard status == noErr, let format else { return nil }
-        manager.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(rate), formatDescription: format)
-        return rate
+        guard created == noErr, let format else { return false }
+        manager.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(refreshRate), formatDescription: format)
+        requestedRate = refreshRate
+        return true
     }
 
+    /// Drops Tube's criteria: tvOS goes back to the TV's own format.
     static func reset() {
         manager?.preferredDisplayCriteria = nil
+        requestedRate = nil
     }
 }
 
