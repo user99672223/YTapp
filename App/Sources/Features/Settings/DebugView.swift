@@ -111,15 +111,18 @@ private struct LogLineLabel: View {
     var body: some View {
         Text("[\(line.level.rawValue)] \(line.text)")
             .font(.caption2.monospaced())
-            .foregroundStyle(color)
+            .foregroundStyle(style)
             .lineLimit(4)
     }
 
-    private var color: Color {
+    /// Info and debug lines use the hierarchical secondary style, like `TextRow`: it follows the
+    /// row's own colour, so it turns dark on the white row of a focused line (the fixed
+    /// `Color.secondary` stayed pale grey there).
+    private var style: AnyShapeStyle {
         switch line.level {
-        case .error: return isFocused ? Color(red: 0.7, green: 0.05, blue: 0.05) : .red
-        case .warn: return isFocused ? Color(red: 0.5, green: 0.35, blue: 0) : .yellow
-        case .info, .debug: return .secondary
+        case .error: return AnyShapeStyle(isFocused ? Color(red: 0.7, green: 0.05, blue: 0.05) : Color.red)
+        case .warn: return AnyShapeStyle(isFocused ? Color(red: 0.5, green: 0.35, blue: 0) : Color.yellow)
+        case .info, .debug: return AnyShapeStyle(HierarchicalShapeStyle.secondary)
         }
     }
 }
