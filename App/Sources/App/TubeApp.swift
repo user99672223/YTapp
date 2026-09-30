@@ -38,13 +38,8 @@ struct RootView: View {
             case .needsSetup:
                 SetupView()
             case .failed(let error):
-                VStack(spacing: 40) {
-                    ErrorStateView(error: error) {
-                        Task { await model.start() }
-                    }
-                    if model.isSignedIn {
-                        Button("Re-enter cookies") { model.beginCookieReentry() }
-                    }
+                ErrorStateView(error: error, secondary: reenterCookies) {
+                    Task { await model.start() }
                 }
             case .ready:
                 MainTabView()
@@ -54,6 +49,12 @@ struct RootView: View {
             // tvOS may terminate the app once it's in the background: save rotated cookies now.
             if phase != .active { model.cookies.flush() }
         }
+    }
+
+    /// Under Retry on a launch failure, when there are cookies to replace.
+    private var reenterCookies: ErrorStateView.SecondaryAction? {
+        guard model.isSignedIn else { return nil }
+        return .init(title: "Re-enter cookies") { model.beginCookieReentry() }
     }
 }
 

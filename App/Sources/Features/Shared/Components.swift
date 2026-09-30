@@ -68,23 +68,33 @@ struct ContentWidthReader: View {
 
 /// Plain message + Retry, used for every failure.
 struct ErrorStateView: View {
+    /// A second way out, drawn under Retry in the same focus section ("Re-enter cookies", "Close").
+    struct SecondaryAction {
+        let title: String
+        let perform: () -> Void
+    }
+
     let title: String
     let message: String
     /// The retry is running: the button shows progress (and stays, keeping focus).
     let isRetrying: Bool
+    let secondary: SecondaryAction?
     let retry: (() -> Void)?
 
-    init(error: BridgeError, isRetrying: Bool = false, retry: (() -> Void)?) {
+    init(error: BridgeError, isRetrying: Bool = false, secondary: SecondaryAction? = nil, retry: (() -> Void)?) {
         title = error.title
         message = error.userMessage
         self.isRetrying = isRetrying
+        self.secondary = secondary
         self.retry = retry
     }
 
-    init(title: String, message: String, isRetrying: Bool = false, retry: (() -> Void)?) {
+    init(title: String, message: String, isRetrying: Bool = false, secondary: SecondaryAction? = nil,
+         retry: (() -> Void)?) {
         self.title = title
         self.message = message
         self.isRetrying = isRetrying
+        self.secondary = secondary
         self.retry = retry
     }
 
@@ -102,14 +112,21 @@ struct ErrorStateView: View {
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: Theme.messageWidth)
-            if let retry {
-                Button {
-                    if !isRetrying { retry() }
-                } label: {
-                    if isRetrying {
-                        ProgressLabel("Retrying…", plain: true)
-                    } else {
-                        Label("Retry", systemImage: "arrow.clockwise")
+            if retry != nil || secondary != nil {
+                VStack(spacing: Theme.Spacing.row) {
+                    if let retry {
+                        Button {
+                            if !isRetrying { retry() }
+                        } label: {
+                            if isRetrying {
+                                ProgressLabel("Retrying…", plain: true)
+                            } else {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
+                        }
+                    }
+                    if let secondary {
+                        Button(secondary.title, action: secondary.perform)
                     }
                 }
                 .padding(.top, Theme.Spacing.row)

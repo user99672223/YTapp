@@ -139,11 +139,8 @@ private struct WatchContent: View {
             if case .failed(let error) = vm.phase {
                 ZStack {
                     Color.black.opacity(0.85).ignoresSafeArea()
-                    VStack(spacing: 0) {
-                        // Its own height only, so Close sits right under Retry.
-                        ErrorStateView(error: error) { vm.retry() }
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Close") { closeWatch() }
+                    ErrorStateView(error: error, secondary: .init(title: "Close") { closeWatch() }) {
+                        vm.retry()
                     }
                 }
             }
