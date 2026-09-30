@@ -622,7 +622,7 @@ private struct CommentsActionButton: View {
 
     /// "1,234 Comments" → "1,234"; nil until loaded or when the text has no number.
     private var count: String? {
-        guard let first = comments.page?.countText?.split(separator: " ").first,
+        guard let first = comments.countText?.split(separator: " ").first,
               first.first?.isNumber == true else { return nil }
         return String(first)
     }
