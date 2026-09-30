@@ -123,6 +123,8 @@ private struct ShortsContent: View {
     static let stageSize = CGSize(width: 495, height: 880)
     /// The action column, and the same space on the other side, so the video stays centred.
     private static let actionsWidth: CGFloat = 150
+    /// What an open comments panel takes of the safe area's width: the panel and a gap before it.
+    private static let panelInset = Theme.panelWidth + Theme.Spacing.row
     private static let pageAnimation = Animation.smooth(duration: 0.35)
     private static let panelAnimation = Animation.easeInOut(duration: 0.3)
 
@@ -138,22 +140,22 @@ private struct ShortsContent: View {
                 .disabled(isFailed)
                 // The comments panel takes the trailing edge; the video moves over to stay in view.
                 if showComments {
-                    Color.clear.frame(width: Theme.panelWidth)
+                    Color.clear.frame(width: Self.panelInset)
                 }
             }
-            .ignoresSafeArea(edges: .horizontal)
 
             if showComments {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    CommentsPanel(comments: vm.comments, close: { closeComments() })
-                        .frame(width: Theme.panelWidth)
-                        .frame(maxHeight: .infinity)
-                        .background(.regularMaterial)
-                        .focusSection()
-                }
-                .ignoresSafeArea()
-                .transition(.move(edge: .trailing))
+                // A floating sheet inside the safe area, like the watch page's panels. It slides in
+                // only a little, so it is on screen (and can take focus) from the first frame of the
+                // animation.
+                CommentsPanel(comments: vm.comments, close: { closeComments() })
+                    .frame(width: Theme.panelWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(.regularMaterial)
+                    .continuousCorners(Theme.Radius.panel)
+                    .focusSection()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .transition(.opacity.combined(with: .offset(x: 60)))
             }
 
             if case .failed(let error) = vm.phase {
@@ -161,13 +163,13 @@ private struct ShortsContent: View {
             }
 
             if let toast = vm.toast {
+                // At the top, like the watch page's toast; beside an open panel rather than under it.
                 VStack {
-                    Text(toast)
-                        .padding(.horizontal, 30).padding(.vertical, 16)
-                        .background(.ultraThinMaterial, in: Capsule())
-                    Spacer()
+                    ShortsToast(text: toast)
+                    Spacer(minLength: 0)
                 }
-                .padding(.top, 40)
+                .frame(maxWidth: .infinity)
+                .padding(.trailing, showComments ? Self.panelInset : 0)
                 .transition(.opacity)
             }
         }
@@ -301,7 +303,7 @@ private struct ShortsContent: View {
 
     private var actions: some View {
         VStack(spacing: Theme.Spacing.titleToContent) {
-            ShortsActionButton(title: "Like", caption: "Like", systemImage: "hand.thumbsup",
+            ShortsActionButton(title: "Like", caption: vm.current?.likeCountText ?? "Like", systemImage: "hand.thumbsup",
                                isActive: vm.likeStatus == .like, focus: $focus, target: .like) {
                 vm.rate(.like)
             }
@@ -309,7 +311,8 @@ private struct ShortsContent: View {
                                isActive: vm.likeStatus == .dislike, focus: $focus, target: .dislike) {
                 vm.rate(.dislike)
             }
-            CommentsActionButton(comments: vm.comments, isOpen: showComments, focus: $focus) {
+            CommentsActionButton(comments: vm.comments, countText: vm.current?.commentsCountText,
+                                 isOpen: showComments, focus: $focus) {
                 showComments.toggle()
             }
             // Always there (does nothing until the Short's channel is known), so the column
@@ -513,7 +516,7 @@ private struct SubscribePill: View {
     }
 }
 
-/// The channel's avatar, or its initial on a plain circle (Shorts' details often have no avatar).
+/// The channel's avatar, or its initial on a plain circle (when the reel answer had no avatar).
 private struct ChannelAvatar: View {
     let channel: ChannelSummary
     var size: CGFloat = 56
@@ -608,15 +611,17 @@ private struct ShortsActionButton: View {
     }
 }
 
-/// The comments button, with the count once the comments are loaded.
+/// The comments button, with the count: the Short's own ("1.2K"), else the loaded comments' one.
 private struct CommentsActionButton: View {
     @ObservedObject var comments: CommentsModel
+    /// The comment count from the Short's details, when YouTube sent one.
+    let countText: String?
     let isOpen: Bool
     var focus: FocusState<ShortsFocus?>.Binding
     let action: () -> Void
 
     var body: some View {
-        ShortsActionButton(title: "Comments", caption: count ?? "Comments", systemImage: "text.bubble",
+        ShortsActionButton(title: "Comments", caption: countText ?? count ?? "Comments", systemImage: "text.bubble",
                            isActive: isOpen, focus: focus, target: .comments, action: action)
     }
 
@@ -625,6 +630,22 @@ private struct CommentsActionButton: View {
         guard let first = comments.countText?.split(separator: " ").first,
               first.first?.isNumber == true else { return nil }
         return String(first)
+    }
+}
+
+/// A short message at the top (a rating or subscription change, the end of the feed), in the
+/// watch page's floating box: the regular material with the floating corner radius.
+private struct ShortsToast: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 18)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+            .frame(maxWidth: Theme.messageWidth)
     }
 }
 

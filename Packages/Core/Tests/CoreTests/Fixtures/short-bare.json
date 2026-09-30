@@ -1,16 +1,13 @@
 {
-  "id": "SHORTID0001",
-  "title": "Short one",
+  "id": "SHORTID0004",
+  "title": "First video",
   "channel": {
     "id": "UCaaaaaaaaaaaaaaaaaaaaaa",
-    "name": "Channel One",
-    "avatar": "https://yt3.ggpht.com/short-avatar=s176"
+    "name": "Channel One"
   },
   "viewCountText": "12,345 views",
-  "likeCountText": "12K",
-  "commentsCountText": "1.2K",
   "likeStatus": "like",
-  "thumbnail": "https://i.ytimg.com/vi/SHORTID0001/maxresdefault.jpg",
+  "thumbnail": "https://i.ytimg.com/vi/SHORTID0004/maxresdefault.jpg",
   "durationSeconds": 605,
   "formats": [
     {
@@ -174,14 +171,14 @@
     {
       "languageCode": "en",
       "name": "English",
-      "url": "https://www.youtube.com/api/timedtext?v=SHORTID0001&lang=en&fmt=vtt",
+      "url": "https://www.youtube.com/api/timedtext?v=SHORTID0004&lang=en&fmt=vtt",
       "isAuto": false,
       "vssId": ".en"
     },
     {
       "languageCode": "de",
       "name": "German (auto-generated)",
-      "url": "https://www.youtube.com/api/timedtext?v=SHORTID0001&lang=de&kind=asr&fmt=vtt",
+      "url": "https://www.youtube.com/api/timedtext?v=SHORTID0004&lang=de&kind=asr&fmt=vtt",
       "isAuto": true,
       "vssId": "a.de"
     }

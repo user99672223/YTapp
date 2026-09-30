@@ -165,7 +165,8 @@ export function checkPlayable(info) {
   fail('unavailable', message, status);
 }
 
-function formatCount(n) {
+// "12K", "1.5M": the compact counts of the watch page and the Shorts action column.
+export function formatCount(n) {
   if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
   if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\.0$/, '')}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '')}M`;

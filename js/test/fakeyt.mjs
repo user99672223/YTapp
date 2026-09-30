@@ -687,15 +687,147 @@ function guideResponse() {
   };
 }
 
+// The reel overlay in its two shapes: renderers (like count as a number, comment count in the
+// comments engagement panel's header, avatar in the player header) and the newer view models
+// (counts as button titles and accessibility labels, avatar in the metapanel's channel bar).
+function reelOverlayRenderers(id) {
+  return {
+    overlay: {
+      reelPlayerOverlayRenderer: {
+        style: 'REEL_PLAYER_OVERLAY_STYLE_SHORTS',
+        likeButton: {
+          likeButtonRenderer: {
+            target: { videoId: id }, likeStatus: 'LIKE', likesAllowed: true, likeCount: 12345,
+            likeCountText: simple('12K'), likeCountWithLikeText: simple('12K'), likeCountWithUnlikeText: simple('12K')
+          }
+        },
+        reelPlayerHeaderSupportedRenderers: {
+          reelPlayerHeaderRenderer: {
+            reelTitleText: runs('Short one'), timestampText: simple('2 days ago'),
+            channelNavigationEndpoint: { browseEndpoint: { browseId: CH1 } },
+            channelTitleText: runs('Channel One', CH1),
+            channelThumbnail: {
+              thumbnails: [
+                { url: '//yt3.ggpht.com/short-avatar=s48', width: 48, height: 48 },
+                { url: '//yt3.ggpht.com/short-avatar=s88', width: 88, height: 88 },
+                { url: '//yt3.ggpht.com/short-avatar=s176', width: 176, height: 176 }
+              ]
+            }
+          }
+        },
+        viewCommentsButton: {
+          buttonRenderer: { text: simple('1,234'), icon: { iconType: 'COMMENT' }, accessibility: { label: 'View 1,234 comments' } }
+        }
+      }
+    },
+    engagementPanels: [
+      { engagementPanelSectionListRenderer: { panelIdentifier: 'shorts-description-panel', header: { engagementPanelTitleHeaderRenderer: { title: runs('Description') } } } },
+      {
+        engagementPanelSectionListRenderer: {
+          header: { engagementPanelTitleHeaderRenderer: { title: runs('Comments'), contextualInfo: runs('1.2K') } },
+          content: { sectionListRenderer: { contents: [] } },
+          targetId: 'engagement-panel-comments-section',
+          visibility: 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN'
+        }
+      }
+    ]
+  };
+}
+
+// The renderers without the exact numbers: no numeric likeCount and no comments engagement panel,
+// so the like count comes from the like button's texts and the comment count from the comments
+// button, both { simpleText } like YouTube sends them.
+function reelOverlayRenderersTextOnly(id) {
+  const { overlay } = reelOverlayRenderers(id);
+  const renderer = overlay.reelPlayerOverlayRenderer;
+  return {
+    overlay: {
+      reelPlayerOverlayRenderer: {
+        ...renderer,
+        likeButton: {
+          likeButtonRenderer: {
+            target: { videoId: id }, likeStatus: 'INDIFFERENT', likesAllowed: true,
+            likeCountWithLikeText: simple('988'), likeCountWithUnlikeText: simple('987')
+          }
+        }
+      }
+    },
+    engagementPanels: [
+      { engagementPanelSectionListRenderer: { panelIdentifier: 'shorts-description-panel', header: { engagementPanelTitleHeaderRenderer: { title: runs('Description') } } } }
+    ]
+  };
+}
+
+function reelOverlayViewModels() {
+  const button = (iconName, title, accessibilityText) => ({ buttonViewModel: { iconName, title, accessibilityText } });
+  return {
+    overlay: {
+      reelPlayerOverlayRenderer: {
+        style: 'REEL_PLAYER_OVERLAY_STYLE_SHORTS',
+        metapanel: {
+          reelMetapanelViewModel: {
+            metadataItems: [{
+              reelChannelBarViewModel: {
+                channelName: { content: '@channeltwo' },
+                decoratedAvatarViewModel: {
+                  avatar: {
+                    avatarViewModel: {
+                      image: {
+                        sources: [
+                          { url: 'https://yt3.ggpht.com/short-two=s88', width: 88, height: 88 },
+                          { url: 'https://yt3.ggpht.com/short-two=s176', width: 176, height: 176 },
+                          { url: 'https://yt3.ggpht.com/short-two=s900', width: 900, height: 900 }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }]
+          }
+        },
+        buttonBar: {
+          reelActionBarViewModel: {
+            buttonViewModels: [
+              {
+                likeButtonViewModel: {
+                  likeButtonViewModel: {
+                    toggleButtonViewModel: {
+                      toggleButtonViewModel: {
+                        defaultButtonViewModel: button('LIKE', '1.5M', 'like this video along with 1,534,210 other people'),
+                        toggledButtonViewModel: button('LIKE', '1.5M', 'unlike')
+                      }
+                    },
+                    likeStatusEntity: { likeStatus: 'INDIFFERENT' }
+                  }
+                }
+              },
+              { dislikeButtonViewModel: { dislikeButtonViewModel: { toggleButtonViewModel: { toggleButtonViewModel: { defaultButtonViewModel: button('DISLIKE', 'Dislike', 'Dislike this video') } } } } },
+              button('MESSAGE_BUBBLE', '3.4K', 'View 3,456 comments'),
+              button('SHARE', 'Share', 'Share')
+            ]
+          }
+        }
+      }
+    }
+  };
+}
+
 function reelWatch(id) {
+  // SHORTID0001: renderers; SHORTID0002: view models (and not liked); SHORTID0003: renderers with
+  // texts only (and not liked); others: no overlay at all.
+  const overlays = { SHORTID0001: reelOverlayRenderers, SHORTID0002: reelOverlayViewModels, SHORTID0003: reelOverlayRenderersTextOnly };
+  const overlay = overlays[id] ? overlays[id](id) : {};
+  const likeStatus = id === 'SHORTID0002' || id === 'SHORTID0003' ? 'INDIFFERENT' : 'LIKE';
   return {
     responseContext: {},
+    ...overlay,
     playerResponse: playerResponse(id),
     frameworkUpdates: {
       entityBatchUpdate: {
         mutations: [{
           entityKey: 'x',
-          payload: { likeStatusEntity: { key: Buffer.from([0x0a, 11, ...Buffer.from(id)]).toString('base64'), likeStatus: 'LIKE' } }
+          payload: { likeStatusEntity: { key: Buffer.from([0x0a, 11, ...Buffer.from(id)]).toString('base64'), likeStatus } }
         }]
       }
     }
