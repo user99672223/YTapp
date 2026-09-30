@@ -1,24 +1,44 @@
 import SwiftUI
 import Core
 
+/// Card sizes and the grid, from the tvOS grid in Apple's Human Interface Guidelines. tvOS itself
+/// keeps content 80 points from the sides of the 1,920-point screen; a list adds no margin of its
+/// own inside that, as in Apple's TV apps, so four video columns of 410 points or six Short
+/// columns of 260, 40 points apart, fill the 1,760 points between the margins exactly.
 enum Layout {
     static let gridColumns = 4
-    static let cardWidth: CGFloat = 400
-    static let cardSpacing: CGFloat = 48
-    static let shortWidth: CGFloat = 230
+    static let cardWidth: CGFloat = 410
+    static let cardSpacing: CGFloat = 40
+    static let shortWidth: CGFloat = 260
     static let shortColumns = 6
     static let shortSpacing: CGFloat = 40
-    static let channelWidth: CGFloat = 240
-    static let horizontalPadding: CGFloat = 80
+    /// A channel in a sideways row (a six-column width); in a grid it takes the column's width.
+    static let channelWidth: CGFloat = 260
+    /// Between the rows of a grid, from the last line of text to the next row's artwork (which
+    /// reaches up into it when focused).
+    static let rowSpacing: CGFloat = 60
+    /// tvOS's own side safe area. The system insets every screen's content by it; lists don't add
+    /// it themselves.
+    static let screenMargin: CGFloat = 80
+    /// Side margin a list adds inside the safe area: none, so the first card lines up with the
+    /// safe area like the grids in Apple's apps.
+    static let horizontalPadding: CGFloat = 0
     /// The width between the side margins of a list on the Apple TV's 1920-point screen (80-point
     /// safe area plus `horizontalPadding` on each side). Used until the real width is measured.
-    static let defaultContentWidth: CGFloat = 1920 - 2 * (80 + horizontalPadding)
+    static let defaultContentWidth: CGFloat = 1920 - 2 * (screenMargin + horizontalPadding)
 
     /// Width of each of `count` equal columns that exactly fill `width`, so a grid has the same
     /// margin on the right as on the left.
     static func columnWidth(in width: CGFloat, count: Int, spacing: CGFloat) -> CGFloat {
         guard count > 0, width > 0 else { return 0 }
         return floor((width - spacing * CGFloat(count - 1)) / CGFloat(count))
+    }
+
+    /// How far focused artwork of this width or height reaches past each of its edges: the
+    /// system's focus effect enlarges it to about 110 %. Text under a card starts this much lower,
+    /// so the lifted card never covers it and nothing has to move when focus arrives.
+    static func focusOverflow(_ length: CGFloat) -> CGFloat {
+        ceil(length * 0.05)
     }
 }
 
