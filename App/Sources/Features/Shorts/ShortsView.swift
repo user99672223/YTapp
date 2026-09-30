@@ -20,29 +20,14 @@ struct ShortsTabView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 40) {
-                HStack(spacing: 30) {
-                    Button {
-                        router.shorts = ShortsRequest(seedId: nil)
-                    } label: {
-                        Label("Play Shorts", systemImage: "play.fill").font(.title3.bold()).padding(.horizontal, 20)
-                    }
-                    Text("Endless feed · swipe up/down to switch · loops")
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+                Button {
+                    router.shorts = ShortsRequest(seedId: nil)
+                } label: {
+                    Label("Play Shorts", systemImage: "play.fill")
                 }
-                if let shorts = home.page?.shorts, !shorts.isEmpty {
-                    Text("From your Home feed").font(.title3.bold())
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 50) {
-                        ForEach(Array(shorts.enumerated()), id: \.offset) { _, short in
-                            ShortCard(video: short, width: shortWidth)
-                        }
-                    }
-                } else if home.isLoading {
-                    ProgressView()
-                } else if let error = home.error {
-                    ErrorStateView(error: error) { Task { await home.refresh(model) } }
-                        .frame(height: 500)
-                }
+                .buttonStyle(.borderedProminent)
+                content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(ContentWidthReader(width: $contentWidth))
@@ -50,6 +35,30 @@ struct ShortsTabView: View {
             .padding(.vertical, 40)
         }
         .task { await home.loadIfNeeded(model) }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let shorts = home.page?.shorts, !shorts.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Spacing.titleToContent) {
+                Text("From your Home feed").font(.title3.bold())
+                LazyVGrid(columns: columns, alignment: .leading, spacing: Theme.Spacing.section) {
+                    ForEach(shorts, id: \.id) { short in
+                        ShortCard(video: short, width: shortWidth)
+                    }
+                }
+            }
+        } else if let error = home.error {
+            ErrorStateView(error: error, isRetrying: home.isLoading) {
+                Task { await home.refresh(model, userInitiated: true) }
+            }
+            .frame(height: 500)
+        } else if home.page == nil || home.isLoading {
+            LoadingView().frame(height: 500)
+        } else {
+            EmptyStateView(systemImage: "bolt.horizontal", text: "Your Home feed has no Shorts right now.")
+                .frame(height: 500)
+        }
     }
 }
 
