@@ -61,13 +61,21 @@ struct LaunchView: View {
     let message: String
 
     var body: some View {
-        VStack(spacing: 30) {
-            Image(systemName: "play.rectangle.fill")
-                .font(.system(size: 120))
-                .foregroundStyle(.red)
-            Text("Tube").font(.largeTitle.bold())
-            ProgressView()
-            Text(message).font(.headline).foregroundStyle(.secondary)
+        VStack(spacing: Theme.Spacing.section) {
+            VStack(spacing: Theme.Spacing.titleToContent) {
+                Image(systemName: "play.rectangle.fill")
+                    .font(.system(size: Theme.heroSymbolSize * 1.5))
+                    .foregroundStyle(.red)
+                Text("Tube").font(.largeTitle.bold())
+            }
+            VStack(spacing: Theme.Spacing.titleToContent) {
+                ProgressView()
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: Theme.messageWidth)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
@@ -80,7 +88,8 @@ struct MainTabView: View {
 
     // Six tabs with icon and text don't fit the tvOS tab bar at 1920 points: the last one was cut
     // off, and focusing it cut off the first. Subscriptions is shortened, and Search and Settings
-    // show only their icon, as in Apple's own TV apps.
+    // show only their icon, as in Apple's own TV apps. The symbols are the plain (outline) ones,
+    // so the bar can apply one variant to all of them.
     var body: some View {
         TabView(selection: $router.selectedTab) {
             NavigationStack(path: router.path(for: .home)) { HomeView().withRoutes() }
@@ -90,7 +99,7 @@ struct MainTabView: View {
                 .tabItem { Label("Subs", systemImage: "rectangle.stack.badge.play") }
                 .tag(AppTab.subscriptions)
             ShortsTabView()
-                .tabItem { Label("Shorts", systemImage: "bolt.horizontal.fill") }
+                .tabItem { Label("Shorts", systemImage: "bolt.horizontal") }
                 .tag(AppTab.shorts)
             NavigationStack(path: router.path(for: .search)) { SearchView().withRoutes() }
                 .tabItem { Image(systemName: "magnifyingglass") }
@@ -126,14 +135,19 @@ struct AuthBanner: View {
     let message: String
 
     var body: some View {
-        HStack(spacing: 30) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-            Text(message).font(.callout)
+        HStack(spacing: Theme.Spacing.titleToContent) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title3)
+                .foregroundStyle(.yellow)
+            Text(message)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: Theme.messageWidth, alignment: .leading)
             Button("Re-enter cookies") { model.beginCookieReentry() }
             Button("Dismiss") { model.authProblem = nil }
         }
-        .padding(30)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .padding(.bottom, 40)
+        .padding(Theme.Spacing.floating)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.floating, style: .continuous))
+        .padding(.bottom, Theme.Spacing.floating)
     }
 }

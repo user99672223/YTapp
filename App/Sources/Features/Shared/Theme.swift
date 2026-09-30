@@ -29,7 +29,8 @@ enum Theme {
         static let titleToContent: CGFloat = 24
         /// Between sections of a screen.
         static let section: CGFloat = 60
-        /// Between the artwork of a card and its title.
+        /// Between a card's artwork, lifted by focus, and its title. Unfocused, the title sits
+        /// `Layout.focusOverflow` lower, so the lifted card never covers it and nothing moves.
         static let cardToText: CGFloat = 14
         /// Between lines of text under a card.
         static let textLines: CGFloat = 4
@@ -37,10 +38,22 @@ enum Theme {
         static let row: CGFloat = 20
         /// Inner padding of side panels.
         static let panel: CGFloat = 48
+        /// Between a badge (duration, LIVE, a playlist's size) and the edges of its artwork.
+        static let badgeInset: CGFloat = 10
+        /// Inner padding of banners and toasts.
+        static let floating: CGFloat = 28
     }
 
     /// Width of the trailing side panels over a playing video (comments, info, captions, …).
     static let panelWidth: CGFloat = 760
+
+    /// Longest line of a centred message (errors, empty lists, banners): about 60 characters of
+    /// body text, so it reads as a paragraph rather than one line across the whole TV.
+    static let messageWidth: CGFloat = 1000
+
+    /// The big symbol above an error or an empty list: the one place text-free SF Symbols take a
+    /// fixed size, since no text style is that large.
+    static let heroSymbolSize: CGFloat = 80
 }
 
 extension View {
