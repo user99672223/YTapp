@@ -8,6 +8,9 @@ open and runs a small script of steps:
   down*12@0.4      press Down 12 times, 0.4 s apart (up, left, right, select, menu, home,
                    play_pause work the same; the @ delay defaults to 0.5 s)
   shot:NAME        screenshot through tvd, taken in the background so the presses keep their pace
+                   (the picture lands 0.1-0.6 s later: a key listed right after it is usually
+                   pressed BEFORE the capture, so the shot shows the result of that key)
+  snap:NAME        screenshot that finishes before the next step (use it to see a state)
   mark:TEXT        marker line in tvd's logs (spaces as _)
   wait:1.5         pause
 
@@ -70,6 +73,9 @@ async def main(script):
         for step in script.split():
             if step.startswith("shot:"):
                 shot_async(step[5:], threads)
+            elif step.startswith("snap:"):
+                shot_async(step[5:], threads)
+                await asyncio.to_thread(threads[-1].join)
             elif step.startswith("mark:"):
                 api("POST", "/mark", text=step[5:].replace("_", " "))
                 print(f"mark {step[5:]}", flush=True)

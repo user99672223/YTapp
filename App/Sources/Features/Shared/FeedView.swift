@@ -625,6 +625,10 @@ struct FeedSectionView: View, Equatable {
                         .onDisappear { cardDisappeared(entry) }
                 }
             }
+            // Full width: Down from a control above the list (Search filters, a picker at the
+            // side) reaches the first row even when that row has a single card.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusSection()
             if !section.shelf.isEmpty {
                 ShelfRow(entries: section.shelf, cardAppeared: cardAppeared, cardDisappeared: cardDisappeared)
             }

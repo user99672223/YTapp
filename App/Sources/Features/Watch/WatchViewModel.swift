@@ -531,7 +531,8 @@ final class WatchViewModel: ObservableObject {
     // MARK: - Actions
 
     func rate(_ target: LikeStatus) {
-        guard let id = details?.id else { return }
+        // While the next video loads, `details` is still the previous one's.
+        guard let id = details?.id, id == videoId else { return }
         let desired: LikeStatus = likeStatus == target ? .none : target
         let previous = likeStatus
         likeStatus = desired
@@ -547,7 +548,7 @@ final class WatchViewModel: ObservableObject {
     }
 
     func toggleSubscription() {
-        guard let channelId = details?.channel.id else { return }
+        guard details?.id == videoId, let channelId = details?.channel.id else { return }
         let target = !(isSubscribed ?? false)
         invalidateCachedDetails()
         Task {
@@ -561,7 +562,7 @@ final class WatchViewModel: ObservableObject {
     }
 
     func toggleWatchLater() {
-        guard let id = details?.id else { return }
+        guard let id = details?.id, id == videoId else { return }
         let target = !(inWatchLater ?? false)
         Task {
             do {
