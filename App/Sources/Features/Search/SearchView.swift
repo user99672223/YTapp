@@ -5,9 +5,8 @@ import Core
 /// start at the lists' margin (`Layout.horizontalPadding` inside tvOS's safe area), like every
 /// other screen; with no margin of its own that is also where the system puts the search field's
 /// suggestion chips, so the whole screen shares one leading edge. The filters are the results
-/// list's header, like the pickers on Subs and Library: they scroll away with the results, which
-/// then get the whole screen once the search field and keyboard have moved off it, and Up from
-/// the first row of results brings them back.
+/// list's header, like the pickers on Subs and Library: they scroll away with the results, and
+/// Up from the first row of results brings them back.
 struct SearchView: View {
     /// The filter menus, so focus can be put back on one.
     private enum Filter: Hashable { case uploadDate, type, duration, sort }
@@ -29,13 +28,10 @@ struct SearchView: View {
         // below keep their identity (and focus) when the first results arrive.
         VStack(alignment: .leading, spacing: 0) {
             if let results, let query = submitted {
-                // The scroll view is the whole screen's content, so it reaches up under the
-                // search field and keyboard, and the results scroll up into the room they leave
-                // instead of sliding under chips pinned in the middle of the screen. No .id on
-                // it: FeedView loads whichever model it's handed, so a new search or a changed
-                // filter keeps the header, and the focused filter menu, in place. FeedView shows
-                // the loading, no-results and error (with Retry) states under the filters, and
-                // lays channels, videos and playlists out in the same grid as every other list.
+                // The filters scroll with the results instead of staying pinned over them, so
+                // the cards never slide under the chips. FeedView shows the loading, no-results
+                // and error (with Retry) states under the filters, and lays channels, videos and
+                // playlists out in the same grid as every other list.
                 FeedView(feed: results, emptyText: noResultsText(for: query), autoRefresh: false, emptySystemImage: "magnifyingglass") {
                     filterBar
                         // Full width and its own focus section, so Up from any column of results
@@ -43,6 +39,11 @@ struct SearchView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focusSection()
                 }
+                // Keyed on the query, not the model: a new search starts a new list at the top
+                // (focus is on the keyboard then), instead of keeping where the last one was
+                // scrolled to, while a changed filter (the same query) keeps the header, and the
+                // filter menu focus is on, in place. FeedView loads whichever model it's handed.
+                .id(query)
             } else {
                 EmptyStateView(systemImage: "magnifyingglass", text: "Search YouTube")
             }
