@@ -139,6 +139,21 @@ final class ShortsViewModel: ObservableObject {
         URL(string: "https://i.ytimg.com/vi/\(id)/oar2.jpg")
     }
 
+    /// The thumbnail from the details of the Short at `position`, for when its poster can't be
+    /// loaded.
+    func posterFallback(at position: Int) -> URL? {
+        short(at: position)?.thumbnail.flatMap(URL.init(string:))
+    }
+
+    /// Width / height of the Short at `position`'s video, from its streams (all of a video's
+    /// formats have its shape); nil until its details are known.
+    func aspectRatio(at position: Int) -> Double? {
+        guard let formats = short(at: position)?.formats,
+              let format = formats.first(where: { $0.hasVideo && ($0.width ?? 0) > 0 && ($0.height ?? 0) > 0 }),
+              let width = format.width, let height = format.height else { return nil }
+        return Double(width) / Double(height)
+    }
+
     func next() {
         guard !ids.isEmpty else { return }
         if index + 1 < ids.count {
