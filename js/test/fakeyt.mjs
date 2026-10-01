@@ -758,6 +758,27 @@ function reelOverlayRenderersTextOnly(id) {
   };
 }
 
+// The renderers with likeCount as a string and no like texts: compact ("157K", as seen on the TV,
+// SHORTID0005) or the exact count with grouping ("157,433", SHORTID0006).
+function reelOverlayRenderersStringCount(id) {
+  const { overlay, engagementPanels } = reelOverlayRenderers(id);
+  const renderer = overlay.reelPlayerOverlayRenderer;
+  return {
+    overlay: {
+      reelPlayerOverlayRenderer: {
+        ...renderer,
+        likeButton: {
+          likeButtonRenderer: {
+            target: { videoId: id }, likeStatus: 'LIKE', likesAllowed: true,
+            likeCount: id === 'SHORTID0005' ? '157K' : '157,433'
+          }
+        }
+      }
+    },
+    engagementPanels
+  };
+}
+
 function reelOverlayViewModels() {
   const button = (iconName, title, accessibilityText) => ({ buttonViewModel: { iconName, title, accessibilityText } });
   return {
@@ -816,7 +837,10 @@ function reelOverlayViewModels() {
 function reelWatch(id) {
   // SHORTID0001: renderers; SHORTID0002: view models (and not liked); SHORTID0003: renderers with
   // texts only (and not liked); others: no overlay at all.
-  const overlays = { SHORTID0001: reelOverlayRenderers, SHORTID0002: reelOverlayViewModels, SHORTID0003: reelOverlayRenderersTextOnly };
+  const overlays = {
+    SHORTID0001: reelOverlayRenderers, SHORTID0002: reelOverlayViewModels, SHORTID0003: reelOverlayRenderersTextOnly,
+    SHORTID0005: reelOverlayRenderersStringCount, SHORTID0006: reelOverlayRenderersStringCount
+  };
   const overlay = overlays[id] ? overlays[id](id) : {};
   const likeStatus = id === 'SHORTID0002' || id === 'SHORTID0003' ? 'INDIFFERENT' : 'LIKE';
   return {

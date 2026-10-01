@@ -330,6 +330,13 @@ test('Shorts show like and comment counts and the channel avatar from the reel o
   assert.equal(textOnly.commentsCountText, '1,234');
   assert.equal(textOnly.channel.avatar, 'https://yt3.ggpht.com/short-avatar=s176');
 
+  // likeCount as a string: a compact count is shown as it is (not read as 157), an exact one with
+  // grouping is formatted.
+  const compact = await call('shortInfo', { id: 'SHORTID0005', client: 'TV' });
+  assert.equal(compact.likeCountText, '157K');
+  const grouped = await call('shortInfo', { id: 'SHORTID0006', client: 'TV' });
+  assert.equal(grouped.likeCountText, '157K');
+
   // No overlay: the fields are left out (Swift shows "Like", "Comments" and the initial), and
   // that is logged once.
   const bare = await call('shortInfo', { id: 'SHORTID0004', client: 'TV' });

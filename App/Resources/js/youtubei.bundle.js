@@ -45169,19 +45169,27 @@ return process(__tube_n, __tube_sp, __tube_s);`);
     return m ? Number(m[0].replace(/\D/g, "")) : void 0;
   }
   __name(labelNumber, "labelNumber");
+  function exactCount(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : void 0;
+    if (typeof value !== "string") return void 0;
+    const s = value.trim();
+    return /^(?:\d{1,3}(?:[,.   ]\d{3})+|\d+)$/.test(s) ? Number(s.replace(/\D/g, "")) : void 0;
+  }
+  __name(exactCount, "exactCount");
   function likeCountOf(overlay, liked) {
     const renderer = findKey(overlay, "likeButtonRenderer");
     if (renderer && renderer.likesAllowed !== false) {
-      const n = typeof renderer.likeCount === "number" ? renderer.likeCount : parseInt(renderer.likeCount, 10);
-      if (Number.isFinite(n)) return formatCount(n);
-      const shown = countText(renderer.likeCountText) || countText(liked ? renderer.likeCountWithLikeText : renderer.likeCountWithUnlikeText);
+      const n = exactCount(renderer.likeCount);
+      if (n !== void 0) return formatCount(n);
+      const shown = countText(renderer.likeCountText) || countText(liked ? renderer.likeCountWithLikeText : renderer.likeCountWithUnlikeText) || countText(renderer.likeCount);
       if (shown) return shown;
     }
     const toggle = findModel(findModel(overlay, "likeButtonViewModel"), "toggleButtonViewModel");
     const button = findModel(liked ? toggle?.toggledButtonViewModel : toggle?.defaultButtonViewModel, "buttonViewModel");
+    const title = countText(button?.title);
+    if (title) return title;
     const others = labelNumber(button?.accessibilityText);
-    if (Number.isFinite(others) && !liked) return formatCount(others);
-    return countText(button?.title);
+    return Number.isFinite(others) && !liked ? formatCount(others) : void 0;
   }
   __name(likeCountOf, "likeCountOf");
   function commentsCountOf(json, overlay) {

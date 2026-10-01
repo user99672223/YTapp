@@ -56,23 +56,37 @@ function labelNumber(label) {
   return m ? Number(m[0].replace(/\D/g, '')) : undefined;
 }
 
+// A count given as a number: a number, or a string of digits with or without grouping ("12345",
+// "12,345"). Not a compact count ("157K"): parseInt reads that as 157, which the TV showed.
+function exactCount(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  const s = value.trim();
+  return /^(?:\d{1,3}(?:[,.   ]\d{3})+|\d+)$/.test(s) ? Number(s.replace(/\D/g, '')) : undefined;
+}
+
 function likeCountOf(overlay, liked) {
   const renderer = findKey(overlay, 'likeButtonRenderer');
   if (renderer && renderer.likesAllowed !== false) {
-    const n = typeof renderer.likeCount === 'number' ? renderer.likeCount : parseInt(renderer.likeCount, 10);
-    if (Number.isFinite(n)) return formatCount(n);
+    const n = exactCount(renderer.likeCount);
+    if (n !== undefined) return formatCount(n);
     // likeCountText is the count as it stands; likeCountWithLikeText is the count with the
-    // viewer's like in it and likeCountWithUnlikeText the count without it.
+    // viewer's like in it and likeCountWithUnlikeText the count without it. A likeCount that is
+    // already compact ("157K") is shown as it is.
     const shown = countText(renderer.likeCountText) ||
-      countText(liked ? renderer.likeCountWithLikeText : renderer.likeCountWithUnlikeText);
+      countText(liked ? renderer.likeCountWithLikeText : renderer.likeCountWithUnlikeText) ||
+      countText(renderer.likeCount);
     if (shown) return shown;
   }
-  // The newer action bar: a toggle button whose title is the count (per state).
+  // The newer action bar: a toggle button whose title is the count (per state), as YouTube shows
+  // it. The number in its label is only used when the title isn't a count: labels can spell the
+  // magnitude out ("157 thousand"), which would read as 157.
   const toggle = findModel(findModel(overlay, 'likeButtonViewModel'), 'toggleButtonViewModel');
   const button = findModel(liked ? toggle?.toggledButtonViewModel : toggle?.defaultButtonViewModel, 'buttonViewModel');
+  const title = countText(button?.title);
+  if (title) return title;
   const others = labelNumber(button?.accessibilityText);
-  if (Number.isFinite(others) && !liked) return formatCount(others);
-  return countText(button?.title);
+  return Number.isFinite(others) && !liked ? formatCount(others) : undefined;
 }
 
 function commentsCountOf(json, overlay) {
