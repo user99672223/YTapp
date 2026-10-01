@@ -22,7 +22,8 @@ struct SettingsView: View {
         case maxQuality, streamClient, poTokens, captionLanguage, frameRate
         case bundleURL, clearCache, debug
 
-        /// Opens a page on the Settings stack (or the keyboard) that focus comes back from.
+        /// Opens a page on the Settings stack (or the keyboard) that focus comes back from. Bundle
+        /// URL also sets its return row as the keyboard opens; this is the fallback.
         var opensPage: Bool {
             switch self {
             case .maxQuality, .streamClient, .poTokens, .captionLanguage, .frameRate, .bundleURL, .debug:
@@ -140,9 +141,14 @@ struct SettingsView: View {
             Section {
                 InfoRow("Running bundle", value: model.bundleInfo.map { "\($0.bundleVersion)" } ?? "not loaded")
                 InfoRow("Source", value: model.bundles.hasDownloadedBundle ? "Downloaded" : "Built into the app")
-                TextField("Bundle URL", text: $model.settings.bundleURL)
-                    .textContentType(.URL)
-                    .focused($focusedRow, equals: .bundleURL)
+                // The keyboard is a system screen over the app, which may not count as this list
+                // disappearing, so the row is marked to come back to as editing starts, like
+                // Clear cache's confirmation.
+                TextField("Bundle URL", text: $model.settings.bundleURL, onEditingChanged: { editing in
+                    if editing { returnRow = .bundleURL }
+                })
+                .textContentType(.URL)
+                .focused($focusedRow, equals: .bundleURL)
                 Button(bundleUpdate.busy ? "Downloading…" : "Download newer bundle") {
                     Task { await downloadBundle() }
                 }
@@ -197,7 +203,7 @@ struct SettingsView: View {
             returnRow = nil
         }
         .onDisappear {
-            // A choice list, the Debug screen or the keyboard covered the list. (Switching to
+            // A choice list, the Debug screen (or the keyboard) covered the list. (Switching to
             // another tab changes the selected tab first, and coming back from the tab bar should
             // land on Re-enter cookies again.)
             if router.selectedTab == .settings, let lastRow, lastRow.opensPage {
