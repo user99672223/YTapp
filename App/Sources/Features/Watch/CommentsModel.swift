@@ -147,6 +147,19 @@ final class CommentsModel: ObservableObject {
         }
     }
 
+    /// Whether the list (`CommentsList`) shows the row `focus` names right now, so focus can be
+    /// sent back to it.
+    func showsRow(_ focus: CommentFocus) -> Bool {
+        switch focus {
+        case .comment(let id): return error == nil && isLoaded && items.contains { $0.id == id }
+        case .moreComments: return error == nil && isLoaded && hasMore
+        case .empty: return error == nil && isLoaded && items.isEmpty
+        case .retry: return error != nil
+        case .draft: return canPost
+        default: return false
+        }
+    }
+
     // MARK: - Replies
 
     /// Comments open in the thread view when they have replies or are too long for a row.
@@ -226,6 +239,17 @@ final class CommentThreadModel: ObservableObject {
     }
 
     var hasMore: Bool { replies.continuation != nil }
+
+    /// Whether the thread view (`CommentThreadView`) shows the row `focus` names right now.
+    func showsRow(_ focus: CommentFocus) -> Bool {
+        switch focus {
+        case .text(let index): return index == 0 || chunks.indices.contains(index)
+        case .reply(let id): return error == nil && isLoaded && replies.items.contains { $0.id == id }
+        case .moreReplies: return error == nil && isLoaded && hasMore
+        case .retry: return comment.hasReplies && (error != nil || (isLoaded && replies.items.isEmpty && !hasMore))
+        default: return false
+        }
+    }
 
     func load() {
         guard comment.hasReplies, !isLoaded, !isLoading else { return }
