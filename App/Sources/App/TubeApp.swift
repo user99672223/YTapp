@@ -91,6 +91,12 @@ struct MainTabView: View {
     // off, and focusing it cut off the first. Subscriptions is shortened, and Search and Settings
     // show only their icon, as in Apple's own TV apps. The symbols are the plain (outline) ones,
     // so the bar can apply one variant to all of them.
+    //
+    // Up from a tab's content is the system's move: the focus engine picks a tab item it finds
+    // in the direction of the move, which isn't always the selected one (tvOS then switches to
+    // it), and the selected tab only when no item is in the way. The tab bar's items aren't
+    // views the app can focus or give a default to, and focus sections and default focus in the
+    // content only steer focus coming into it, so the app can't change this.
     var body: some View {
         TabView(selection: $router.selectedTab) {
             NavigationStack(path: router.path(for: .home)) { HomeView().withRoutes() }

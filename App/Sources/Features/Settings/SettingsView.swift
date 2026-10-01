@@ -13,11 +13,39 @@ final class BundleUpdateStatus: ObservableObject {
 }
 
 struct SettingsView: View {
+    /// The rows focus is sent to. Coming down from the tab bar lands on Re-enter cookies, the
+    /// first row that does anything (the account row above it is only information), never on
+    /// "Sign out" right under it. Coming back from what a row opened (a list of choices, the Debug
+    /// screen, the keyboard, the Clear cache confirmation) lands on that row again.
+    private enum Row: Hashable {
+        case reenterCookies
+        case maxQuality, streamClient, poTokens, captionLanguage, frameRate
+        case bundleURL, clearCache, debug
+
+        /// Opens a page on the Settings stack (or the keyboard) that focus comes back from. Bundle
+        /// URL also sets its return row as the keyboard opens; this is the fallback.
+        var opensPage: Bool {
+            switch self {
+            case .maxQuality, .streamClient, .poTokens, .captionLanguage, .frameRate, .bundleURL, .debug:
+                return true
+            case .reenterCookies, .clearCache:
+                return false
+            }
+        }
+    }
+
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var router: Router
     @ObservedObject private var bundleUpdate = BundleUpdateStatus.shared
     @State private var confirmSignOut = false
     @State private var confirmClear = false
     @State private var cacheSize: Int64 = 0
+    @FocusState private var focusedRow: Row?
+    /// The row that last had focus (rows without a `Row` leave it as it was).
+    @State private var lastRow: Row?
+    /// The row that opened a page or confirmation, while focus is away on it; nil otherwise, and
+    /// focus coming into the list lands on Re-enter cookies.
+    @State private var returnRow: Row?
     @Environment(\.scenePhase) private var scenePhase
     /// Read when Settings appears and when the app comes back to the screen: it's switched in
     /// the Apple TV's own settings, outside the app.
@@ -63,13 +91,17 @@ struct SettingsView: View {
                     Text(model.isSignedIn ? "Signed in (account name unavailable)" : "Not signed in")
                 }
                 Button("Re-enter cookies") { model.beginCookieReentry() }
+                    .focused($focusedRow, equals: .reenterCookies)
                 if model.isSignedIn {
+                    // Deliberately not a `Row`: focus is never sent here, so after Cancel it may
+                    // come back to Re-enter cookies instead.
                     Button { confirmSignOut = true } label: { DestructiveRowLabel("Sign out of this Apple TV") }
                 }
             }
 
             Section {
                 ChoiceRow("Maximum quality", selection: $model.settings.maxHeight, options: qualityOptions)
+                    .focused($focusedRow, equals: .maxQuality)
                 InfoRow("Codec order", value: "AV1 → VP9 → H.264")
                 InfoRow("Audio", value: "Opus (highest bitrate), else AAC")
                 Toggle("Hardware decoding for H.264", isOn: $model.settings.hardwareDecodeH264)
@@ -81,7 +113,9 @@ struct SettingsView: View {
 
             Section {
                 ChoiceRow("Stream client", selection: $model.settings.streamClient, options: streamClientOptions)
+                    .focused($focusedRow, equals: .streamClient)
                 ChoiceRow("PO tokens (web clients)", selection: $model.settings.poTokenMode, options: poTokenOptions)
+                    .focused($focusedRow, equals: .poTokens)
             } header: {
                 Text("YouTube stream client")
             } footer: {
@@ -92,10 +126,12 @@ struct SettingsView: View {
                 Toggle("Autoplay next video", isOn: $model.settings.autoplay)
                 Toggle("Captions on by default", isOn: $model.settings.captionsEnabled)
                 ChoiceRow("Caption language", selection: $model.settings.captionsLanguage, options: captionLanguageOptions)
+                    .focused($focusedRow, equals: .captionLanguage)
                 Toggle("Show stats while playing", isOn: $model.settings.showStatsOverlay)
                 // Last, right above the footer that explains it.
                 ChoiceRow("Match frame rate", selection: $model.settings.frameRateMatching, options: frameRateOptions,
                           footer: Self.frameRateChoices)
+                    .focused($focusedRow, equals: .frameRate)
             } header: {
                 Text("Playback")
             } footer: {
@@ -105,8 +141,14 @@ struct SettingsView: View {
             Section {
                 InfoRow("Running bundle", value: model.bundleInfo.map { "\($0.bundleVersion)" } ?? "not loaded")
                 InfoRow("Source", value: model.bundles.hasDownloadedBundle ? "Downloaded" : "Built into the app")
-                TextField("Bundle URL", text: $model.settings.bundleURL)
-                    .textContentType(.URL)
+                // The keyboard is a system screen over the app, which may not count as this list
+                // disappearing, so the row is marked to come back to as editing starts, like
+                // Clear cache's confirmation.
+                TextField("Bundle URL", text: $model.settings.bundleURL, onEditingChanged: { editing in
+                    if editing { returnRow = .bundleURL }
+                })
+                .textContentType(.URL)
+                .focused($focusedRow, equals: .bundleURL)
                 Button(bundleUpdate.busy ? "Downloading…" : "Download newer bundle") {
                     Task { await downloadBundle() }
                 }
@@ -127,11 +169,18 @@ struct SettingsView: View {
 
             Section("Storage") {
                 InfoRow("Player & session cache", value: Formatters.bytes(cacheSize))
-                Button { confirmClear = true } label: { DestructiveRowLabel("Clear cache") }
+                Button {
+                    returnRow = .clearCache
+                    confirmClear = true
+                } label: {
+                    DestructiveRowLabel("Clear cache")
+                }
+                .focused($focusedRow, equals: .clearCache)
             }
 
             Section("Diagnostics") {
                 NavigationLink("Debug screen") { DebugView() }
+                    .focused($focusedRow, equals: .debug)
             }
 
             // Highlightable rows: this is the end of the list, and a tvOS list only scrolls as far
@@ -140,6 +189,25 @@ struct SettingsView: View {
                 InfoRow("Tube", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")
                 InfoRow("YouTube.js", value: model.bundleInfo?.youtubeiVersion ?? "?")
                 InfoRow("libmpv client API", value: "\(mpv_client_api_version() >> 16).\(mpv_client_api_version() & 0xffff)")
+            }
+        }
+        // Down from the tab bar went to whichever row tvOS picked, and on the TV that was
+        // "Sign out", one press from signing out. As a focus section with a default, moving into
+        // the list from the tab bar lands on Re-enter cookies; while a row's page or
+        // confirmation is open, the default is that row, so coming back doesn't jump to the top.
+        .focusSection()
+        .defaultFocus($focusedRow, returnRow ?? Row.reenterCookies, priority: .userInitiated)
+        .onChange(of: focusedRow) { _, row in
+            guard let row else { return }
+            lastRow = row
+            returnRow = nil
+        }
+        .onDisappear {
+            // A choice list, the Debug screen (or the keyboard) covered the list. (Switching to
+            // another tab changes the selected tab first, and coming back from the tab bar should
+            // land on Re-enter cookies again.)
+            if router.selectedTab == .settings, let lastRow, lastRow.opensPage {
+                returnRow = lastRow
             }
         }
         .confirmationDialog("Sign out?", isPresented: $confirmSignOut) {
