@@ -142,6 +142,9 @@ struct ShortsInfoColumn: View {
         }
         // The symbols line up with the avatar in the channel row.
         .padding(.leading, ShortsLayout.pillPadding + (ShortsLayout.avatarSize - ShortsLayout.buttonSize) / 2)
+        // Down from Subscribe lands on the like button, not the button nearest the row's middle.
+        .focusSection()
+        .defaultFocus(focus, .like, priority: .userInitiated)
         // Room for the caption under the focused button, so nothing moves when it appears.
         .padding(.bottom, ShortsLayout.captionHeight)
     }

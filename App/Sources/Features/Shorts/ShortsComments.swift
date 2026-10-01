@@ -411,7 +411,8 @@ private struct ShortsThreadParent: View {
     }
 }
 
-/// A piece of the open comment's text: brighter while focused; the box's bar shows where.
+/// A piece of the open comment's text: brighter, on a faint platter, while focused; the box's
+/// bar shows where it is in a long text.
 private struct ShortsTextPieceStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         ShortsTextPieceBody(configuration: configuration)
@@ -425,6 +426,12 @@ private struct ShortsTextPieceBody: View {
     var body: some View {
         configuration.label
             .foregroundStyle(isFocused ? Color.white : Color.white.opacity(0.75))
+            .background {
+                RoundedRectangle(cornerRadius: ShortsLayout.cardRadius / 2, style: .continuous)
+                    .fill(Color.white.opacity(isFocused ? 0.12 : 0))
+                    .padding(.horizontal, -10)
+                    .padding(.vertical, -4)
+            }
             .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.15), value: isFocused)
     }

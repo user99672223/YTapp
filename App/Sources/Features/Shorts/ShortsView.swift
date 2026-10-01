@@ -104,7 +104,9 @@ enum ShortsLayout {
     /// The video's frame for a Short of this shape (width / height).
     static func frame(aspectRatio: Double?) -> CGRect {
         let ratio = min(1, max(0.5, aspectRatio ?? defaultAspectRatio))
-        let width = (frameHeight * CGFloat(ratio)).rounded()
+        // Rounded down: mpv fits the picture to the height, so a frame half a point wider
+        // would show a hairline of black at its edge.
+        let width = (frameHeight * CGFloat(ratio)).rounded(.down)
         return CGRect(x: frameTrailing - width, y: frameTop, width: width, height: frameHeight)
     }
 }
@@ -357,7 +359,9 @@ private struct ShortsContent: View {
             if commentsOpen {
                 ShortsCommentsColumn(comments: vm.comments, countText: vm.current?.commentsCountText,
                                      focus: $focus, moveFocus: moveFocus)
-                    .transition(.opacity)
+                    // Gone at once when closed: a focused card that lingers through a fade-out
+                    // kept focus from reaching the comments button.
+                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
             }
         }
         .animation(.easeInOut(duration: 0.2), value: commentsOpen)
@@ -414,12 +418,13 @@ private struct ShortsContent: View {
         }
     }
 
-    /// Moves focus to `target`, again shortly after if the view only just became focusable
-    /// (the column it's in was hidden or disabled in the same update).
+    /// Moves focus to `target`, and again over the next half second while it hasn't arrived: a
+    /// view that only just became focusable (its column was hidden or disabled in the same
+    /// update) can't take focus at once, and meanwhile the focus engine puts it on the video.
     private func moveFocus(_ target: ShortsFocus) {
         focus = target
         Task { @MainActor in
-            for _ in 0..<3 {
+            for _ in 0..<12 {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 guard focus != target else { return }
                 focus = target

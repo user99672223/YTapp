@@ -9,7 +9,6 @@ struct ShortsTabView: View {
     @EnvironmentObject private var router: Router
     @StateObject private var home = FeedModel(cacheKey: "home", category: .home) { try await $0.home() }
     @State private var contentWidth: CGFloat = Layout.defaultContentWidth
-    @FocusState private var watchNowFocused: Bool
 
     /// The welcome fills most of the first screen under the tab bar; the grid's title shows
     /// below it, so it's clear there is more.
@@ -38,7 +37,6 @@ struct ShortsTabView: View {
                     .padding(.bottom, Theme.Spacing.section)
             }
         }
-        .defaultFocus($watchNowFocused, true)
         .task { await home.loadIfNeeded(model) }
     }
 
@@ -46,7 +44,7 @@ struct ShortsTabView: View {
         VStack(spacing: Theme.Spacing.section) {
             VStack(spacing: Theme.Spacing.titleToContent) {
                 HStack(spacing: Theme.Spacing.titleToContent) {
-                    Image(systemName: "bolt.horizontal.fill")
+                    Image(systemName: "bolt.fill")
                         .font(.system(size: Theme.heroSymbolSize, weight: .semibold))
                         .foregroundStyle(.red)
                         .accessibilityHidden(true)
@@ -66,9 +64,7 @@ struct ShortsTabView: View {
             }
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
-            .focused($watchNowFocused)
         }
-        .focusSection()
     }
 
     @ViewBuilder
