@@ -103,24 +103,26 @@ private struct WatchContent: View {
                     .transition(.opacity.combined(with: .offset(x: 60)))
             }
 
-            // The toast, and loading/buffering while the controls cover the lower part of the
-            // screen: at the top, beside an open panel rather than under it.
+            // The toast: at the top, beside an open panel rather than under it. The controls sit at
+            // the bottom, so it doesn't meet their title.
             VStack(spacing: Theme.Spacing.row) {
                 if let toast = vm.toast {
                     // Plain text: the watch page's messages report failures too.
                     ToastView(text: toast)
-                }
-                if showsControls {
-                    statusBox
                 }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
             .padding(.trailing, videoInset)
 
+            // Loading and buffering while the controls are hidden (or a panel or the countdown
+            // stands in for them): centred on the video, left of an open panel. With the controls
+            // up, the box is part of their column, above the title (`ControlsOverlay`).
             if !showsControls {
                 VStack(spacing: Theme.Spacing.row) {
-                    statusBox
+                    if let status = WatchStatus(vm: vm, player: player) {
+                        StatusBox(status: status)
+                    }
                     if let seekFlash {
                         SeekFlashView(flash: seekFlash)
                     }
@@ -185,6 +187,9 @@ private struct WatchContent: View {
             // Play now, Cancel, Back or the countdown running out: the focused box went away.
             if ended { restoreFocus() }
         }
+        // `videoId` isn't published, but `load(videoId:)` publishes in the same step (countdown,
+        // phase), so the page is redrawn with the new id.
+        .onChange(of: vm.videoId) { _, _ in videoChanged() }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the app (TV button) pauses, like the YouTube app.
             vm.setInBackground(phase == .background)
@@ -210,10 +215,6 @@ private struct WatchContent: View {
         panel == nil ? 0 : Theme.panelWidth + Theme.Spacing.row
     }
 
-    private var isBuffering: Bool {
-        vm.phase == .playing && (player.isBuffering || !player.isFileLoaded) && player.errorMessage == nil
-    }
-
     private var catcher: some View {
         Button { showControls() } label: {
             Color.clear.contentShape(Rectangle()).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -222,48 +223,14 @@ private struct WatchContent: View {
         .focused($focus, equals: .catcher)
         .onMoveCommand { direction in
             switch direction {
-            case .left: jump(-10)
-            case .right: jump(10)
+            // ±10 s once there is a video to seek in; while the next one loads (the controls
+            // can be hidden then too), left/right bring the controls up like up/down.
+            case .left where vm.phase == .playing: jump(-10)
+            case .right where vm.phase == .playing: jump(10)
             default: showControls()
             }
         }
         .ignoresSafeArea()
-    }
-
-    /// Loading or buffering, in one compact box (a spinner beside the text).
-    @ViewBuilder
-    private var statusBox: some View {
-        if case .loading(let message) = vm.phase {
-            HStack(spacing: Theme.Spacing.titleToContent) {
-                ProgressView()
-                VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
-                    Text(message).font(.headline)
-                    // The previous video's details stay until the next one's arrive.
-                    if let details = vm.details, details.id == vm.videoId {
-                        Text(details.title).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
-            }
-            .floatingBox()
-            .frame(maxWidth: Theme.messageWidth)
-        } else if isBuffering {
-            HStack(spacing: Theme.Spacing.titleToContent) {
-                ProgressView()
-                VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
-                    if player.bufferingPercent > 0 {
-                        Text("Buffering \(player.bufferingPercent)%").font(.headline.monospacedDigit())
-                    } else {
-                        Text(player.isFileLoaded ? "Buffering…" : "Opening stream…").font(.headline)
-                    }
-                    if player.bufferedSeconds > 0 {
-                        Text(String(format: "%.0f s buffered", player.bufferedSeconds))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .floatingBox()
-        }
     }
 
     // MARK: - Controls visibility and focus
@@ -276,8 +243,15 @@ private struct WatchContent: View {
         bumpHideTimer()
     }
 
+    /// The hide timer: only while nothing else holds the screen or the remote.
     private func hideControls() {
         guard panel == nil, scrubTarget == nil, vm.countdown == nil, !isFailed else { return }
+        hideNow()
+    }
+
+    /// Hides the controls; the invisible catcher takes the remote.
+    private func hideNow() {
+        hideTask?.cancel()
         controlsVisible = false
         focus = .catcher
     }
@@ -296,6 +270,8 @@ private struct WatchContent: View {
     /// countdown, the failure screen): the open panel, else the controls, else the remote catcher.
     private func restoreFocus() {
         if panel != nil {
+            // Nil for comments, which place their own focus (the system lands in the panel,
+            // the only focusable part of the screen then).
             focus = panelFocus
         } else if controlsVisible {
             focus = .playPause
@@ -323,7 +299,7 @@ private struct WatchContent: View {
         controlsVisible = true
         switch closing {
         case .chapters where vm.chapters.isEmpty:
-            // The video changed under the panel and the new one has no Chapters button.
+            // No Chapters button to go back to (the details changed and have none).
             focus = .playPause
         default:
             focus = .opener(closing)
@@ -331,25 +307,55 @@ private struct WatchContent: View {
         bumpHideTimer()
     }
 
+    /// The countdown's Cancel button: the viewer stays on this video, so the controls come up
+    /// (Play again, Up next).
     private func cancelCountdown() {
         vm.cancelCountdown()
         if panel == nil { showControls() }
     }
 
-    /// Back: a scrub preview is dropped first (like the system player), then the countdown,
-    /// the panel, the controls, and last the watch page itself. The countdown goes before the
-    /// panel because it takes focus when it appears, even over an open panel.
+    /// Back on the up-next countdown: autoplay stops and the box goes, and nothing comes up in
+    /// its place. The controls stay hidden (the finished video's pause raised them under the
+    /// box), so the next Back leaves the page; a panel open under the box gets focus back.
+    private func dismissCountdown() {
+        if panel == nil {
+            hideTask?.cancel()
+            controlsVisible = false
+        }
+        vm.cancelCountdown()
+        // `onChange(of: vm.countdown == nil)` puts focus back: on the panel, else the catcher.
+    }
+
+    /// Another video started in this session (autoplay, Play now, an Up next card). An open panel
+    /// belongs to the previous one (its chapters, captions, streams, comments): it closes back to
+    /// the controls, which now show the new title. A scrub preview is dropped rather than
+    /// seeking the new video to a time on the old one's bar. Otherwise a panel could stay open
+    /// across the change, and Back, meant to leave, would first close it.
+    private func videoChanged() {
+        scrubCommit?.cancel()
+        scrubTarget = nil
+        guard panel != nil else { return }
+        panel = nil
+        panelFocus = nil
+        controlsVisible = true
+        if vm.countdown == nil { focus = .playPause }
+        bumpHideTimer()
+    }
+
+    /// Back/Menu takes away one thing, the one on top, in this order: a scrub preview (dropped,
+    /// like the system player's), the up-next countdown (it takes focus when it appears, even over
+    /// an open panel), a side panel (focus goes back to the button that opened it), the controls,
+    /// and, with nothing left on screen, the watch page itself. The same whether the video is
+    /// playing, paused or still loading: controls on screen are hidden first, never skipped.
     private func handleExit() {
         if scrubTarget != nil {
             cancelScrub()
         } else if vm.countdown != nil {
-            cancelCountdown()
+            dismissCountdown()
         } else if panel != nil {
             closePanel()
-        } else if controlsVisible, vm.phase == .playing {
-            hideTask?.cancel()
-            controlsVisible = false
-            focus = .catcher
+        } else if showsControls {
+            hideNow()
         } else {
             closeWatch()
         }
@@ -418,6 +424,9 @@ private struct WatchContent: View {
 
 /// The controls over the video, laid out like the system player's: title and channel, the
 /// progress bar with elapsed and remaining time, a row of round buttons, and Up next below.
+/// Everything sits at the bottom of the screen: the Spacer on top is the only view in the column
+/// that grows (the Up next scroll view is held to its content's height, the progress bar to its
+/// own), and loading/buffering takes its place above the title rather than floating over it.
 private struct ControlsOverlay: View {
     @ObservedObject var vm: WatchViewModel
     @ObservedObject var player: MPVPlayer.State
@@ -428,34 +437,49 @@ private struct ControlsOverlay: View {
     let onPanel: (WatchPanel) -> Void
     let onActivity: () -> Void
 
-    private var chapters: [Chapter] { vm.chapters }
+    /// None while the next video loads: the previous one's details, and so its chapters, stay
+    /// until the next one's arrive, like the title and Up next (which also wait for them).
+    private var chapters: [Chapter] { vm.details?.id == vm.videoId ? vm.chapters : [] }
     /// The scrub preview while there is one, else where the video is.
     private var shownPosition: Double { scrubTarget ?? player.position }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Spacer(minLength: 0)
-            titleBlock
-            Scrubber(position: player.position, duration: player.duration, buffered: player.bufferedSeconds,
-                     chapters: chapters, target: scrubTarget, onMove: onScrub, onCommit: onCommitScrub)
-                .focused(focus, equals: .scrubber)
-            timeRow
-                .padding(.top, 4)
-            buttonRow
-                .padding(.top, Theme.Spacing.titleToContent)
-            upNextRow
+            // In the column, so it can't cover the title or the controls; it grows upwards into
+            // the Spacer, and nothing below it moves when it comes and goes.
+            if let status = WatchStatus(vm: vm, player: player) {
+                StatusBox(status: status, showsTitle: false, alignment: .leading)
+                    .padding(.bottom, Theme.Spacing.titleToContent)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                titleBlock
+                Scrubber(position: player.position, duration: player.duration, buffered: player.bufferedSeconds,
+                         chapters: chapters, target: scrubTarget, onMove: onScrub, onCommit: onCommitScrub)
+                    .focused(focus, equals: .scrubber)
+                timeRow
+                    .padding(.top, 4)
+                buttonRow
+                    .padding(.top, Theme.Spacing.titleToContent)
+                upNextRow
+            }
+            .background { scrim }
         }
-        .background { scrim }
     }
 
-    /// Darkens the lower part of the video behind the controls, edge to edge.
+    /// How far above the title the scrim starts to darken the video.
+    private static let scrimFade: CGFloat = 200
+
+    /// Darkens the video behind the controls: it fades in above the title and reaches the
+    /// screen's bottom and side edges, so the title and times read on any picture, however tall
+    /// the controls are (with or without Up next).
     private var scrim: some View {
-        LinearGradient(stops: [
-            .init(color: .black.opacity(0), location: 0),
-            .init(color: .black.opacity(0.3), location: 0.3),
-            .init(color: .black.opacity(0.75), location: 0.6),
-            .init(color: .black.opacity(0.9), location: 1),
-        ], startPoint: .top, endPoint: .bottom)
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.black.opacity(0), .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.scrimFade)
+            LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+        }
+        .padding(.top, -Self.scrimFade)
         .ignoresSafeArea()
     }
 
@@ -729,6 +753,67 @@ private struct ScrubberBar: View {
 //
 // The watch page's floating boxes (loading, buffering, seek flash, toast, up-next countdown,
 // stats) are `floatingBox(compact:)`s, like the app's toast (Components.swift).
+
+/// What the loading/buffering box reports; nil (no box) while the video plays normally, and on
+/// the failure screen, which says what went wrong itself.
+private enum WatchStatus: Equatable {
+    /// Fetching the video or unlocking its stream, with its title once the details are in.
+    case loading(message: String, title: String?)
+    /// The stream is opening, or refilling its buffer.
+    case buffering(percent: Int, fileLoaded: Bool, bufferedSeconds: Double)
+
+    @MainActor
+    init?(vm: WatchViewModel, player: MPVPlayer.State) {
+        if case .loading(let message) = vm.phase {
+            // The previous video's details stay until the next one's arrive; not its title.
+            let title = vm.details.flatMap { $0.id == vm.videoId ? $0.title : nil }
+            self = .loading(message: message, title: title)
+        } else if vm.phase == .playing, player.isBuffering || !player.isFileLoaded, player.errorMessage == nil {
+            self = .buffering(percent: player.bufferingPercent, fileLoaded: player.isFileLoaded,
+                              bufferedSeconds: player.bufferedSeconds)
+        } else {
+            return nil
+        }
+    }
+}
+
+/// Loading or buffering, in one compact box (a spinner beside the text).
+private struct StatusBox: View {
+    let status: WatchStatus
+    /// The video's title under a loading message; off in the controls, whose title is right below.
+    var showsTitle = true
+    /// Where the box sits in its (at most `Theme.messageWidth` wide) frame: centred on the video,
+    /// or leading, in line with the controls' title.
+    var alignment: Alignment = .center
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.titleToContent) {
+            ProgressView()
+            VStack(alignment: .leading, spacing: Theme.Spacing.textLines) {
+                switch status {
+                case .loading(let message, let title):
+                    Text(message).font(.headline)
+                    if showsTitle, let title {
+                        Text(title).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                case .buffering(let percent, let fileLoaded, let bufferedSeconds):
+                    if percent > 0 {
+                        Text("Buffering \(percent)%").font(.headline.monospacedDigit())
+                    } else {
+                        Text(fileLoaded ? "Buffering…" : "Opening stream…").font(.headline)
+                    }
+                    if bufferedSeconds > 0 {
+                        Text(String(format: "%.0f s buffered", bufferedSeconds))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .floatingBox()
+        .frame(maxWidth: Theme.messageWidth, alignment: alignment)
+    }
+}
 
 /// A short sign over the video while the controls are hidden: a jump (±10 s) or play.
 private struct SeekFlash: Equatable {
